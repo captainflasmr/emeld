@@ -23,22 +23,24 @@ Copy the files to your load path and add the following to your init file:
 
 * Usage
 Run ~M-x mild-diff~ and select the two directories you wish to compare.
+Alternatively, run ~M-x mild-diff-dwim~ to automatically use open Dired buffers as the comparison sources.
 
 * Key Bindings
-| Key             | Action                            |
-|-----------------+-----------------------------------|
-| TAB             | Toggle expansion of a directory   |
-| RET, e, =       | Action (Ediff if different)        |
-| f, v            | Find File (Open current side)     |
-| C               | Copy to the other side            |
-| o               | Jump to the other side            |
-| h               | Toggle hidden files               |
-| F               | Toggle filtered (glob) files      |
-| s               | Toggle same (identical) files     |
-| m               | Toggle modified files             |
-| a               | Toggle added (new) files          |
-| g               | Full rescan/refresh               |
-| n/p             | Navigation (Side-aware)           |
+| Key       | Action                              |
+|-----------+-------------------------------------|
+| TAB       | Toggle expansion of a directory     |
+| RET, e, = | Action (Ediff if different)         |
+| f, v      | Find File (Open current side)       |
+| C         | Copy to the other side              |
+| w         | Copy filename (C-u w for full path) |
+| o         | Jump to the other side              |
+| h         | Toggle hidden files                 |
+| F         | Toggle filtered (glob) files        |
+| s         | Toggle same (identical) files       |
+| m         | Toggle modified files               |
+| a         | Toggle added (new) files            |
+| g         | Full rescan/refresh                 |
+| n/p       | Navigation (Side-aware)             |
 
 * Customization
 - ~mild-filter-globs~: List of globs to ignore (e.g., ~".git"~, ~"*.elc"~).

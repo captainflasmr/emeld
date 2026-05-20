@@ -176,6 +176,44 @@ PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
       (mild--render))
     (switch-to-buffer buf)))
 
+(defun mild--get-dwim-dirs ()
+  "Try to guess directories based on visible dired buffers."
+  (let ((dired-dirs (delq nil
+                          (mapcar (lambda (w)
+                                    (with-current-buffer (window-buffer w)
+                                      (when (eq major-mode 'dired-mode)
+                                        (directory-file-name (expand-file-name default-directory)))))
+                                  (window-list)))))
+    (delete-dups dired-dirs)))
+
+;;;###autoload
+(defun mild-diff-dwim ()
+  "Start mild-diff guessing directories from visible dired buffers.
+Prompts for confirmation or selection."
+  (interactive)
+  (require 'dired-aux)
+  (let* ((target-b (dired-dwim-target-directory))
+         (target-a (if (eq major-mode 'dired-mode)
+                       default-directory
+                     (car (mild--get-dwim-dirs))))
+         ;; If target-b is same as target-a, we only have one good candidate
+         (has-two (and target-b (not (string= (expand-file-name target-a)
+                                             (expand-file-name target-b)))))
+         (left (read-directory-name "Left directory: " nil target-a t))
+         (left-abs (directory-file-name (expand-file-name left)))
+         ;; For right side, use target-b if it's different from what was chosen for left.
+         ;; If not, don't suggest a default to avoid redundant picker population.
+         (right-suggest (if (and target-b (not (string= left-abs (directory-file-name (expand-file-name target-b)))))
+                            target-b
+                          nil))
+         (right (read-directory-name "Right directory: " 
+                                     (or right-suggest (file-name-directory left-abs))
+                                     right-suggest t))
+         (right-abs (directory-file-name (expand-file-name right))))
+    (if (string= left-abs right-abs)
+        (user-error "Cannot compare a directory with itself: %s" left-abs)
+      (mild-diff left-abs right-abs))))
+
 (defface mild-same-face
   '((t :inherit font-lock-comment-face))
   "Face for files that are the same."
@@ -219,6 +257,7 @@ PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
     (define-key map (kbd "p")   #'mild-previous-line)
     (define-key map (kbd "o")   #'mild-jump-other-side)
     (define-key map (kbd "C")   #'mild-copy)
+    (define-key map (kbd "w")   #'mild-copy-path-at-point)
     (define-key map (kbd "h")   #'mild-toggle-show-hidden)
     (define-key map (kbd "F")   #'mild-toggle-show-filtered)
     (define-key map (kbd "s")   #'mild-toggle-show-same)
@@ -348,6 +387,25 @@ If ON-RIGHT is non-nil, align to the right column."
         (if path
             (find-file-other-window path)
           (message "No file on %s side" (if (< cur-col mild--column-width) "left" "right")))))))
+
+(defun mild-copy-path-at-point (arg)
+  "Copy the filename at point to the kill ring.
+With prefix ARG, copy the full absolute path.
+The side is determined by the current column."
+  (interactive "P")
+  (let* ((node (get-text-property (point) 'mild-node))
+         (cur-col (current-column)))
+    (if (not node)
+        (message "No node at point")
+      (let* ((path (if (< cur-col mild--column-width)
+                       (mild-node-left-path node)
+                     (mild-node-right-path node)))
+             (text (if arg path (mild-node-name node))))
+        (if text
+            (progn
+              (kill-new text)
+              (message "Copied: %s" text))
+          (message "No file on this side"))))))
 
 (defun mild-copy ()
   "Copy the file/dir to the other side."

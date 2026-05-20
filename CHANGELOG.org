@@ -9,10 +9,13 @@
 - Toggles for hidden and filtered files.
 - New visibility toggles for **Same** (~s~), **Modified** (~m~), and **Added/New** (~a~) files.
 - Directory folding and unfolding (~TAB~).
-- Side-aware navigation (~n~/~p~) that remembers left/right column focus.
-- Side-jumping navigation (~o~) to switch between columns.
+- Added ~mild-diff-dwim~ with robust directory detection and collision safety.
+- Added ~mild-simple-comparison~ option for fast, size-only matching.
+- Added side-aware navigation (~n~/~p~) that remembers left/right column focus.
+- Added side-jumping navigation (~o~) to switch between columns.
+- Added ~w~ to copy filename at point (~C-u w~ for full path).
+- REALIGNMENT: Glob filter toggle moved to ~F~.
 - Standard file actions: ~RET~, ~e~, ~=~ for Ediff; ~f~, ~v~ for Find File.
-- Keybinding realignment: Filter toggle moved to ~F~.
 - Full theming support (inherits from standard Emacs ~diff-*~ faces).
 - Confirmation messages in the echo area for all UI toggles.
 - Compatibility fixes for older Emacs versions (27.1+).
