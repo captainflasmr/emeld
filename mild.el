@@ -513,19 +513,58 @@ If the current side is empty but the other has a file, snap to it."
     (mild--render)
     (message "Rescanning directories in background...")))
 
+(defun mild--read-new-root (on-left)
+  "Prompt for a new root directory for side ON-LEFT and update the buffer."
+  (let* ((old-root (if on-left mild--left-root mild--right-root))
+         (side-label (if on-left "Left" "Right"))
+         (new-dir (read-directory-name
+                   (format "%s directory: " side-label)
+                   old-root nil t)))
+    (unless (string= (directory-file-name (expand-file-name new-dir))
+                     (directory-file-name old-root))
+      (if on-left
+          (setq mild--left-root
+                (file-name-as-directory (expand-file-name new-dir)))
+        (setq mild--right-root
+              (file-name-as-directory (expand-file-name new-dir))))
+      (setf (if on-left
+                (mild-node-left-path mild--root-node)
+              (mild-node-right-path mild--root-node))
+            (if on-left mild--left-root mild--right-root))
+      (setf (mild-node-name mild--root-node)
+            (file-name-nondirectory
+             (directory-file-name mild--left-root)))
+      (setf (mild-node-name-right mild--root-node)
+            (file-name-nondirectory
+             (directory-file-name mild--right-root)))
+      (mild-refresh))))
+
 (defun mild-action ()
-  "Perform default action on node (ediff or view)."
+  "Perform default action on node (ediff or view).
+
+On the header line (directory paths), prompt to replace the
+current side's directory with a new one via completion.
+On files, run ediff or open.  On directories, open in dired."
   (interactive)
-  (let ((node (get-text-property (point) 'mild-node)))
-    (when node
-      (let ((left (mild-node-left-path node))
-            (right (mild-node-right-path node)))
+  (let* ((node (get-text-property (point) 'mild-node))
+         (header (get-text-property (point) 'mild-header)))
+    (cond
+     (header
+      (let ((cur-col (current-column)))
+        (mild--read-new-root (< cur-col mild--column-width))))
+     (node
+      (let* ((cur-col (current-column))
+             (on-left (< cur-col mild--column-width))
+             (left (mild-node-left-path node))
+             (right (mild-node-right-path node))
+             (side-path (if on-left left right)))
         (cond ((and left right (not (mild-node-is-dir node)))
                (if (eq (mild-node-diff-status node) 'same)
-                   (find-file-other-window left)
+                   (find-file-other-window side-path)
                  (ediff-files left right)))
-              (left (find-file-other-window left))
-              (right (find-file-other-window right)))))))
+              (side-path (find-file-other-window side-path))
+              (t (message "No file on %s side"
+                          (if on-left "left" "right")))))))))
 
 (defun mild-find-file ()
   "Open the file on the current side in another window."
@@ -664,11 +703,13 @@ Creates missing parent directories on the destination side if needed."
     
     (setq mild--column-width (/ (window-width) 2))
     (erase-buffer)
-    ;; Headers
-    (insert (propertize (truncate-string-to-width mild--left-root mild--column-width nil ?\s)
-                        'face 'mild-header-face))
-    (insert (propertize (truncate-string-to-width mild--right-root mild--column-width nil ?\s)
-                        'face 'mild-header-face))
+    ;; Headers (with mild-header property for interactive directory switching)
+    (let ((header-start (point)))
+      (insert (propertize (truncate-string-to-width mild--left-root mild--column-width nil ?\s)
+                          'face 'mild-header-face))
+      (insert (propertize (truncate-string-to-width mild--right-root mild--column-width nil ?\s)
+                          'face 'mild-header-face))
+      (add-text-properties header-start (point) '(mild-header t mouse-face highlight)))
     (insert "\n" (make-string (* 2 mild--column-width) ?-) "\n")
     ;; Root node (collapsible)
     (mild--render-nodes (list mild--root-node) "" mild--column-width)
