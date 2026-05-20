@@ -1,5 +1,17 @@
 #+TITLE: Changelog for Mild
 
+* [0.3.0] - 2026-05-20
+** Changed
+- ~mild-action~ is now side-aware: ~RET~ on the right column opens the right-side path.
+- ~mild-show-tree-lines~ now defaults to ~t~.
+- Header line shows ~[SIMPLE]~ or ~[FULL]~ scan mode indicator.
+** Added
+- ~G~ to force a full content-based scan (ignores ~mild-simple-comparison~).
+- ~mild-dir-prefix~ (default ~"📁 "~) for a configurable directory icon; directory names rendered in bold.
+- ~mild-refresh-full~ bound to ~G~.
+** Fixed
+- Bug in ~mild--move-to-node-name~: used ~let~ instead of ~let*~ for dependent bindings, causing void-variable errors (~has-left~, ~has-right~).
+
 * [0.2.1] - 2026-05-20
 ** Added
 - Root directories now rendered as collapsible tree nodes at the top (different names on left/right columns via new ~name-right~ slot).  ~RET~ on the root prompts to change the directory for the current side.

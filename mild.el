@@ -1,8 +1,7 @@
 ;;; mild.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
-;; Author: Antigravity
 ;; Keywords: files, tools
-;; Version: 0.2.1
+;; Version: 0.3.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -84,6 +83,8 @@ This is much faster but less accurate than content comparison."
 
 (defvar-local mild--scan-thread nil
   "Current scanning thread for this buffer.")
+(defvar-local mild--last-scan-mode 'full
+  "Scan mode used for the last refresh: `simple' or `full'.")
 (defvar-local mild--right-root nil)
 (defvar-local mild--root-node nil)
 (defvar-local mild--column-width nil)
@@ -185,6 +186,7 @@ PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
       (mild-mode)
       (setq mild--left-root (file-name-as-directory (expand-file-name dir1)))
       (setq mild--right-root (file-name-as-directory (expand-file-name dir2)))
+      (setq mild--last-scan-mode (if mild-simple-comparison 'simple 'full))
       (setq mild--root-node (mild-node-create
                               :name (file-name-nondirectory
                                      (directory-file-name mild--left-root))
@@ -281,6 +283,7 @@ Prompts for confirmation or selection."
     (define-key map (kbd "f")   #'mild-find-file)
     (define-key map (kbd "v")   #'mild-find-file)
     (define-key map (kbd "g")   #'mild-refresh)
+    (define-key map (kbd "G")   #'mild-refresh-full)
     (define-key map (kbd "n")   #'mild-next-line)
     (define-key map (kbd "p")   #'mild-previous-line)
     (define-key map (kbd "M-n") #'mild-next-change)
@@ -485,39 +488,50 @@ If the current side is empty but the other has a file, snap to it."
     ;; so the callback won't update the UI for the old scan.
     (setq mild--scan-thread nil)))
 
-(defun mild-refresh ()
-  "Refresh the comparison asynchronously."
-  (interactive)
+(defun mild-refresh (&optional force-full)
+  "Refresh the comparison asynchronously.
+With non-nil FORCE-FULL, always use content comparison (diff -q)."
+  (interactive "P")
   (mild--stop-scan)
-  (let ((buf (current-buffer))
-        (left mild--left-root)
-        (right mild--right-root)
-        (root mild--root-node))
+  (let* ((buf (current-buffer))
+         (left mild--left-root)
+         (right mild--right-root)
+         (root mild--root-node)
+         (simple (if force-full nil mild-simple-comparison)))
+    (setq mild--last-scan-mode (if simple 'simple 'full))
     (setq mild--scan-thread
           (make-thread
            (lambda ()
-             (let ((new-children (mild--scan-dir left right root)))
-               ;; Use run-at-time to update UI from main thread context
-               (run-at-time 0 nil
-                            (lambda (b nodes)
-                              (when (buffer-live-p b)
-                                (with-current-buffer b
-                                  (setf (mild-node-children mild--root-node) nodes)
-                                  (setf (mild-node-diff-status mild--root-node)
-                                        (if (cl-some (lambda (child)
-                                                        (not (eq (mild-node-diff-status child) 'same)))
-                                                      nodes)
-                                            'different
-                                          'same))
-                                  (setq mild--scan-thread nil)
-                                  (mild--update-header-line)
-                                  (mild--render)
-                                  (message "Scanning done."))))
-                            buf new-children)))
+             (let ((mild-simple-comparison simple))
+               (let ((new-children (mild--scan-dir left right root)))
+                 ;; Use run-at-time to update UI from main thread context
+                 (run-at-time 0 nil
+                              (lambda (b nodes)
+                                (when (buffer-live-p b)
+                                  (with-current-buffer b
+                                    (setf (mild-node-children mild--root-node) nodes)
+                                    (setf (mild-node-diff-status mild--root-node)
+                                          (if (cl-some (lambda (child)
+                                                          (not (eq (mild-node-diff-status child) 'same)))
+                                                        nodes)
+                                              'different
+                                            'same))
+                                    (setq mild--scan-thread nil)
+                                    (mild--update-header-line)
+                                    (mild--render)
+                                    (message "Scanning done."))))
+                              buf new-children))))
            "mild-scan-thread"))
     (mild--update-header-line)
     (mild--render)
-    (message "Rescanning directories in background...")))
+    (message (if force-full
+                 "Full content scan in background..."
+               "Rescanning directories in background..."))))
+
+(defun mild-refresh-full ()
+  "Force a full content-based scan (ignores `mild-simple-comparison')."
+  (interactive)
+  (mild-refresh t))
 
 (defun mild--read-new-root (on-left)
   "Prompt for a new root directory for side ON-LEFT and update the buffer."
@@ -681,12 +695,15 @@ Creates missing parent directories on the destination side if needed."
   (setq header-line-format
         '(:eval
           (let ((scan-msg (if (and (boundp 'mild--scan-thread) 
-                                   mild--scan-thread 
-                                   (thread-live-p mild--scan-thread))
-                              (propertize " [SCANNING...] " 'face 'highlight)
-                            "")))
+                                    mild--scan-thread 
+                                    (thread-live-p mild--scan-thread))
+                               (propertize " [SCANNING...] " 'face 'highlight)
+                             ""))
+                (mode-msg (if (eq mild--last-scan-mode 'simple)
+                              (propertize " [SIMPLE] " 'face 'warning)
+                            (propertize " [FULL] " 'face 'success))))
             (concat
-             scan-msg
+             scan-msg mode-msg
              " Legend: "
              (propertize "Mod" 'face 'mild-diff-face) "  "
              (propertize "New(L)" 'face 'mild-left-only-face) "  "
