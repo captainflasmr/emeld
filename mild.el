@@ -22,7 +22,7 @@ These match recursively."
   :type '(repeat string)
   :group 'mild)
 
-(defcustom mild-show-filtered t
+(defcustom mild-show-filtered nil
   "Whether to show filtered files (matching `mild-filter-globs`)."
   :type 'boolean
   :group 'mild)
@@ -52,7 +52,7 @@ These match recursively."
   :type 'integer
   :group 'mild)
 
-(defcustom mild-show-tree-lines nil
+(defcustom mild-show-tree-lines t
   "Whether to show hierarchical tree lines."
   :type 'boolean
   :group 'mild)
