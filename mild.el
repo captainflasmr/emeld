@@ -47,6 +47,12 @@ These match recursively."
   :type 'boolean
   :group 'mild)
 
+(defcustom mild-dir-prefix "📁 "
+  "Prefix string shown before directory names to distinguish from files.
+Set to \"\" for no prefix."
+  :type 'string
+  :group 'mild)
+
 (defcustom mild-indent-offset 2
   "Indentation offset for each directory level."
   :type 'integer
@@ -758,15 +764,17 @@ The root node is always visible."
                            ((eq status 'different) 'mild-diff-face)
                            ((eq status 'left-only) 'mild-left-only-face)
                            ((eq status 'right-only) 'mild-right-only-face)))
+               (name-face (if (mild-node-is-dir node) (list face 'bold) face))
                (dir-indicator (if (mild-node-is-dir node)
-                                  (if (mild-node-expanded node) "[-] " "[+] ")
-                                "")))
-          (let ((start (point)))
-            ;; Left Side
-            (insert (propertize full-prefix 'face 'shadow))
-            (when (mild-node-left-path node)
-              (insert dir-indicator)
-              (insert (propertize (mild-node-name node) 'face face)))
+                                    (concat (if (mild-node-expanded node) "[-] " "[+] ")
+                                            mild-dir-prefix)
+                                  "")))
+           (let ((start (point)))
+             ;; Left Side
+             (insert (propertize full-prefix 'face 'shadow))
+             (when (mild-node-left-path node)
+               (insert dir-indicator)
+               (insert (propertize (mild-node-name node) 'face name-face)))
             
             ;; Padding to Right Side
             (let ((current-len (current-column)))
@@ -778,9 +786,9 @@ The root node is always visible."
             (insert (propertize full-prefix 'face 'shadow))
             (when (mild-node-right-path node)
               (insert dir-indicator)
-              (insert (propertize (or (mild-node-name-right node)
-                                     (mild-node-name node))
-                                  'face face)))
+               (insert (propertize (or (mild-node-name-right node)
+                                      (mild-node-name node))
+                                   'face name-face)))
             
             (add-text-properties start (point) `(mild-node ,node mouse-face highlight))
             (insert "\n")
