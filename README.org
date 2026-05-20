@@ -31,6 +31,7 @@ Alternatively, run ~M-x mild-diff-dwim~ to automatically use open Dired buffers 
 | TAB       | Toggle expansion of a directory     |
 | RET, e, = | Action (Ediff if different)         |
 | f, v      | Find File (Open current side)       |
+| d         | Delete file/dir from current side   |
 | C         | Copy to the other side              |
 | w         | Copy filename (C-u w for full path) |
 | SPC       | Fold/Unfold (Dir) or Soft Diff (File)|

@@ -273,6 +273,7 @@ Prompts for confirmation or selection."
     (define-key map (kbd "o")   #'mild-jump-other-side)
     (define-key map (kbd "C")   #'mild-copy)
     (define-key map (kbd "w")   #'mild-copy-path-at-point)
+    (define-key map (kbd "d")   #'mild-delete)
     (define-key map (kbd "SPC") #'mild-soft-diff)
     (define-key map (kbd "h")   #'mild-toggle-show-hidden)
     (define-key map (kbd "F")   #'mild-toggle-show-filtered)
@@ -594,6 +595,26 @@ Creates missing parent directories on the destination side if needed."
                 (mild-refresh)
                 (message "Copied %s" (mild-node-name node)))
             (error (message "Copy failed: %s" (error-message-string err)))))))))
+
+(defun mild-delete ()
+  "Delete the file/directory at point from the current side."
+  (interactive)
+  (let* ((node (get-text-property (point) 'mild-node))
+         (cur-col (current-column))
+         (on-left (< cur-col mild--column-width)))
+    (unless node (user-error "No node at point"))
+    (let* ((path (if on-left (mild-node-left-path node) (mild-node-right-path node)))
+           (side (if on-left "left" "right")))
+      (unless path (user-error "No file on %s side to delete" side))
+      (when (yes-or-no-p (format "Delete %s from %s side?" (mild-node-name node) side))
+        (condition-case err
+            (progn
+              (if (file-directory-p path)
+                  (delete-directory path t t)
+                (delete-file path t))
+              (mild-refresh)
+              (message "Deleted %s from %s side" (mild-node-name node) side))
+          (error (message "Delete failed: %s" (error-message-string err))))))))
 
 (defun mild--update-header-line ()
   "Update the header line with legend and status."
