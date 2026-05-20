@@ -1,0 +1,12 @@
+#+TITLE: Changelog for Mild
+
+* [0.1.0] - 2026-05-20
+** Added
+- Initial implementation of `mild.el`.
+- Side-by-side directory comparison.
+- Recursive glob matching for filtering.
+- Toggles for hidden and filtered (ignored) files.
+- Directory folding and unfolding.
+- Keybindings for navigation, copying, and ediff.
+- Unit tests for filtering logic.
+- README and CHANGELOG documentation.

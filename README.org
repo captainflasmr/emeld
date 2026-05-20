@@ -1,0 +1,39 @@
+#+TITLE: Mild: Meld-Inspired Local Diff
+#+AUTHOR: Antigravity
+
+* Introduction
+Mild is a simple, side-by-side directory comparison tool for Emacs. It is designed to be a lightweight and maintainable alternative to other directory diff tools, with a focus on ease of use and a clean hierarchy.
+
+* Features
+- Side-by-side view in a single buffer.
+- Recursive glob-based filtering (like Meld).
+- Toggles for hidden files (~h~) and filtered files (~f~).
+- Tree folding (~TAB~).
+- File copying between directories (~C~).
+- Integration with ~ediff~ (~RET~).
+
+* Installation
+Copy the files to your load path and add the following to your init file:
+#+begin_src elisp
+(add-to-list 'load-path "~/.emacs.d/offline-packages/local-packages/mild")
+(require 'mild)
+#+end_src
+
+* Usage
+Run ~M-x mild-diff~ and select the two directories you wish to compare.
+
+* Key Bindings
+| Key   | Action                            |
+|-------+-----------------------------------|
+| TAB   | Toggle expansion of a directory   |
+| RET   | Action (Open file or start Ediff) |
+| C     | Copy to the other side            |
+| h     | Toggle hidden files               |
+| f     | Toggle filtered files             |
+| g     | Full rescan/refresh               |
+| n/p   | Navigation                        |
+
+* Customization
+- ~mild-filter-globs~: List of globs to ignore (e.g., ~".git"~, ~"*.elc"~).
+- ~mild-show-hidden~: Whether to show dotfiles by default.
+- ~mild-show-filtered~: Whether to show filtered files by default.
