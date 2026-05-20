@@ -7,10 +7,12 @@ Mild is a simple, side-by-side directory comparison tool for Emacs. It is design
 * Features
 - Side-by-side view in a single buffer.
 - Recursive glob-based filtering (like Meld).
-- Toggles for hidden files (~h~) and filtered files (~f~).
+- Instant toggles for New, Modified, and Identical files.
 - Tree folding (~TAB~).
 - File copying between directories (~C~).
-- Integration with ~ediff~ (~RET~).
+- Side-aware navigation (~n~/~p~) and side-jumping (~o~).
+- Integration with ~ediff~.
+- Fully themeable (uses standard Emacs faces).
 
 * Installation
 Copy the files to your load path and add the following to your init file:
@@ -23,20 +25,23 @@ Copy the files to your load path and add the following to your init file:
 Run ~M-x mild-diff~ and select the two directories you wish to compare.
 
 * Key Bindings
-| Key   | Action                            |
-|-------+-----------------------------------|
-| TAB   | Toggle expansion of a directory   |
-| RET   | Action (Open file or start Ediff) |
-| C     | Copy to the other side            |
-| h     | Toggle hidden files               |
-| f     | Toggle filtered files             |
-| s     | Toggle same (identical) files     |
-| m     | Toggle modified (different) files |
-| a     | Toggle added (new) files          |
-| g     | Full rescan/refresh               |
-| n/p   | Navigation                        |
+| Key             | Action                            |
+|-----------------+-----------------------------------|
+| TAB             | Toggle expansion of a directory   |
+| RET, e, =       | Action (Ediff if different)        |
+| f, v            | Find File (Open current side)     |
+| C               | Copy to the other side            |
+| o               | Jump to the other side            |
+| h               | Toggle hidden files               |
+| F               | Toggle filtered (glob) files      |
+| s               | Toggle same (identical) files     |
+| m               | Toggle modified files             |
+| a               | Toggle added (new) files          |
+| g               | Full rescan/refresh               |
+| n/p             | Navigation (Side-aware)           |
 
 * Customization
 - ~mild-filter-globs~: List of globs to ignore (e.g., ~".git"~, ~"*.elc"~).
-- ~mild-show-hidden~: Whether to show dotfiles by default.
-- ~mild-show-filtered~: Whether to show filtered files by default.
+- ~mild-show-hidden~: Whether to show dotfiles.
+- ~mild-show-same~: Whether to show identical files (default nil).
+- ~mild-simple-comparison~: Set to t for fast size-only matching.

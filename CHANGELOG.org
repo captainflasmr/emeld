@@ -1,12 +1,18 @@
 #+TITLE: Changelog for Mild
 
-* [0.1.0] - 2026-05-20
+* [0.2.0] - 2026-05-20
 ** Added
-- Initial implementation of `mild.el`.
-- Side-by-side directory comparison.
-- Recursive glob matching for filtering.
-- Toggles for hidden and filtered (ignored) files.
-- Directory folding and unfolding.
-- Keybindings for navigation, copying, and ediff.
-- Unit tests for filtering logic.
-- README and CHANGELOG documentation.
+- Initial implementation of `mild.el` side-by-side comparison.
+- Content-based comparison using ~diff -q~ for high accuracy.
+- Performance option ~mild-simple-comparison~ for size-only matching.
+- Recursive glob matching for filtering (matches filenames or relative paths).
+- Toggles for hidden and filtered files.
+- New visibility toggles for **Same** (~s~), **Modified** (~m~), and **Added/New** (~a~) files.
+- Directory folding and unfolding (~TAB~).
+- Side-aware navigation (~n~/~p~) that remembers left/right column focus.
+- Side-jumping navigation (~o~) to switch between columns.
+- Standard file actions: ~RET~, ~e~, ~=~ for Ediff; ~f~, ~v~ for Find File.
+- Keybinding realignment: Filter toggle moved to ~F~.
+- Full theming support (inherits from standard Emacs ~diff-*~ faces).
+- Confirmation messages in the echo area for all UI toggles.
+- Compatibility fixes for older Emacs versions (27.1+).

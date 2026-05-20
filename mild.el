@@ -2,7 +2,7 @@
 
 ;; Author: Antigravity
 ;; Keywords: files, tools
-;; Version: 0.1
+;; Version: 0.2
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -47,6 +47,12 @@ These match recursively."
   :type 'boolean
   :group 'mild)
 
+(defcustom mild-simple-comparison nil
+  "If non-nil, only compare file sizes for diff status.
+This is much faster but less accurate than content comparison."
+  :type 'boolean
+  :group 'mild)
+
 (cl-defstruct (mild-node
                (:constructor mild-node-create))
   name
@@ -62,6 +68,7 @@ These match recursively."
 (defvar-local mild--left-root nil)
 (defvar-local mild--right-root nil)
 (defvar-local mild--root-node nil)
+(defvar-local mild--column-width nil)
 
 (defun mild--glob-to-regexp (glob)
   "Convert GLOB to a regular expression.
@@ -96,9 +103,12 @@ Otherwise, it matches against the filename."
             (is-dir-right (file-directory-p right)))
         (cond ((not (eq is-dir-left is-dir-right)) 'different)
               (is-dir-left 'same) ; Directories are 'same' by default, children will update it
-              (t (if (= 0 (process-file "diff" nil nil nil "-q"
-                                       (expand-file-name left)
-                                       (expand-file-name right)))
+              (t (if (if mild-simple-comparison
+                         (eq (file-attribute-size (file-attributes left))
+                             (file-attribute-size (file-attributes right)))
+                       (= 0 (process-file "diff" nil nil nil "-q"
+                                          (expand-file-name left)
+                                          (expand-file-name right))))
                      'same
                    'different))))
     (cond (left 'left-only)
@@ -172,17 +182,17 @@ PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
   :group 'mild)
 
 (defface mild-diff-face
-  '((t :foreground "red" :weight bold))
+  '((t :inherit diff-changed :weight bold))
   "Face for files that are different."
   :group 'mild)
 
 (defface mild-left-only-face
-  '((t :foreground "forest green"))
+  '((t :inherit diff-added))
   "Face for files that exist only on the left side."
   :group 'mild)
 
 (defface mild-right-only-face
-  '((t :foreground "royal blue"))
+  '((t :inherit diff-removed))
   "Face for files that exist only on the right side."
   :group 'mild)
 
@@ -192,7 +202,7 @@ PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
   :group 'mild)
 
 (defface mild-filtered-face
-  '((t :foreground "gray50" :strike-through t))
+  '((t :inherit shadow :strike-through t))
   "Face for filtered files."
   :group 'mild)
 
@@ -200,12 +210,17 @@ PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "TAB") #'mild-toggle-expand)
     (define-key map (kbd "RET") #'mild-action)
+    (define-key map (kbd "e")   #'mild-action)
+    (define-key map (kbd "=")   #'mild-action)
+    (define-key map (kbd "f")   #'mild-find-file)
+    (define-key map (kbd "v")   #'mild-find-file)
     (define-key map (kbd "g")   #'mild-refresh)
-    (define-key map (kbd "n")   #'next-line)
-    (define-key map (kbd "p")   #'previous-line)
+    (define-key map (kbd "n")   #'mild-next-line)
+    (define-key map (kbd "p")   #'mild-previous-line)
+    (define-key map (kbd "o")   #'mild-jump-other-side)
     (define-key map (kbd "C")   #'mild-copy)
     (define-key map (kbd "h")   #'mild-toggle-show-hidden)
-    (define-key map (kbd "f")   #'mild-toggle-show-filtered)
+    (define-key map (kbd "F")   #'mild-toggle-show-filtered)
     (define-key map (kbd "s")   #'mild-toggle-show-same)
     (define-key map (kbd "m")   #'mild-toggle-show-different)
     (define-key map (kbd "a")   #'mild-toggle-show-added)
@@ -221,6 +236,37 @@ PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
   (make-local-variable 'mild-show-same)
   (make-local-variable 'mild-show-different)
   (make-local-variable 'mild-show-added))
+
+(defun mild--move-to-node-name (on-right)
+  "Move point to the start of the node name on the current side.
+If ON-RIGHT is non-nil, align to the right column."
+  (if on-right
+      (move-to-column mild--column-width)
+    (beginning-of-line))
+  (skip-chars-forward " ")
+  (forward-char 4))
+
+(defun mild-next-line ()
+  "Move to the next line and align to node name."
+  (interactive)
+  (let ((on-right (>= (current-column) mild--column-width)))
+    (forward-line 1)
+    (mild--move-to-node-name on-right)))
+
+(defun mild-previous-line ()
+  "Move to the previous line and align to node name."
+  (interactive)
+  (let ((on-right (>= (current-column) mild--column-width)))
+    (forward-line -1)
+    (mild--move-to-node-name on-right)))
+
+(defun mild-jump-other-side ()
+  "Jump to the other side of the directory comparison."
+  (interactive)
+  (let ((cur-col (current-column)))
+    (if (< cur-col mild--column-width)
+        (forward-char mild--column-width)
+      (backward-char mild--column-width))))
 
 (defun mild-toggle-show-hidden ()
   "Toggle showing hidden files."
@@ -290,6 +336,19 @@ PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
               (left (find-file-other-window left))
               (right (find-file-other-window right)))))))
 
+(defun mild-find-file ()
+  "Open the file on the current side in another window."
+  (interactive)
+  (let* ((node (get-text-property (point) 'mild-node))
+         (cur-col (current-column)))
+    (when node
+      (let ((path (if (< cur-col mild--column-width)
+                      (mild-node-left-path node)
+                    (mild-node-right-path node))))
+        (if path
+            (find-file-other-window path)
+          (message "No file on %s side" (if (< cur-col mild--column-width) "left" "right")))))))
+
 (defun mild-copy ()
   "Copy the file/dir to the other side."
   (interactive)
@@ -311,17 +370,17 @@ PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
 
 (defun mild--render ()
   "Render the tree in the current buffer."
-  (let ((inhibit-read-only t)
-        (column-width (/ (window-width) 2)))
+  (let ((inhibit-read-only t))
+    (setq mild--column-width (/ (window-width) 2))
     (erase-buffer)
     ;; Headers
-    (insert (propertize (truncate-string-to-width mild--left-root column-width nil ?\s)
+    (insert (propertize (truncate-string-to-width mild--left-root mild--column-width nil ?\s)
                         'face 'mild-header-face))
-    (insert (propertize (truncate-string-to-width mild--right-root column-width nil ?\s)
+    (insert (propertize (truncate-string-to-width mild--right-root mild--column-width nil ?\s)
                         'face 'mild-header-face))
-    (insert "\n" (make-string (* 2 column-width) ?-) "\n")
+    (insert "\n" (make-string (* 2 mild--column-width) ?-) "\n")
     ;; Root children
-    (mild--render-nodes (mild-node-children mild--root-node) 0 column-width)
+    (mild--render-nodes (mild-node-children mild--root-node) 0 mild--column-width)
     (goto-char (point-min))))
 
 (defun mild--node-visible-p (node)
