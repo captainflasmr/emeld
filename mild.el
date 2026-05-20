@@ -283,7 +283,9 @@ Prompts for confirmation or selection."
   (make-local-variable 'mild-show-filtered)
   (make-local-variable 'mild-show-same)
   (make-local-variable 'mild-show-different)
-  (make-local-variable 'mild-show-added))
+  (make-local-variable 'mild-show-added)
+  (setq-local revert-buffer-function #'mild-refresh)
+  (mild--update-header-line))
 
 (defun mild--move-to-node-name (on-right)
   "Move point to the start of the node name on the current side.
@@ -363,7 +365,7 @@ If ON-RIGHT is non-nil, align to the right column."
 
 (defun mild--stop-scan ()
   "Stop the currently running scanning thread if any."
-  (when (and mild--scan-thread (thread-alive-p mild--scan-thread))
+  (when (and mild--scan-thread (thread-live-p mild--scan-thread))
     ;; Threads in Emacs are cooperative, so we can't force kill them easily,
     ;; but we can signal or just wait. For simplicity, we just clear the variable
     ;; so the callback won't update the UI for the old scan.
@@ -388,10 +390,12 @@ If ON-RIGHT is non-nil, align to the right column."
                                 (with-current-buffer b
                                   (setf (mild-node-children mild--root-node) nodes)
                                   (setq mild--scan-thread nil)
+                                  (mild--update-header-line)
                                   (mild--render)
                                   (message "Scanning done."))))
                             buf new-children)))
            "mild-scan-thread"))
+    (mild--update-header-line)
     (mild--render)
     (message "Rescanning directories in background...")))
 
@@ -493,6 +497,26 @@ Creates missing parent directories on the destination side if needed."
                 (message "Copied %s" (mild-node-name node)))
             (error (message "Copy failed: %s" (error-message-string err)))))))))
 
+(defun mild--update-header-line ()
+  "Update the header line with legend and status."
+  (setq header-line-format
+        '(:eval
+          (let ((scan-msg (if (and (boundp 'mild--scan-thread) 
+                                   mild--scan-thread 
+                                   (thread-live-p mild--scan-thread))
+                              (propertize " [SCANNING...] " 'face 'highlight)
+                            "")))
+            (concat
+             scan-msg
+             " Legend: "
+             (propertize "Mod" 'face 'mild-diff-face) "  "
+             (propertize "New(L)" 'face 'mild-left-only-face) "  "
+             (propertize "New(R)" 'face 'mild-right-only-face) "  "
+             (propertize "Same" 'face 'mild-same-face) "  "
+             (if mild-filter-globs
+                 (propertize "Filtered" 'face 'mild-filtered-face)
+               ""))))))
+
 (defun mild--render ()
   "Render the tree in the current buffer."
   (let ((inhibit-read-only t))
@@ -503,8 +527,6 @@ Creates missing parent directories on the destination side if needed."
                         'face 'mild-header-face))
     (insert (propertize (truncate-string-to-width mild--right-root mild--column-width nil ?\s)
                         'face 'mild-header-face))
-    (when mild--scan-thread
-      (insert (propertize " [SCANNING...]" 'face 'warning)))
     (insert "\n" (make-string (* 2 mild--column-width) ?-) "\n")
     ;; Root children
     (mild--render-nodes (mild-node-children mild--root-node) 0 mild--column-width)
