@@ -269,6 +269,11 @@ Prompts for confirmation or selection."
   "Face for the directory headers."
   :group 'mild)
 
+(defface mild-dir-face
+  '((t :inherit font-lock-type-face :weight bold))
+  "Face for directory names (overrides diff-status faces)."
+  :group 'mild)
+
 (defface mild-filtered-face
   '((t :inherit shadow :strike-through t))
   "Face for filtered files."
@@ -781,7 +786,7 @@ The root node is always visible."
                            ((eq status 'different) 'mild-diff-face)
                            ((eq status 'left-only) 'mild-left-only-face)
                            ((eq status 'right-only) 'mild-right-only-face)))
-               (name-face (if (mild-node-is-dir node) (list face 'bold) face))
+               (name-face (if (mild-node-is-dir node) 'mild-dir-face face))
                (dir-indicator (if (mild-node-is-dir node)
                                     (concat (if (mild-node-expanded node) "[-] " "[+] ")
                                             mild-dir-prefix)
