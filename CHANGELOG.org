@@ -1,5 +1,9 @@
 #+TITLE: Changelog for Mild
 
+* [0.2.1] - 2026-05-20
+** Added
+- ~M-n~/~M-p~ for next/previous change navigation (file-only), ~mild-next-change~ / ~mild-previous-change~.
+
 * [0.2.0] - 2026-05-20
 ** Added
 - Initial implementation of `mild.el` side-by-side comparison.

@@ -42,6 +42,7 @@ Alternatively, run ~M-x mild-diff-dwim~ to automatically use open Dired buffers 
 | a         | Toggle added (new) files            |
 | g         | Full rescan/refresh                 |
 | n/p       | Navigation (Side-aware)             |
+| M-n/M-p   | Jump to next/previous file change   |
 
 * Customization
 - ~mild-filter-globs~: List of globs to ignore (e.g., ~".git"~, ~"*.elc"~).

@@ -2,7 +2,7 @@
 
 ;; Author: Antigravity
 ;; Keywords: files, tools
-;; Version: 0.2
+;; Version: 0.2.1
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -268,6 +268,8 @@ Prompts for confirmation or selection."
     (define-key map (kbd "g")   #'mild-refresh)
     (define-key map (kbd "n")   #'mild-next-line)
     (define-key map (kbd "p")   #'mild-previous-line)
+    (define-key map (kbd "M-n") #'mild-next-change)
+    (define-key map (kbd "M-p") #'mild-previous-change)
     (define-key map (kbd "o")   #'mild-jump-other-side)
     (define-key map (kbd "C")   #'mild-copy)
     (define-key map (kbd "w")   #'mild-copy-path-at-point)
@@ -278,6 +280,8 @@ Prompts for confirmation or selection."
     (define-key map (kbd "m")   #'mild-toggle-show-different)
     (define-key map (kbd "a")   #'mild-toggle-show-added)
     (define-key map (kbd "T")   #'mild-toggle-tree-lines)
+    (define-key map (kbd ">")   #'mild-increase-indent)
+    (define-key map (kbd "<")   #'mild-decrease-indent)
     map)
   "Keymap for `mild-mode'.")
 
@@ -318,9 +322,9 @@ If the current side is empty but the other has a file, snap to it."
     ;; Smart snapping: only if this side is truly empty and the other side has a file
     (let ((node (get-text-property (point) 'mild-node)))
       (when (and node (mild-node-parent node)) ; Only snap for children, not root nodes
-        (let ((has-left (mild-node-left-path node))
-              (has-right (mild-node-right-path node))
-              (current-is-empty (not (if on-right has-right has-left))))
+        (let* ((has-left (mild-node-left-path node))
+               (has-right (mild-node-right-path node))
+               (current-is-empty (not (if on-right has-right has-left))))
           (when (and current-is-empty (if on-right has-left has-right))
             (if on-right (beginning-of-line) (move-to-column width))
             (let ((new-limit (if on-right (+ (line-beginning-position) width) (line-end-position))))
@@ -328,6 +332,46 @@ If the current side is empty but the other has a file, snap to it."
                           (< (point) new-limit)
                           (looking-at "[] └├│─\\[+-]"))
                 (forward-char 1)))))))))
+
+(defun mild--change-status-p (node)
+  "Return non-nil if NODE represents a change (different, added, or removed)."
+  (memq (mild-node-diff-status node) '(different left-only right-only)))
+
+(defun mild-next-change ()
+  "Move to the next change (different, added, or removed node)."
+  (interactive)
+  (let* ((width (or (bound-and-true-p mild--column-width) (/ (window-width) 2)))
+         (on-right (>= (current-column) width))
+         (found nil)
+         (orig (point)))
+    (forward-line 1)
+    (while (and (not found) (not (eobp)))
+      (let ((node (get-text-property (point) 'mild-node)))
+        (if (and node (mild--change-status-p node) (not (mild-node-is-dir node)))
+            (setq found t)
+          (forward-line 1))))
+    (if found
+        (mild--move-to-node-name on-right)
+      (goto-char orig)
+      (message "No next change"))))
+
+(defun mild-previous-change ()
+  "Move to the previous change (different, added, or removed node)."
+  (interactive)
+  (let* ((width (or (bound-and-true-p mild--column-width) (/ (window-width) 2)))
+         (on-right (>= (current-column) width))
+         (found nil)
+         (orig (point)))
+    (forward-line -1)
+    (while (and (not found) (not (bobp)))
+      (let ((node (get-text-property (point) 'mild-node)))
+        (if (and node (mild--change-status-p node) (not (mild-node-is-dir node)))
+            (setq found t)
+          (forward-line -1))))
+    (if found
+        (mild--move-to-node-name on-right)
+      (goto-char orig)
+      (message "No previous change"))))
 
 (defun mild-next-line ()
   "Move to the next line and align to node name."
@@ -377,6 +421,20 @@ If the current side is empty but the other has a file, snap to it."
   "Toggle the display of tree lines."
   (interactive)
   (setq mild-show-tree-lines (not mild-show-tree-lines))
+  (mild--render))
+
+(defun mild-increase-indent ()
+  "Increase the directory indentation."
+  (interactive)
+  (setq mild-indent-offset (1+ mild-indent-offset))
+  (message "Indent: %d" mild-indent-offset)
+  (mild--render))
+
+(defun mild-decrease-indent ()
+  "Decrease the directory indentation."
+  (interactive)
+  (setq mild-indent-offset (max 1 (1- mild-indent-offset)))
+  (message "Indent: %d" mild-indent-offset)
   (mild--render))
 
 (defun mild-toggle-show-different ()
@@ -612,11 +670,10 @@ Creates missing parent directories on the destination side if needed."
         (let* ((status (mild-node-diff-status node))
                (is-last (= idx count))
                (branch (if mild-show-tree-lines
-                           (if is-last "└─" "├─")
+                           (concat (if is-last "└" "├")
+                                   (make-string (1- mild-indent-offset) ?─))
                          (make-string mild-indent-offset ?\s)))
-               (full-prefix (if mild-show-tree-lines
-                                (concat indent-prefix branch)
-                              (concat indent-prefix branch)))
+               (full-prefix (concat indent-prefix branch))
                (face (cond ((eq status 'filtered) 'mild-filtered-face)
                            ((eq status 'same) 'mild-same-face)
                            ((eq status 'different) 'mild-diff-face)
@@ -625,8 +682,8 @@ Creates missing parent directories on the destination side if needed."
                (dir-indicator (if (mild-node-is-dir node)
                                   (if (mild-node-expanded node) "[-] " "[+] ")
                                 "")))
-          ;; Left Side
           (let ((start (point)))
+            ;; Left Side
             (insert (propertize full-prefix 'face 'shadow))
             (when (mild-node-left-path node)
               (insert dir-indicator)
@@ -645,15 +702,17 @@ Creates missing parent directories on the destination side if needed."
               (insert (propertize (mild-node-name node) 'face face)))
             
             (add-text-properties start (point) `(mild-node ,node mouse-face highlight))
-            (insert "\n"))
-          
-          ;; Recurse
-          (when (and (mild-node-expanded node) (mild-node-children node))
-            (mild--render-nodes (mild-node-children node)
-                                (if mild-show-tree-lines
-                                    (concat indent-prefix (if is-last "  " "│ "))
-                                  (concat indent-prefix (make-string mild-indent-offset ?\s)))
-                                column-width)))))))
+            (insert "\n")
+            
+            ;; Recurse
+            (when (and (mild-node-expanded node) (mild-node-children node))
+              (mild--render-nodes (mild-node-children node)
+                                  (if mild-show-tree-lines
+                                      (concat indent-prefix 
+                                              (if is-last " " "│")
+                                              (make-string (1- mild-indent-offset) ?\s))
+                                    (concat indent-prefix (make-string mild-indent-offset ?\s)))
+                                  column-width))))))))
 
 (provide 'mild)
 ;;; mild.el ends here
