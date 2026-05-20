@@ -32,6 +32,21 @@ These match recursively."
   :type 'boolean
   :group 'mild)
 
+(defcustom mild-show-same nil
+  "Whether to show identical files."
+  :type 'boolean
+  :group 'mild)
+
+(defcustom mild-show-different t
+  "Whether to show modified files."
+  :type 'boolean
+  :group 'mild)
+
+(defcustom mild-show-added t
+  "Whether to show new (orphan) files."
+  :type 'boolean
+  :group 'mild)
+
 (cl-defstruct (mild-node
                (:constructor mild-node-create))
   name
@@ -77,15 +92,15 @@ Otherwise, it matches against the filename."
   (if (and left right
            (file-exists-p left)
            (file-exists-p right))
-      (let ((attr-left (file-attributes left))
-            (attr-right (file-attributes right)))
-        (if (and (eq (file-directory-p left) (file-directory-p right))
-                 (or (file-directory-p left)
-                     (and (eq (file-attribute-size attr-left) (file-attribute-size attr-right))
-                          (time-equal-p (file-attribute-modification-time attr-left)
-                                        (file-attribute-modification-time attr-right)))))
-            'same
-          'different))
+      (let ((is-dir-left (file-directory-p left))
+            (is-dir-right (file-directory-p right)))
+        (cond ((not (eq is-dir-left is-dir-right)) 'different)
+              (is-dir-left 'same) ; Directories are 'same' by default, children will update it
+              (t (if (= 0 (process-file "diff" nil nil nil "-q"
+                                       (expand-file-name left)
+                                       (expand-file-name right)))
+                     'same
+                   'different))))
     (cond (left 'left-only)
           (right 'right-only)
           (t 'same))))
@@ -191,25 +206,56 @@ PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
     (define-key map (kbd "C")   #'mild-copy)
     (define-key map (kbd "h")   #'mild-toggle-show-hidden)
     (define-key map (kbd "f")   #'mild-toggle-show-filtered)
+    (define-key map (kbd "s")   #'mild-toggle-show-same)
+    (define-key map (kbd "m")   #'mild-toggle-show-different)
+    (define-key map (kbd "a")   #'mild-toggle-show-added)
     map)
   "Keymap for `mild-mode'.")
 
 (define-derived-mode mild-mode special-mode "Mild"
   "Major mode for Meld-Inspired Local Diff."
   (setq-local truncate-lines t)
-  (setq-local buffer-read-only t))
+  (setq-local buffer-read-only t)
+  (make-local-variable 'mild-show-hidden)
+  (make-local-variable 'mild-show-filtered)
+  (make-local-variable 'mild-show-same)
+  (make-local-variable 'mild-show-different)
+  (make-local-variable 'mild-show-added))
 
 (defun mild-toggle-show-hidden ()
   "Toggle showing hidden files."
   (interactive)
   (setq mild-show-hidden (not mild-show-hidden))
+  (message "Show hidden: %s" (if mild-show-hidden "on" "off"))
   (mild-refresh))
 
 (defun mild-toggle-show-filtered ()
   "Toggle showing filtered files."
   (interactive)
   (setq mild-show-filtered (not mild-show-filtered))
+  (message "Show filtered: %s" (if mild-show-filtered "on" "off"))
   (mild-refresh))
+
+(defun mild-toggle-show-same ()
+  "Toggle showing identical files."
+  (interactive)
+  (setq mild-show-same (not mild-show-same))
+  (message "Show same: %s" (if mild-show-same "on" "off"))
+  (mild--render))
+
+(defun mild-toggle-show-different ()
+  "Toggle showing modified files."
+  (interactive)
+  (setq mild-show-different (not mild-show-different))
+  (message "Show modified: %s" (if mild-show-different "on" "off"))
+  (mild--render))
+
+(defun mild-toggle-show-added ()
+  "Toggle showing new files."
+  (interactive)
+  (setq mild-show-added (not mild-show-added))
+  (message "Show new: %s" (if mild-show-added "on" "off"))
+  (mild--render))
 
 (defun mild-toggle-expand ()
   "Toggle expansion of the node at point."
@@ -278,42 +324,51 @@ PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
     (mild--render-nodes (mild-node-children mild--root-node) 0 column-width)
     (goto-char (point-min))))
 
+(defun mild--node-visible-p (node)
+  "Determine if NODE should be visible based on status filters."
+  (let ((status (mild-node-diff-status node)))
+    (cond ((eq status 'same) mild-show-same)
+          ((eq status 'different) mild-show-different)
+          ((memq status '(left-only right-only)) mild-show-added)
+          (t t))))
+
 (defun mild--render-nodes (nodes indent column-width)
   "Render a list of NODES with INDENT and COLUMN-WIDTH."
   (dolist (node nodes)
-    (let* ((status (mild-node-diff-status node))
-           (face (cond ((eq status 'filtered) 'mild-filtered-face)
-                       ((eq status 'same) 'mild-same-face)
-                       ((eq status 'different) 'mild-diff-face)
-                       ((eq status 'left-only) 'mild-left-only-face)
-                       ((eq status 'right-only) 'mild-right-only-face)))
-           (prefix (if (mild-node-is-dir node)
-                       (if (mild-node-expanded node) "[-] " "[+] ")
-                     "    "))
-           (name (mild-node-name node))
-           (indent-str (make-string (* indent 2) ?\s))
-           (start (point)))
-      
-      ;; Left Column
-      (insert indent-str prefix)
-      (if (mild-node-left-path node)
-          (insert (propertize name 'face face))
-        (insert (make-string (length name) ?\s)))
-      (let ((current-col (- (point) (line-beginning-position))))
-        (when (< current-col column-width)
-          (insert (make-string (- column-width current-col) ?\s))))
-      
-      ;; Right Column
-      (insert indent-str prefix)
-      (if (mild-node-right-path node)
-          (insert (propertize name 'face face))
-        (insert (make-string (length name) ?\s)))
-      
-      (add-text-properties start (point) `(mild-node ,node mouse-face highlight))
-      (insert "\n")
-      
-      (when (and (mild-node-is-dir node) (mild-node-expanded node))
-        (mild--render-nodes (mild-node-children node) (+ indent 1) column-width)))))
+    (when (mild--node-visible-p node)
+      (let* ((status (mild-node-diff-status node))
+             (face (cond ((eq status 'filtered) 'mild-filtered-face)
+                         ((eq status 'same) 'mild-same-face)
+                         ((eq status 'different) 'mild-diff-face)
+                         ((eq status 'left-only) 'mild-left-only-face)
+                         ((eq status 'right-only) 'mild-right-only-face)))
+             (prefix (if (mild-node-is-dir node)
+                         (if (mild-node-expanded node) "[-] " "[+] ")
+                       "    "))
+             (name (mild-node-name node))
+             (indent-str (make-string (* indent 2) ?\s))
+             (start (point)))
+        
+        ;; Left Column
+        (insert indent-str prefix)
+        (if (mild-node-left-path node)
+            (insert (propertize name 'face face))
+          (insert (make-string (length name) ?\s)))
+        (let ((current-col (- (point) (line-beginning-position))))
+          (when (< current-col column-width)
+            (insert (make-string (- column-width current-col) ?\s))))
+        
+        ;; Right Column
+        (insert indent-str prefix)
+        (if (mild-node-right-path node)
+            (insert (propertize name 'face face))
+          (insert (make-string (length name) ?\s)))
+        
+        (add-text-properties start (point) `(mild-node ,node mouse-face highlight))
+        (insert "\n")
+        
+        (when (and (mild-node-is-dir node) (mild-node-expanded node))
+          (mild--render-nodes (mild-node-children node) (+ indent 1) column-width))))))
 
 (provide 'mild)
 ;;; mild.el ends here

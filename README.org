@@ -30,6 +30,9 @@ Run ~M-x mild-diff~ and select the two directories you wish to compare.
 | C     | Copy to the other side            |
 | h     | Toggle hidden files               |
 | f     | Toggle filtered files             |
+| s     | Toggle same (identical) files     |
+| m     | Toggle modified (different) files |
+| a     | Toggle added (new) files          |
 | g     | Full rescan/refresh               |
 | n/p   | Navigation                        |
 
