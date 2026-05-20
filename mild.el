@@ -47,6 +47,11 @@ These match recursively."
   :type 'boolean
   :group 'mild)
 
+(defcustom mild-indent-offset 2
+  "Number of spaces to indent each level of the directory tree."
+  :type 'integer
+  :group 'mild)
+
 (defcustom mild-simple-comparison nil
   "If non-nil, only compare file sizes for diff status.
 This is much faster but less accurate than content comparison."
@@ -65,7 +70,8 @@ This is much faster but less accurate than content comparison."
   (is-dir nil)
   (is-filtered nil))
 
-(defvar-local mild--left-root nil)
+(defvar-local mild--scan-thread nil
+  "Current scanning thread for this buffer.")
 (defvar-local mild--right-root nil)
 (defvar-local mild--root-node nil)
 (defvar-local mild--column-width nil)
@@ -123,6 +129,7 @@ PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
                              (mapcar #'file-name-nondirectory (mild--get-files right-dir)))))
          (nodes nil))
     (dolist (name (sort all-names #'string<))
+      (thread-yield)
       (let* ((left (and left-dir (expand-file-name name left-dir)))
              (right (and right-dir (expand-file-name name right-dir)))
              (exists-left (and left (file-exists-p left)))
@@ -174,7 +181,8 @@ PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
       (setf (mild-node-children mild--root-node)
             (mild--scan-dir mild--left-root mild--right-root mild--root-node))
       (mild--render))
-    (switch-to-buffer buf)))
+    (switch-to-buffer buf)
+    (mild-refresh)))
 
 (defun mild--get-dwim-dirs ()
   "Try to guess directories based on visible dired buffers."
@@ -258,6 +266,7 @@ Prompts for confirmation or selection."
     (define-key map (kbd "o")   #'mild-jump-other-side)
     (define-key map (kbd "C")   #'mild-copy)
     (define-key map (kbd "w")   #'mild-copy-path-at-point)
+    (define-key map (kbd "SPC") #'mild-soft-diff)
     (define-key map (kbd "h")   #'mild-toggle-show-hidden)
     (define-key map (kbd "F")   #'mild-toggle-show-filtered)
     (define-key map (kbd "s")   #'mild-toggle-show-same)
@@ -352,14 +361,39 @@ If ON-RIGHT is non-nil, align to the right column."
         (mild--render)
         (goto-char pos)))))
 
+(defun mild--stop-scan ()
+  "Stop the currently running scanning thread if any."
+  (when (and mild--scan-thread (thread-alive-p mild--scan-thread))
+    ;; Threads in Emacs are cooperative, so we can't force kill them easily,
+    ;; but we can signal or just wait. For simplicity, we just clear the variable
+    ;; so the callback won't update the UI for the old scan.
+    (setq mild--scan-thread nil)))
+
 (defun mild-refresh ()
-  "Refresh the comparison."
+  "Refresh the comparison asynchronously."
   (interactive)
-  (message "Rescanning directories...")
-  (setf (mild-node-children mild--root-node)
-        (mild--scan-dir mild--left-root mild--right-root mild--root-node))
-  (mild--render)
-  (message "Rescanning done."))
+  (mild--stop-scan)
+  (let ((buf (current-buffer))
+        (left mild--left-root)
+        (right mild--right-root)
+        (root mild--root-node))
+    (setq mild--scan-thread
+          (make-thread
+           (lambda ()
+             (let ((new-children (mild--scan-dir left right root)))
+               ;; Use run-at-time to update UI from main thread context
+               (run-at-time 0 nil
+                            (lambda (b nodes)
+                              (when (buffer-live-p b)
+                                (with-current-buffer b
+                                  (setf (mild-node-children mild--root-node) nodes)
+                                  (setq mild--scan-thread nil)
+                                  (mild--render)
+                                  (message "Scanning done."))))
+                            buf new-children)))
+           "mild-scan-thread"))
+    (mild--render)
+    (message "Rescanning directories in background...")))
 
 (defun mild-action ()
   "Perform default action on node (ediff or view)."
@@ -388,6 +422,22 @@ If ON-RIGHT is non-nil, align to the right column."
             (find-file-other-window path)
           (message "No file on %s side" (if (< cur-col mild--column-width) "left" "right")))))))
 
+(defun mild-soft-diff ()
+  "Contextual action for SPC.
+If on a directory, toggle expansion.
+If on a file, show a quick diff of the current node."
+  (interactive)
+  (let ((node (get-text-property (point) 'mild-node)))
+    (if (not node)
+        (message "No node at point")
+      (if (mild-node-is-dir node)
+          (mild-toggle-expand)
+        (let ((left (mild-node-left-path node))
+              (right (mild-node-right-path node)))
+          (if (and left right (not (file-directory-p left)) (not (file-directory-p right)))
+              (diff left right)
+            (message "Soft diff only works for comparing two files")))))))
+
 (defun mild-copy-path-at-point (arg)
   "Copy the filename at point to the kill ring.
 With prefix ARG, copy the full absolute path.
@@ -408,23 +458,40 @@ The side is determined by the current column."
           (message "No file on this side"))))))
 
 (defun mild-copy ()
-  "Copy the file/dir to the other side."
+  "Copy the file/dir at point to the other side.
+Creates missing parent directories on the destination side if needed."
   (interactive)
-  (let ((node (get-text-property (point) 'mild-node)))
-    (when (and node (not (eq (mild-node-diff-status node) 'same)))
-      (let* ((left (mild-node-left-path node))
-             (right (mild-node-right-path node))
-             (parent (mild-node-parent node))
-             (dest-dir (if left 
-                           (mild-node-right-path parent)
-                         (mild-node-left-path parent))))
-        (when (and dest-dir (yes-or-no-p (format "Copy %s to %s?" 
-                                                (or left right) 
-                                                dest-dir)))
-          (if (file-directory-p (or left right))
-              (copy-directory (or left right) (expand-file-name (mild-node-name node) dest-dir))
-            (copy-file (or left right) (expand-file-name (mild-node-name node) dest-dir)))
-          (mild-refresh))))))
+  (let* ((node (get-text-property (point) 'mild-node))
+         (cur-col (current-column))
+         (on-left (< cur-col mild--column-width)))
+    (unless node (user-error "No node at point"))
+    (let* ((source (if on-left (mild-node-left-path node) (mild-node-right-path node)))
+           (source-root (if on-left mild--left-root mild--right-root))
+           (dest-root (if on-left mild--right-root mild--left-root)))
+      (unless source (user-error "No file on current side to copy"))
+      (let* ((rel-path (file-relative-name source source-root))
+             (dest (directory-file-name (expand-file-name rel-path dest-root)))
+             (dest-parent (file-name-directory dest)))
+        (when (yes-or-no-p (format "Copy %s to %s?" (mild-node-name node) dest-root))
+          (condition-case err
+              (progn
+                ;; Ensure dest-parent is a directory
+                (unless (file-directory-p dest-parent)
+                  (when (file-exists-p dest-parent) (delete-file dest-parent))
+                  (make-directory dest-parent t))
+                ;; Perform the copy
+                (if (file-directory-p source)
+                    ;; For directories, if dest exists, we must handle it to avoid nesting
+                    (if (fboundp 'copy-directory-contents) ; Hypothetical, but let's use the real args
+                        (copy-directory source dest t t t) ; Emacs 28+
+                      ;; Emacs 27 fallback: remove dest if it exists as a file
+                      (when (and (file-exists-p dest) (not (file-directory-p dest)))
+                        (delete-file dest))
+                      (copy-directory source dest t t))
+                  (copy-file source dest t))
+                (mild-refresh)
+                (message "Copied %s" (mild-node-name node)))
+            (error (message "Copy failed: %s" (error-message-string err)))))))))
 
 (defun mild--render ()
   "Render the tree in the current buffer."
@@ -436,6 +503,8 @@ The side is determined by the current column."
                         'face 'mild-header-face))
     (insert (propertize (truncate-string-to-width mild--right-root mild--column-width nil ?\s)
                         'face 'mild-header-face))
+    (when mild--scan-thread
+      (insert (propertize " [SCANNING...]" 'face 'warning)))
     (insert "\n" (make-string (* 2 mild--column-width) ?-) "\n")
     ;; Root children
     (mild--render-nodes (mild-node-children mild--root-node) 0 mild--column-width)
@@ -463,7 +532,7 @@ The side is determined by the current column."
                          (if (mild-node-expanded node) "[-] " "[+] ")
                        "    "))
              (name (mild-node-name node))
-             (indent-str (make-string (* indent 2) ?\s))
+             (indent-str (make-string (* indent mild-indent-offset) ?\s))
              (start (point)))
         
         ;; Left Column

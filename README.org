@@ -33,6 +33,7 @@ Alternatively, run ~M-x mild-diff-dwim~ to automatically use open Dired buffers 
 | f, v      | Find File (Open current side)       |
 | C         | Copy to the other side              |
 | w         | Copy filename (C-u w for full path) |
+| SPC       | Fold/Unfold (Dir) or Soft Diff (File)|
 | o         | Jump to the other side              |
 | h         | Toggle hidden files                 |
 | F         | Toggle filtered (glob) files        |

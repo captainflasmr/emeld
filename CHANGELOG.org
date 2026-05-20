@@ -9,6 +9,9 @@
 - Toggles for hidden and filtered files.
 - New visibility toggles for **Same** (~s~), **Modified** (~m~), and **Added/New** (~a~) files.
 - Directory folding and unfolding (~TAB~).
+- Added asynchronous directory scanning (~make-thread~) to prevent UI hangs.
+- Added contextual ~SPC~ behavior: Toggle expansion for directories or show Soft Diff for files.
+- Added ~mild-indent-offset~ to customize tree indentation depth.
 - Added ~mild-diff-dwim~ with robust directory detection and collision safety.
 - Added ~mild-simple-comparison~ option for fast, size-only matching.
 - Added side-aware navigation (~n~/~p~) that remembers left/right column focus.
