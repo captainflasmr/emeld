@@ -1,7 +1,7 @@
 ;;; mild.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.3.0
+;; Version: 0.4.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -695,6 +695,20 @@ Creates missing parent directories on the destination side if needed."
               (message "Deleted %s from %s side" (mild-node-name node) side))
           (error (message "Delete failed: %s" (error-message-string err))))))))
 
+(defun mild--toggle-indicator (label enabled)
+  "Return a propertized string for toggle LABEL showing ENABLED state."
+  (propertize label 'face (if enabled 'bold 'shadow)))
+
+(defun mild--display-state-string ()
+  "Return a compact string showing current display toggle states."
+  (concat
+   (mild--toggle-indicator "h" mild-show-hidden)
+   (mild--toggle-indicator "f" mild-show-filtered)
+   (mild--toggle-indicator "s" mild-show-same)
+   (mild--toggle-indicator "m" mild-show-different)
+   (mild--toggle-indicator "a" mild-show-added)
+   (mild--toggle-indicator "T" mild-show-tree-lines)))
+
 (defun mild--update-header-line ()
   "Update the header line with legend and status."
   (setq header-line-format
@@ -705,11 +719,11 @@ Creates missing parent directories on the destination side if needed."
                                (propertize " [SCANNING...] " 'face 'highlight)
                              ""))
                 (mode-msg (if (eq mild--last-scan-mode 'simple)
-                              (propertize " [SIMPLE] " 'face 'warning)
-                            (propertize " [FULL] " 'face 'success))))
+                               (propertize " [SIMPLE] " 'face 'warning)
+                             (propertize " [FULL] " 'face 'success))))
             (concat
              scan-msg mode-msg
-             " Legend: "
+             " [" (mild--display-state-string) "] "
              (propertize "Mod" 'face 'mild-diff-face) "  "
              (propertize "New(L)" 'face 'mild-left-only-face) "  "
              (propertize "New(R)" 'face 'mild-right-only-face) "  "

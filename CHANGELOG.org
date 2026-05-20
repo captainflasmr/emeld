@@ -1,5 +1,9 @@
 #+TITLE: Changelog for Mild
 
+* [0.4.0] - 2026-05-20
+** Added
+- ~mild-dir-face~ for directory names (font-lock-type-face + bold), distinct from file diff-status faces.
+
 * [0.3.0] - 2026-05-20
 ** Changed
 - ~mild-action~ is now side-aware: ~RET~ on the right column opens the right-side path.

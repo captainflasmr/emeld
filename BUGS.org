@@ -9,9 +9,9 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
-** DOING state of display in header-line
-
 ** DOING better header line formatting
+
+** TODO add directory tree display for dired?
 
 ** TODO sub directory refresh
 
