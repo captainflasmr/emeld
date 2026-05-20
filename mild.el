@@ -66,6 +66,7 @@ This is much faster but less accurate than content comparison."
 (cl-defstruct (mild-node
                (:constructor mild-node-create))
   name
+  (name-right nil)    ; display name for the right side (defaults to `name')
   left-path
   right-path
   parent
@@ -178,13 +179,21 @@ PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
       (mild-mode)
       (setq mild--left-root (file-name-as-directory (expand-file-name dir1)))
       (setq mild--right-root (file-name-as-directory (expand-file-name dir2)))
-      (setq mild--root-node (mild-node-create :name "ROOT"
-                                             :left-path mild--left-root
-                                             :right-path mild--right-root
-                                             :is-dir t
-                                             :expanded t))
+      (setq mild--root-node (mild-node-create
+                              :name (file-name-nondirectory
+                                     (directory-file-name mild--left-root))
+                              :name-right (file-name-nondirectory
+                                           (directory-file-name mild--right-root))
+                              :left-path mild--left-root
+                              :right-path mild--right-root
+                              :is-dir t
+                              :expanded t))
       (setf (mild-node-children mild--root-node)
             (mild--scan-dir mild--left-root mild--right-root mild--root-node))
+      ;; Set root status based on children
+      (when (cl-some (lambda (child) (not (eq (mild-node-diff-status child) 'same)))
+                     (mild-node-children mild--root-node))
+        (setf (mild-node-diff-status mild--root-node) 'different))
       (mild--render))
     (switch-to-buffer buf)
     (mild-refresh)))
@@ -488,6 +497,12 @@ If the current side is empty but the other has a file, snap to it."
                               (when (buffer-live-p b)
                                 (with-current-buffer b
                                   (setf (mild-node-children mild--root-node) nodes)
+                                  (setf (mild-node-diff-status mild--root-node)
+                                        (if (cl-some (lambda (child)
+                                                        (not (eq (mild-node-diff-status child) 'same)))
+                                                      nodes)
+                                            'different
+                                          'same))
                                   (setq mild--scan-thread nil)
                                   (mild--update-header-line)
                                   (mild--render)
@@ -655,8 +670,8 @@ Creates missing parent directories on the destination side if needed."
     (insert (propertize (truncate-string-to-width mild--right-root mild--column-width nil ?\s)
                         'face 'mild-header-face))
     (insert "\n" (make-string (* 2 mild--column-width) ?-) "\n")
-    ;; Root children
-    (mild--render-nodes (mild-node-children mild--root-node) "" mild--column-width)
+    ;; Root node (collapsible)
+    (mild--render-nodes (list mild--root-node) "" mild--column-width)
     
     ;; Restore point
     (if target-path
@@ -674,12 +689,14 @@ Creates missing parent directories on the destination side if needed."
       (goto-char (point-min)))))
 
 (defun mild--node-visible-p (node)
-  "Determine if NODE should be visible based on status filters."
-  (let ((status (mild-node-diff-status node)))
-    (cond ((eq status 'same) mild-show-same)
-          ((eq status 'different) mild-show-different)
-          ((memq status '(left-only right-only)) mild-show-added)
-          (t t))))
+  "Determine if NODE should be visible based on status filters.
+The root node is always visible."
+  (or (eq node mild--root-node)
+      (let ((status (mild-node-diff-status node)))
+        (cond ((eq status 'same) mild-show-same)
+              ((eq status 'different) mild-show-different)
+              ((memq status '(left-only right-only)) mild-show-added)
+              (t t)))))
 
 (defun mild--render-nodes (nodes indent-prefix column-width)
   "Render a list of NODES with INDENT-PREFIX and COLUMN-WIDTH."
@@ -720,7 +737,9 @@ Creates missing parent directories on the destination side if needed."
             (insert (propertize full-prefix 'face 'shadow))
             (when (mild-node-right-path node)
               (insert dir-indicator)
-              (insert (propertize (mild-node-name node) 'face face)))
+              (insert (propertize (or (mild-node-name-right node)
+                                     (mild-node-name node))
+                                  'face face)))
             
             (add-text-properties start (point) `(mild-node ,node mouse-face highlight))
             (insert "\n")

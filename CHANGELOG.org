@@ -2,6 +2,7 @@
 
 * [0.2.1] - 2026-05-20
 ** Added
+- Root directories now rendered as collapsible tree nodes at the top (different names on left/right columns via new ~name-right~ slot).
 - ~M-n~/~M-p~ for next/previous change navigation (file-only), ~mild-next-change~ / ~mild-previous-change~.
 - ~d~ to delete the file/directory at point from the current side, ~mild-delete~.
 
