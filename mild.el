@@ -518,8 +518,16 @@ Creates missing parent directories on the destination side if needed."
                ""))))))
 
 (defun mild--render ()
-  "Render the tree in the current buffer."
-  (let ((inhibit-read-only t))
+  "Render the tree in the current buffer, attempting to preserve point."
+  (let ((inhibit-read-only t)
+        (old-node (get-text-property (point) 'mild-node))
+        (old-col (current-column))
+        (target-path nil))
+    ;; Save path of current node to restore point later
+    (when old-node
+      (setq target-path (or (mild-node-left-path old-node)
+                           (mild-node-right-path old-node))))
+    
     (setq mild--column-width (/ (window-width) 2))
     (erase-buffer)
     ;; Headers
@@ -530,7 +538,21 @@ Creates missing parent directories on the destination side if needed."
     (insert "\n" (make-string (* 2 mild--column-width) ?-) "\n")
     ;; Root children
     (mild--render-nodes (mild-node-children mild--root-node) 0 mild--column-width)
-    (goto-char (point-min))))
+    
+    ;; Restore point
+    (if target-path
+        (let ((found nil))
+          (goto-char (point-min))
+          (while (and (not found) (not (eobp)))
+            (let ((node (get-text-property (point) 'mild-node)))
+              (if (and node (or (string= (mild-node-left-path node) target-path)
+                                (string= (mild-node-right-path node) target-path)))
+                  (progn
+                    (setq found t)
+                    (move-to-column old-col))
+                (forward-line 1))))
+          (unless found (goto-char (point-min))))
+      (goto-char (point-min)))))
 
 (defun mild--node-visible-p (node)
   "Determine if NODE should be visible based on status filters."
