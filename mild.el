@@ -21,6 +21,24 @@ These match recursively."
   :type '(repeat string)
   :group 'mild)
 
+(defcustom mild-filter-groups nil
+  "List of named filter groups.  Each entry is (NAME GLOBS ...).
+Globs use the same format as `mild-filter-globs'.
+Toggle groups on/off with `mild-toggle-filter-group'."
+  :type '(repeat (list (string :tag "Group name")
+                       (repeat :tag "Glob patterns" string)))
+  :group 'mild)
+
+(put 'mild-filter-globs 'safe-local-variable
+     (lambda (val) (and (listp val) (cl-every #'stringp val))))
+(put 'mild-filter-groups 'safe-local-variable
+     (lambda (val)
+       (and (listp val)
+            (cl-every (lambda (entry)
+                        (and (listp entry) (stringp (car entry))
+                             (cl-every #'stringp (cdr entry))))
+                      val))))
+
 (defcustom mild-show-filtered nil
   "Whether to show filtered files (matching `mild-filter-globs`)."
   :type 'boolean
@@ -68,6 +86,10 @@ This is much faster but less accurate than content comparison."
   :type 'boolean
   :group 'mild)
 
+(defun mild--apply-dir-locals ()
+  "Apply .dir-locals.el from `default-directory' to the current buffer."
+  (hack-dir-local-variables-non-file-buffer))
+
 (cl-defstruct (mild-node
                (:constructor mild-node-create))
   name
@@ -85,6 +107,8 @@ This is much faster but less accurate than content comparison."
   "Current scanning thread for this buffer.")
 (defvar-local mild--last-scan-mode 'full
   "Scan mode used for the last refresh: `simple' or `full'.")
+(defvar-local mild--active-filter-groups nil
+  "List of currently active filter group names.")
 (defvar-local mild--right-root nil)
 (defvar-local mild--root-node nil)
 (defvar-local mild--column-width nil)
@@ -106,7 +130,31 @@ Otherwise, it matches against the filename."
                    (if (string-match-p "/" glob)
                        (string-match-p rx rel-path)
                      (string-match-p rx name))))
-               mild-filter-globs)))
+               mild-filter-globs)
+      (cl-some (lambda (group)
+                 (when (member (car group) mild--active-filter-groups)
+                   (cl-some (lambda (glob)
+                              (let ((rx (mild--glob-to-regexp glob)))
+                                (if (string-match-p "/" glob)
+                                    (string-match-p rx rel-path)
+                                  (string-match-p rx name))))
+                            (cdr group))))
+               mild-filter-groups)))
+
+(defun mild-toggle-filter-group (group)
+  "Toggle a named filter GROUP on or off.
+GROUP is the name of a group defined in `mild-filter-groups'."
+  (interactive
+   (let ((names (mapcar #'car mild-filter-groups)))
+     (unless names (user-error "No filter groups defined (customize `mild-filter-groups')"))
+     (list (completing-read "Toggle filter group: " names nil t))))
+  (if (member group mild--active-filter-groups)
+      (progn
+        (setq mild--active-filter-groups (delete group mild--active-filter-groups))
+        (message "Filter group \"%s\" disabled" group))
+    (push group mild--active-filter-groups)
+    (message "Filter group \"%s\" enabled" group))
+  (mild-refresh))
 
 (defun mild--get-files (dir)
   "Get all files in DIR except . and .."
@@ -184,6 +232,8 @@ PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
                                         (file-name-nondirectory (directory-file-name dir2))))))
     (with-current-buffer buf
       (mild-mode)
+      (setq default-directory (file-name-as-directory (expand-file-name dir1)))
+      (mild--apply-dir-locals)
       (setq mild--left-root (file-name-as-directory (expand-file-name dir1)))
       (setq mild--right-root (file-name-as-directory (expand-file-name dir2)))
       (setq mild--last-scan-mode (if mild-simple-comparison 'simple 'full))
@@ -306,6 +356,7 @@ Prompts for confirmation or selection."
     (define-key map (kbd "T")   #'mild-toggle-tree-lines)
     (define-key map (kbd ">")   #'mild-increase-indent)
     (define-key map (kbd "<")   #'mild-decrease-indent)
+    (define-key map (kbd "C-c f") #'mild-toggle-filter-group)
     map)
   "Keymap for `mild-mode'.")
 
@@ -548,8 +599,11 @@ With non-nil FORCE-FULL, always use content comparison (diff -q)."
     (unless (string= (directory-file-name (expand-file-name new-dir))
                      (directory-file-name old-root))
       (if on-left
-          (setq mild--left-root
-                (file-name-as-directory (expand-file-name new-dir)))
+          (progn
+            (setq mild--left-root
+                  (file-name-as-directory (expand-file-name new-dir)))
+            (setq default-directory mild--left-root)
+            (mild--apply-dir-locals))
         (setq mild--right-root
               (file-name-as-directory (expand-file-name new-dir))))
       (setf (if on-left
@@ -701,13 +755,17 @@ Creates missing parent directories on the destination side if needed."
 
 (defun mild--display-state-string ()
   "Return a compact string showing current display toggle states."
-  (concat
-   (mild--toggle-indicator "h" mild-show-hidden)
-   (mild--toggle-indicator "f" mild-show-filtered)
-   (mild--toggle-indicator "s" mild-show-same)
-   (mild--toggle-indicator "m" mild-show-different)
-   (mild--toggle-indicator "a" mild-show-added)
-   (mild--toggle-indicator "T" mild-show-tree-lines)))
+  (let ((groups (mapcar (lambda (g) (concat "[" g "]"))
+                        mild--active-filter-groups)))
+    (concat
+     (mild--toggle-indicator "h" mild-show-hidden)
+     (mild--toggle-indicator "f" mild-show-filtered)
+     (mild--toggle-indicator "s" mild-show-same)
+     (mild--toggle-indicator "m" mild-show-different)
+     (mild--toggle-indicator "a" mild-show-added)
+     (mild--toggle-indicator "T" mild-show-tree-lines)
+     (when groups
+       (concat " " (mapconcat #'identity groups " "))))))
 
 (defun mild--update-header-line ()
   "Update the header line with legend and status."

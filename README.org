@@ -26,27 +26,50 @@ Run ~M-x mild-diff~ and select the two directories you wish to compare.
 Alternatively, run ~M-x mild-diff-dwim~ to automatically use open Dired buffers as the comparison sources.
 
 * Key Bindings
-| Key       | Action                              |
-|-----------+-------------------------------------|
-| TAB       | Toggle expansion of a directory     |
-| RET, e, = | Action (Ediff if different)         |
-| f, v      | Find File (Open current side)       |
-| d         | Delete file/dir from current side   |
-| C         | Copy to the other side              |
-| w         | Copy filename (C-u w for full path) |
-| SPC       | Fold/Unfold (Dir) or Soft Diff (File)|
-| o         | Jump to the other side              |
-| h         | Toggle hidden files                 |
-| F         | Toggle filtered (glob) files        |
-| s         | Toggle same (identical) files       |
-| m         | Toggle modified files               |
-| a         | Toggle added (new) files            |
-| g         | Full rescan/refresh                 |
-| n/p       | Navigation (Side-aware)             |
-| M-n/M-p   | Jump to next/previous file change   |
+| Key       | Action                                 |
+|-----------+----------------------------------------|
+| TAB       | Toggle expansion of a directory        |
+| RET, e, = | Action (Ediff if different)            |
+| f, v      | Find File (Open current side)          |
+| d         | Delete file/dir from current side      |
+| C         | Copy to the other side                 |
+| w         | Copy filename (C-u w for full path)    |
+| SPC       | Fold/Unfold (Dir) or Soft Diff (File)  |
+| o         | Jump to the other side                 |
+| h         | Toggle hidden files                    |
+| F         | Toggle filtered (glob) files           |
+| s         | Toggle same (identical) files          |
+| m         | Toggle modified files                  |
+| a         | Toggle added (new) files               |
+| g         | Rescan (uses ~mild-simple-comparison~) |
+| G         | Force full content-diff scan           |
+| n/p       | Navigation (Side-aware)                |
+| M-n/M-p   | Jump to next/previous file change      |
+| C-c f     | Toggle a named filter group on/off     |
 
 * Customization
-- ~mild-filter-globs~: List of globs to ignore (e.g., ~".git"~, ~"*.elc"~).
+- ~mild-filter-globs~: List of globs to ignore (e.g., ~".git"~, ~"*.elc"~).  These are always applied.
+- ~mild-filter-groups~: Named groups of globs that can be toggled on/off interactively with ~C-c f~.
 - ~mild-show-hidden~: Whether to show dotfiles.
 - ~mild-show-same~: Whether to show identical files (default nil).
 - ~mild-simple-comparison~: Set to t for fast size-only matching.
+- ~mild-dir-prefix~: Unicode prefix for directory names (default ~"📁 "~).
+
+* Per-Project Configuration with ~.dir-locals.el~
+
+You can tailor ~mild-filter-globs~ and ~mild-filter-groups~ per project by adding a
+~.dir-locals.el~ file somewhere above the left-hand directory tree (the mild buffer
+uses the left directory as its ~default-directory~, so ~.dir-locals.el~ in an ancestor
+of that directory will be picked up):
+
+#+begin_src elisp
+;;; .dir-locals.el
+((nil
+  . ((mild-filter-globs . (".git" "node_modules" "build" "*.log"))
+     (mild-filter-groups . (("Backups" "*~" "*.bak")
+                            ("Logs" "*.log" "logs/*")
+                            ("Config" "*.cfg" "config/*"))))))
+#+end_src
+
+Toggle named groups on/off during a comparison with ~C-c f~.
+Active group names appear in brackets in the header line.

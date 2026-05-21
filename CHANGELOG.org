@@ -2,6 +2,12 @@
 
 * [0.4.0] - 2026-05-20
 ** Added
+- ~mild-filter-groups~: named groups of globs toggleable with ~C-c f~. Active groups shown in brackets in the header line.
+- ~.dir-locals.el~ documentation for per-project filter configuration.
+** Changed
+- ~mild--filtered-p~ now also checks active filter groups.
+- Header line shows active group names (e.g. ~[build] [logs]~).
+** Added
 - ~mild-dir-face~ for directory names (font-lock-type-face + bold), distinct from file diff-status faces.
 
 * [0.3.0] - 2026-05-20
