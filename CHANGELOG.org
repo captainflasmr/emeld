@@ -1,5 +1,10 @@
 #+TITLE: Changelog for Emeld
 
+* [0.9.1] - 2026-05-21
+** Changed
+- Transient menu restructured into ~View~, ~Navigate~, ~File~, and ~Filename~ groups.
+- Toggle indicators use ~[x]~/~[ ]~ instead of ~✓~ for consistent alignment.
+
 * [0.9.0] - 2026-05-21
 ** Added
 - ~emeld-format-patch~ (~P~): export all changed files as a unified-diff patch (left→right direction).

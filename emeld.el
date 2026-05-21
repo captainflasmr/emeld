@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.9.0
+;; Version: 0.9.1
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -980,69 +980,68 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
 
 (transient-define-prefix emeld-dispatch ()
    "Transient menu for emeld."
-     [["File status"
-      ("s" (lambda () (if emeld-show-same "[x] same" "[ ] same"))
-       (lambda () (interactive) (emeld-toggle-show-same)) :transient t)
-      ("m" (lambda () (if emeld-show-different "[x] modified" "[ ] modified"))
-       (lambda () (interactive) (emeld-toggle-show-different)) :transient t)
-      ("a" (lambda () (if emeld-show-added "[x] added" "[ ] added"))
-       (lambda () (interactive) (emeld-toggle-show-added)) :transient t)]
-     ["Toggles"
-      ("F" (lambda () (if emeld-show-filtered "[x] filtered" "[ ] filtered"))
-       (lambda () (interactive) (emeld-toggle-show-filtered)) :transient t)
-      ("T" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
-       (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)]
-     ["Actions"
-      ("g  " "rescan (simple)   " emeld-refresh)
-      ("G  " "rescan (full diff)" emeld-refresh-full)
-      ("o  " "jump other side   " emeld-jump-other-side :transient t)
-      ("M-n" "next change       " emeld-next-change :transient t)
-      ("M-p" "previous change   " emeld-previous-change :transient t)
-      ("SPC" "soft diff / fold  " emeld-soft-diff)
-      ("P  " "format as patch   " emeld-format-patch)
-      ("C  " "copy to other sid " emeld-copy)
-      ("d  " "delete from side  " emeld-delete)
-      ("w  " "copy path         " emeld-copy-path-at-point)
-      ("RET" "action (ediff)    " emeld-action)]
-    ["Indent"
-     (">" "more"  emeld-increase-indent :transient t)
-     ("<" "less" emeld-decrease-indent :transient t)]
-     ["Filename"
-      :if (lambda () emeld-filter-groups)
-      :class transient-column
-      :setup-children
-      (lambda (&rest _)
-        (when emeld-filter-groups
-          (let ((keys '("z" "x" "y" "w" "v" "u" "t" "r" "q" "j"))
-                (suffixes nil)
-                (max-len (apply #'max (mapcar (lambda (g) (length (car g)))
-                                              emeld-filter-groups))))
-            (dolist (g emeld-filter-groups)
-              (let* ((name (car g))
-                     (key (pop keys)))
-                (unless (fboundp (intern (format "emeld--toggle-group-%s" (downcase name))))
-                   (let ((n name))
-                     (defalias (intern (format "emeld--toggle-group-%s" (downcase name)))
-                       (lambda ()
-                         (interactive)
-                         (emeld-toggle-filter-group n)
-                         (run-at-time 0 nil
-                          (lambda () (transient-setup 'emeld-dispatch))))
-                       (format "Toggle filter group `%s'." (downcase name)))))
-                (push (transient-parse-suffix
-                        'emeld-dispatch
-                        (list key
-                              (format (concat "[%c] %-" (number-to-string max-len) "s")
-                                      (if (member name emeld--active-filter-groups) ?x ?\s)
-                                      name)
-                               (intern (format "emeld--toggle-group-%s" (downcase name)))
-                               :transient t))
-                       suffixes)))
-             (push (transient-parse-suffix
-                    'emeld-dispatch
-                    '("l" "list all globs..." emeld-list-filter-groups))
-                   suffixes)
-             (nreverse suffixes))))]])
+     [["View"
+       ("s" (lambda () (if emeld-show-same "[x] same" "[ ] same"))
+        (lambda () (interactive) (emeld-toggle-show-same)) :transient t)
+       ("m" (lambda () (if emeld-show-different "[x] modified" "[ ] modified"))
+        (lambda () (interactive) (emeld-toggle-show-different)) :transient t)
+       ("a" (lambda () (if emeld-show-added "[x] added" "[ ] added"))
+        (lambda () (interactive) (emeld-toggle-show-added)) :transient t)
+       ("F" (lambda () (if emeld-show-filtered "[x] filtered" "[ ] filtered"))
+        (lambda () (interactive) (emeld-toggle-show-filtered)) :transient t)
+       ("T" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
+        (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
+       (">" "indent more"  emeld-increase-indent :transient t)
+       ("<" "indent less"  emeld-decrease-indent :transient t)]
+      ["Navigate"
+       ("g"   "rescan (simple)"    emeld-refresh)
+       ("G"   "rescan (full diff)" emeld-refresh-full)
+       ("o"   "jump other side"    emeld-jump-other-side :transient t)
+       ("M-n" "next change"        emeld-next-change :transient t)
+       ("M-p" "previous change"    emeld-previous-change :transient t)]
+      ["File"
+       ("SPC" "soft diff / fold"   emeld-soft-diff)
+       ("RET" "action (ediff)"     emeld-action)
+       ("C"   "copy to other side" emeld-copy)
+       ("d"   "delete from side"   emeld-delete)
+       ("w"   "copy path"          emeld-copy-path-at-point)
+       ("P"   "format as patch"    emeld-format-patch)]
+      ["Filename"
+       :if (lambda () emeld-filter-groups)
+       :class transient-column
+       :setup-children
+       (lambda (&rest _)
+         (when emeld-filter-groups
+           (let ((keys '("z" "x" "y" "w" "v" "u" "t" "r" "q" "j"))
+                 (suffixes nil)
+                 (max-len (apply #'max (mapcar (lambda (g) (length (car g)))
+                                               emeld-filter-groups))))
+             (dolist (g emeld-filter-groups)
+               (let* ((name (car g))
+                      (key (pop keys)))
+                 (unless (fboundp (intern (format "emeld--toggle-group-%s" (downcase name))))
+                    (let ((n name))
+                      (defalias (intern (format "emeld--toggle-group-%s" (downcase name)))
+                        (lambda ()
+                          (interactive)
+                          (emeld-toggle-filter-group n)
+                          (run-at-time 0 nil
+                           (lambda () (transient-setup 'emeld-dispatch))))
+                        (format "Toggle filter group `%s'." (downcase name)))))
+                 (push (transient-parse-suffix
+                         'emeld-dispatch
+                         (list key
+                               (format (concat "[%c] %-" (number-to-string max-len) "s")
+                                       (if (member name emeld--active-filter-groups) ?x ?\s)
+                                       name)
+                                (intern (format "emeld--toggle-group-%s" (downcase name)))
+                                :transient t))
+                        suffixes)))
+              (push (transient-parse-suffix
+                     'emeld-dispatch
+                     '("l" "list all globs..." emeld-list-filter-groups))
+                    suffixes)
+              (nreverse suffixes))))]])
 
 (define-key emeld-mode-map (kbd "?") #'emeld-dispatch)
 
