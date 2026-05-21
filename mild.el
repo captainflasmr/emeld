@@ -22,7 +22,16 @@ These match recursively."
   :type '(repeat string)
   :group 'mild)
 
-(defcustom mild-filter-groups nil
+(defcustom mild-filter-groups
+  '(("Backups" "#*#" ".#*" "~*" "*~" "*.orig" "*.bak" "*.swp")
+    ("OS metadata" ".DS_Store" "._*" ".Spotlight-V100" ".Trashes"
+     "Thumbs.db" "Desktop.ini")
+    ("Version Control" ".git" ".svn" ".hg" "CVS" "_darcs" ".bzr"
+     "_MTN" ".fslckout" "_FOSSIL_" ".fos" ".osc")
+    ("Binaries" "*.pyc" "*.a" "*.obj" "*.o" "*.so" "*.la" "*.lib"
+     "*.dll" "*.exe")
+    ("Media" "*.jpg" "*.gif" "*.png" "*.bmp" "*.wav" "*.mp3"
+     "*.ogg" "*.flac" "*.avi" "*.mpg" "*.xcf" "*.xpm"))
   "List of named filter groups.  Each entry is (NAME GLOBS ...).
 Globs use the same format as `mild-filter-globs'.
 Toggle groups on/off with `mild-toggle-filter-group'."
@@ -81,7 +90,7 @@ Set to \"\" for no prefix."
   :type 'boolean
   :group 'mild)
 
-(defcustom mild-simple-comparison nil
+(defcustom mild-simple-comparison t
   "If non-nil, only compare file sizes for diff status.
 This is much faster but less accurate than content comparison."
   :type 'boolean
@@ -948,18 +957,15 @@ The root node is always visible."
     ["Actions"
      ("g"   "rescan (simple)"    mild-refresh)
      ("G"   "rescan (full diff)" mild-refresh-full)
-     ("o"   "jump to other side" mild-jump-other-side :transient t)
-     ("SPC" "soft diff / fold"   mild-soft-diff)
+      ("o"   "jump other side"    mild-jump-other-side :transient t)
+      ("M-n" "next change"        mild-next-change :transient t)
+      ("M-p" "previous change"    mild-previous-change :transient t)
+      ("SPC" "soft diff / fold"   mild-soft-diff)
      ("C"   "copy to other side" mild-copy)
      ("d"   "delete from side"   mild-delete)
      ("w"   "copy path"          mild-copy-path-at-point)
      ("C-c f" "toggle filter group" mild-toggle-filter-group)
      ("RET" "action (ediff)"     mild-action)]
-    ["Navigation"
-     ("n"   "next line"       mild-next-line :transient t)
-     ("p"   "previous line"   mild-previous-line :transient t)
-     ("M-n" "next change"     mild-next-change :transient t)
-     ("M-p" "previous change" mild-previous-change :transient t)]
     ["Indent"
      (">" "more"  mild-increase-indent :transient t)
      ("<" "less" mild-decrease-indent :transient t)]])

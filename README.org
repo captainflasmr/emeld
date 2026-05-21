@@ -28,6 +28,7 @@ Alternatively, run ~M-x mild-diff-dwim~ to automatically use open Dired buffers 
 * Key Bindings
 | Key       | Action                                 |
 |-----------+----------------------------------------|
+| ?         | Transient menu                         |
 | TAB       | Toggle expansion of a directory        |
 | RET, e, = | Action (Ediff if different)            |
 | f, v      | Find File (Open current side)          |
@@ -48,8 +49,17 @@ Alternatively, run ~M-x mild-diff-dwim~ to automatically use open Dired buffers 
 | C-c f     | Toggle a named filter group on/off     |
 
 * Customization
-- ~mild-filter-globs~: List of globs to ignore (e.g., ~".git"~, ~"*.elc"~).  These are always applied.
-- ~mild-filter-groups~: Named groups of globs that can be toggled on/off interactively with ~C-c f~.
+- ~mild-filter-globs~: List of globs to ignore (e.g., ~".git"~, ~"*.elc"~).  Always applied.
+- ~mild-filter-groups~: Named groups of globs toggleable with ~C-c f~.  Defaults:
+
+  | Group           | Globs                                                            |
+  |-----------------+------------------------------------------------------------------|
+  | Backups         | ~#*#~, ~.#*~, ~~*~, ~*~~, ~*.orig~, ~*.bak~, ~*.swp~           |
+  | OS metadata     | ~.DS_Store~, ~._*~, ~.Spotlight-V100~, ~.Trashes~, ~Thumbs.db~, ~Desktop.ini~ |
+  | Version Control | ~.git~, ~.svn~, ~.hg~, ~CVS~, ~_darcs~, ~.bzr~, ~_MTN~, ~.fslckout~, ~_FOSSIL_~, ~.fos~, ~.osc~ |
+  | Binaries        | ~*.pyc~, ~*.a~, ~*.obj~, ~*.o~, ~*.so~, ~*.la~, ~*.lib~, ~*.dll~, ~*.exe~ |
+  | Media           | ~*.jpg~, ~*.gif~, ~*.png~, ~*.bmp~, ~*.wav~, ~*.mp3~, ~*.ogg~, ~*.flac~, ~*.avi~, ~*.mpg~, ~*.xcf~, ~*.xpm~ |
+
 - ~mild-show-hidden~: Whether to show dotfiles.
 - ~mild-show-same~: Whether to show identical files (default nil).
 - ~mild-simple-comparison~: Set to t for fast size-only matching.
@@ -57,19 +67,18 @@ Alternatively, run ~M-x mild-diff-dwim~ to automatically use open Dired buffers 
 
 * Per-Project Configuration with ~.dir-locals.el~
 
-You can tailor ~mild-filter-globs~ and ~mild-filter-groups~ per project by adding a
-~.dir-locals.el~ file somewhere above the left-hand directory tree (the mild buffer
-uses the left directory as its ~default-directory~, so ~.dir-locals.el~ in an ancestor
-of that directory will be picked up):
+Mild ships with Meld-style default filter groups (see above).  To override them per
+project, place a ~.dir-locals.el~ file above the left directory:
 
 #+begin_src elisp
 ;;; .dir-locals.el
 ((nil
-  . ((mild-filter-globs . (".git" "node_modules" "build" "*.log"))
-     (mild-filter-groups . (("Backups" "*~" "*.bak")
+  . ((mild-filter-globs . ("node_modules" "build" "dist"))
+     (mild-filter-groups . (("Backups" "*~" "*.bak" "*.orig")
+                            ("Hidden" ".*")
                             ("Logs" "*.log" "logs/*")
                             ("Config" "*.cfg" "config/*"))))))
 #+end_src
 
-Toggle named groups on/off during a comparison with ~C-c f~.
-Active group names appear in brackets in the header line.
+Toggle named groups on/off from the transient menu (~?~ then ~f~) or directly with ~C-c f~.
+The header line shows the current display state and active groups in brackets.
