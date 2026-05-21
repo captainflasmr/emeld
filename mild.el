@@ -1,7 +1,7 @@
 ;;; mild.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.4.0
+;; Version: 0.5.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -10,6 +10,7 @@
 
 (require 'cl-lib)
 (require 'dired)
+(require 'transient)
 
 (defgroup mild nil
   "Meld-Inspired Local Diff."
@@ -357,6 +358,7 @@ Prompts for confirmation or selection."
     (define-key map (kbd ">")   #'mild-increase-indent)
     (define-key map (kbd "<")   #'mild-decrease-indent)
     (define-key map (kbd "C-c f") #'mild-toggle-filter-group)
+    (define-key map (kbd "?")   #'mild-dispatch)
     map)
   "Keymap for `mild-mode'.")
 
@@ -897,7 +899,41 @@ The root node is always visible."
                                               (if is-last " " "│")
                                               (make-string (1- mild-indent-offset) ?\s))
                                     (concat indent-prefix (make-string mild-indent-offset ?\s)))
-                                  column-width))))))))
+                                   column-width))))))))
+
+(transient-define-prefix mild-dispatch ()
+  "Transient menu for Mild."
+  [["Toggles"
+    ("h" (lambda () (if mild-show-hidden "✓ hidden" "  hidden"))
+     (lambda () (interactive) (mild-toggle-show-hidden)) :transient t)
+    ("F" (lambda () (if mild-show-filtered "✓ filtered" "  filtered"))
+     (lambda () (interactive) (mild-toggle-show-filtered)) :transient t)
+    ("s" (lambda () (if mild-show-same "✓ same" "  same"))
+     (lambda () (interactive) (mild-toggle-show-same)) :transient t)
+    ("m" (lambda () (if mild-show-different "✓ modified" "  modified"))
+     (lambda () (interactive) (mild-toggle-show-different)) :transient t)
+    ("a" (lambda () (if mild-show-added "✓ added" "  added"))
+     (lambda () (interactive) (mild-toggle-show-added)) :transient t)
+    ("T" (lambda () (if mild-show-tree-lines "✓ tree-lines" "  tree-lines"))
+     (lambda () (interactive) (mild-toggle-tree-lines)) :transient t)]
+   ["Actions"
+    ("g"   "rescan (simple)"    mild-refresh)
+    ("G"   "rescan (full diff)" mild-refresh-full)
+    ("o"   "jump to other side" mild-jump-other-side :transient t)
+    ("SPC" "soft diff / fold"   mild-soft-diff)
+    ("C"   "copy to other side" mild-copy)
+    ("d"   "delete from side"   mild-delete)
+    ("w"   "copy path"          mild-copy-path-at-point)
+    ("C-c f" "toggle filter group" mild-toggle-filter-group)
+    ("RET" "action (ediff)"     mild-action)]
+   ["Navigation"
+    ("n"   "next line"       mild-next-line :transient t)
+    ("p"   "previous line"   mild-previous-line :transient t)
+    ("M-n" "next change"     mild-next-change :transient t)
+    ("M-p" "previous change" mild-previous-change :transient t)]
+   ["Indent"
+    (">" "more"  mild-increase-indent :transient t)
+    ("<" "less" mild-decrease-indent :transient t)]])
 
 (provide 'mild)
 ;;; mild.el ends here

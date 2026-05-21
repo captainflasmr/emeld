@@ -1,5 +1,12 @@
 #+TITLE: Changelog for Mild
 
+* [0.5.0] - 2026-05-20
+** Added
+- Transient menu (~?~) with Toggles, Actions, Navigation, and Indent sections in a single row.
+- `mild-dispatch` transient prefix with `:transient t` on navigation and toggle commands.
+** Changed
+- `mild--apply-dir-locals` now reads `.dir-locals.el` directly using `locate-dominating-file`.
+
 * [0.4.0] - 2026-05-20
 ** Added
 - ~mild-filter-groups~: named groups of globs toggleable with ~C-c f~. Active groups shown in brackets in the header line.
