@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.9.2
+;; Version: 0.9.3
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -220,11 +220,14 @@ GROUP is the name of a group defined in `emeld-filter-groups'."
   "Recursively scan LEFT-DIR and RIGHT-DIR to build the tree.
 PARENT is the parent `emeld-node`. REL-PATH is the relative path from root."
   (let* ((all-names (delete-dups
-                     (append (mapcar #'file-name-nondirectory (emeld--get-files left-dir))
-                             (mapcar #'file-name-nondirectory (emeld--get-files right-dir)))))
-         (nodes nil))
+                      (append (mapcar #'file-name-nondirectory (emeld--get-files left-dir))
+                              (mapcar #'file-name-nondirectory (emeld--get-files right-dir)))))
+          (nodes nil)
+          (yield-count 0))
     (dolist (name (sort all-names #'string<))
-      (thread-yield)
+      (setq yield-count (1+ yield-count))
+      (when (= 0 (mod yield-count 10))
+        (sleep-for 0.001))
       (let* ((left (and left-dir (expand-file-name name left-dir)))
              (right (and right-dir (expand-file-name name right-dir)))
              (exists-left (and left (file-exists-p left)))
@@ -284,12 +287,7 @@ PARENT is the parent `emeld-node`. REL-PATH is the relative path from root."
                               :right-path emeld--right-root
                               :is-dir t
                               :expanded t))
-      (setf (emeld-node-children emeld--root-node)
-            (emeld--scan-dir emeld--left-root emeld--right-root emeld--root-node))
-      ;; Set root status based on children
-      (when (cl-some (lambda (child) (not (eq (emeld-node-diff-status child) 'same)))
-                     (emeld-node-children emeld--root-node))
-        (setf (emeld-node-diff-status emeld--root-node) 'different))
+      (setf (emeld-node-children emeld--root-node) nil)
       (emeld--render))
     (switch-to-buffer buf)
     (emeld-refresh)))
