@@ -54,11 +54,6 @@ Toggle groups on/off with `mild-toggle-filter-group'."
   :type 'boolean
   :group 'mild)
 
-(defcustom mild-show-hidden nil
-  "Whether to show hidden (dot) files."
-  :type 'boolean
-  :group 'mild)
-
 (defcustom mild-show-same nil
   "Whether to show identical files."
   :type 'boolean
@@ -115,7 +110,7 @@ This is much faster but less accurate than content comparison."
 
 (defvar-local mild--scan-thread nil
   "Current scanning thread for this buffer.")
-(defvar-local mild--last-scan-mode 'full
+(defvar-local mild--last-scan-mode 'normal
   "Scan mode used for the last refresh: `simple' or `full'.")
 (defvar-local mild--active-filter-groups nil
   "List of currently active filter group names.")
@@ -133,9 +128,9 @@ Otherwise, it matches against the filename."
       (concat "^" rx "$"))))
 
 (defun mild--filtered-p (name rel-path)
-  "Check if NAME or REL-PATH is filtered by `mild-filter-globs` or hidden."
-  (or (and (not mild-show-hidden) (string-prefix-p "." name))
-      (cl-some (lambda (glob)
+  "Check if NAME or REL-PATH is filtered.
+Check `mild-filter-globs' and active filter groups."
+  (or (cl-some (lambda (glob)
                  (let ((rx (mild--glob-to-regexp glob)))
                    (if (string-match-p "/" glob)
                        (string-match-p rx rel-path)
@@ -246,7 +241,7 @@ PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
       (mild--apply-dir-locals)
       (setq mild--left-root (file-name-as-directory (expand-file-name dir1)))
       (setq mild--right-root (file-name-as-directory (expand-file-name dir2)))
-      (setq mild--last-scan-mode (if mild-simple-comparison 'simple 'full))
+      (setq mild--last-scan-mode (if mild-simple-comparison 'fast 'normal))
       (setq mild--root-node (mild-node-create
                               :name (file-name-nondirectory
                                      (directory-file-name mild--left-root))
@@ -358,7 +353,6 @@ Prompts for confirmation or selection."
     (define-key map (kbd "w")   #'mild-copy-path-at-point)
     (define-key map (kbd "d")   #'mild-delete)
     (define-key map (kbd "SPC") #'mild-soft-diff)
-    (define-key map (kbd "h")   #'mild-toggle-show-hidden)
     (define-key map (kbd "F")   #'mild-toggle-show-filtered)
     (define-key map (kbd "s")   #'mild-toggle-show-same)
     (define-key map (kbd "m")   #'mild-toggle-show-different)
@@ -374,7 +368,6 @@ Prompts for confirmation or selection."
   "Major mode for Meld-Inspired Local Diff."
   (setq-local truncate-lines t)
   (setq-local buffer-read-only t)
-  (make-local-variable 'mild-show-hidden)
   (make-local-variable 'mild-show-filtered)
   (make-local-variable 'mild-show-same)
   (make-local-variable 'mild-show-different)
@@ -481,13 +474,6 @@ If the current side is empty but the other has a file, snap to it."
          (target-on-right (< (current-column) width)))
     (mild--move-to-node-name target-on-right)))
 
-(defun mild-toggle-show-hidden ()
-  "Toggle showing hidden files."
-  (interactive)
-  (setq mild-show-hidden (not mild-show-hidden))
-  (message "Show hidden: %s" (if mild-show-hidden "on" "off"))
-  (mild-refresh))
-
 (defun mild-toggle-show-filtered ()
   "Toggle showing filtered files."
   (interactive)
@@ -564,7 +550,7 @@ With non-nil FORCE-FULL, always use content comparison (diff -q)."
          (right mild--right-root)
          (root mild--root-node)
          (simple (if force-full nil mild-simple-comparison)))
-    (setq mild--last-scan-mode (if simple 'simple 'full))
+    (setq mild--last-scan-mode (if simple 'fast 'normal))
     (setq mild--scan-thread
           (make-thread
            (lambda ()
@@ -767,9 +753,8 @@ Creates missing parent directories on the destination side if needed."
   "Return a compact string showing current display toggle states."
   (let ((groups (mapcar (lambda (g) (concat "[" g "]"))
                         mild--active-filter-groups)))
-    (concat
-     (mild--toggle-indicator "h" mild-show-hidden)
-     (mild--toggle-indicator "f" mild-show-filtered)
+     (concat
+      (mild--toggle-indicator "f" mild-show-filtered)
      (mild--toggle-indicator "s" mild-show-same)
      (mild--toggle-indicator "m" mild-show-different)
      (mild--toggle-indicator "a" mild-show-added)
@@ -786,9 +771,10 @@ Creates missing parent directories on the destination side if needed."
                                     (thread-live-p mild--scan-thread))
                                (propertize " [SCANNING...] " 'face 'highlight)
                              ""))
-                (mode-msg (if (eq mild--last-scan-mode 'simple)
-                               (propertize " [SIMPLE] " 'face 'warning)
-                             (propertize " [FULL] " 'face 'success))))
+                (mode-msg (concat
+                           (mild--toggle-indicator "FAST" (eq mild--last-scan-mode 'fast))
+                           " "
+                           (mild--toggle-indicator "NORMAL" (not (eq mild--last-scan-mode 'fast))))))
             (concat
              scan-msg mode-msg
               " [" (mild--display-state-string) "] ")))))
@@ -943,8 +929,6 @@ The root node is always visible."
                      suffixes)))
            (nreverse suffixes))))]
     ["Toggles"
-     ("h" (lambda () (if mild-show-hidden "✓ hidden" "  hidden"))
-      (lambda () (interactive) (mild-toggle-show-hidden)) :transient t)
      ("F" (lambda () (if mild-show-filtered "✓ filtered" "  filtered"))
       (lambda () (interactive) (mild-toggle-show-filtered)) :transient t)
      ("T" (lambda () (if mild-show-tree-lines "✓ tree-lines" "  tree-lines"))
