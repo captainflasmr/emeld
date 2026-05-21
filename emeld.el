@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.9.1
+;; Version: 0.9.2
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -83,6 +83,12 @@ Set to \"\" for no prefix."
   "If non-nil, only compare file sizes for diff status.
 This is much faster but less accurate than content comparison."
   :type 'boolean
+  :group 'emeld)
+
+(defcustom emeld-column-ratio 50
+  "Width of the left column as a percentage of the window width (10-90).
+Defaults to 50 for equal-width panes."
+  :type 'integer
   :group 'emeld)
 
 (defun emeld--apply-dir-locals ()
@@ -388,6 +394,8 @@ Prompts for confirmation or selection."
     (define-key map (kbd "T")   #'emeld-toggle-tree-lines)
     (define-key map (kbd ">")   #'emeld-increase-indent)
     (define-key map (kbd "<")   #'emeld-decrease-indent)
+    (define-key map (kbd "}")   #'emeld-grow-column)
+    (define-key map (kbd "{")   #'emeld-shrink-column)
     (define-key map (kbd "C-c f") #'emeld-toggle-filter-group)
     map)
   "Keymap for `emeld-mode'.")
@@ -406,7 +414,7 @@ Prompts for confirmation or selection."
 (defun emeld--move-to-node-name (on-right)
   "Move point to the node name on the current side (ON-RIGHT if non-nil).
 If the current side is empty but the other has a file, snap to it."
-  (let* ((width (or (bound-and-true-p emeld--column-width) (/ (window-width) 2)))
+  (let* ((width (or (bound-and-true-p emeld--column-width) (/ (* (window-width) emeld-column-ratio) 100)))
          (limit (if on-right (line-end-position) (+ (line-beginning-position) width))))
     (if on-right
         (move-to-column width)
@@ -446,7 +454,7 @@ If the current side is empty but the other has a file, snap to it."
 (defun emeld-next-change ()
   "Move to the next change (different, added, or removed node)."
   (interactive)
-  (let* ((width (or (bound-and-true-p emeld--column-width) (/ (window-width) 2)))
+  (let* ((width (or (bound-and-true-p emeld--column-width) (/ (* (window-width) emeld-column-ratio) 100)))
          (on-right (>= (current-column) width))
          (found nil)
          (orig (point)))
@@ -464,7 +472,7 @@ If the current side is empty but the other has a file, snap to it."
 (defun emeld-previous-change ()
   "Move to the previous change (different, added, or removed node)."
   (interactive)
-  (let* ((width (or (bound-and-true-p emeld--column-width) (/ (window-width) 2)))
+  (let* ((width (or (bound-and-true-p emeld--column-width) (/ (* (window-width) emeld-column-ratio) 100)))
          (on-right (>= (current-column) width))
          (found nil)
          (orig (point)))
@@ -482,7 +490,7 @@ If the current side is empty but the other has a file, snap to it."
 (defun emeld-next-line ()
   "Move to the next line and align to node name."
   (interactive)
-  (let* ((width (or (bound-and-true-p emeld--column-width) (/ (window-width) 2)))
+  (let* ((width (or (bound-and-true-p emeld--column-width) (/ (* (window-width) emeld-column-ratio) 100)))
          (on-right (>= (current-column) width)))
     (forward-line 1)
     (emeld--move-to-node-name on-right)))
@@ -490,7 +498,7 @@ If the current side is empty but the other has a file, snap to it."
 (defun emeld-previous-line ()
   "Move to the previous line and align to node name."
   (interactive)
-  (let* ((width (or (bound-and-true-p emeld--column-width) (/ (window-width) 2)))
+  (let* ((width (or (bound-and-true-p emeld--column-width) (/ (* (window-width) emeld-column-ratio) 100)))
          (on-right (>= (current-column) width)))
     (forward-line -1)
     (emeld--move-to-node-name on-right)))
@@ -498,7 +506,7 @@ If the current side is empty but the other has a file, snap to it."
 (defun emeld-jump-other-side ()
   "Jump to the other side of the directory comparison."
   (interactive)
-  (let* ((width (or (bound-and-true-p emeld--column-width) (/ (window-width) 2)))
+  (let* ((width (or (bound-and-true-p emeld--column-width) (/ (* (window-width) emeld-column-ratio) 100)))
          (target-on-right (< (current-column) width)))
     (emeld--move-to-node-name target-on-right)))
 
@@ -534,6 +542,20 @@ If the current side is empty but the other has a file, snap to it."
   (interactive)
   (setq emeld-indent-offset (max 1 (1- emeld-indent-offset)))
   (message "Indent: %d" emeld-indent-offset)
+  (emeld--render))
+
+(defun emeld-shrink-column ()
+  "Shrink the left column by 5%."
+  (interactive)
+  (setq emeld-column-ratio (max 10 (- emeld-column-ratio 5)))
+  (message "Col %d/%d" emeld-column-ratio (- 100 emeld-column-ratio))
+  (emeld--render))
+
+(defun emeld-grow-column ()
+  "Grow the left column by 5%."
+  (interactive)
+  (setq emeld-column-ratio (min 90 (+ emeld-column-ratio 5)))
+  (message "Col %d/%d" emeld-column-ratio (- 100 emeld-column-ratio))
   (emeld--render))
 
 (defun emeld-toggle-show-different ()
@@ -819,7 +841,7 @@ Creates missing parent directories on the destination side if needed."
       (setq target-path (or (emeld-node-left-path old-node)
                            (emeld-node-right-path old-node))))
     
-    (setq emeld--column-width (/ (window-width) 2))
+    (setq emeld--column-width (/ (* (window-width) emeld-column-ratio) 100))
     (erase-buffer)
     ;; Headers (with emeld-header property for interactive directory switching)
     (let ((header-start (point)))
@@ -993,7 +1015,9 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
        ("T" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
         (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
        (">" "indent more"  emeld-increase-indent :transient t)
-       ("<" "indent less"  emeld-decrease-indent :transient t)]
+       ("<" "indent less"  emeld-decrease-indent :transient t)
+       ("}" "pane wider"   emeld-grow-column :transient t)
+       ("{" "pane narrow"  emeld-shrink-column :transient t)]
       ["Navigate"
        ("g"   "rescan (simple)"    emeld-refresh)
        ("G"   "rescan (full diff)" emeld-refresh-full)

@@ -30,7 +30,7 @@ Alternatively, run ~M-x emeld-diff-dwim~ to automatically use open Dired buffers
 
 The transient menu is organized into four groups:
 
-- ~View~ :: Toggle file visibility (~s~ same, ~m~ modified, ~a~ added, ~F~ filtered, ~T~ tree-lines), indent (~>~/~<~).
+- ~View~ :: Toggle file visibility (~s~ same, ~m~ modified, ~a~ added, ~F~ filtered, ~T~ tree-lines), indent (~>~/~<~), pane resize (~{~/~}~).
 - ~Navigate~ :: Scan (~g~ simple, ~G~ full diff) and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
 - ~File~ :: Operate on files (~RET~ ediff/open, ~SPC~ soft diff/fold, ~C~ copy, ~d~ delete, ~w~ copy path, ~P~ format patch).
 - ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~cl~ list all globs.
@@ -57,6 +57,7 @@ The transient menu is organized into four groups:
 | G         | Force full content-diff scan           |
 | n/p       | Navigation (Side-aware)                |
 | M-n/M-p   | Jump to next/previous file change      |
+| { / }     | Shrink/grow left pane width            |
 | C-c f     | Toggle a named filter group on/off     |
 
 * Customization
@@ -74,6 +75,7 @@ The transient menu is organized into four groups:
 - ~emeld-show-same~: Whether to show identical files (default nil).
 - ~emeld-simple-comparison~: Set to t for fast size-only matching.
 - ~emeld-dir-prefix~: Unicode prefix for directory names (default ~"📁 "~).
+- ~emeld-column-ratio~: Left pane width as percentage of window (default 50).
 
 * Per-Project Configuration with ~.dir-locals.el~
 

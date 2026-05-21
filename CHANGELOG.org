@@ -1,5 +1,10 @@
 #+TITLE: Changelog for Emeld
 
+* [0.9.2] - 2026-05-21
+** Added
+- ~emeld-column-ratio~ customizable left-pane width percentage (default 50).
+- ~{~/~}~ bindings and transient entries to shrink/grow the left column by 5%.
+
 * [0.9.1] - 2026-05-21
 ** Changed
 - Transient menu restructured into ~View~, ~Navigate~, ~File~, and ~Filename~ groups.
