@@ -1,5 +1,9 @@
 #+TITLE: Changelog for Emeld
 
+* [0.9.0] - 2026-05-21
+** Added
+- ~emeld-format-patch~ (~P~): export all changed files as a unified-diff patch (left→right direction).
+
 * [0.8.0] - 2026-05-20
 ** Added
 - ~emeld-list-filter-groups~ (~l~ in the transient Filename column): opens a buffer listing every filter group with all its globs and active state.

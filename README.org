@@ -10,6 +10,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Instant toggles for New, Modified, and Identical files.
 - Tree folding (~TAB~).
 - File copying between directories (~C~).
+- Export changes as a unified-diff patch (~P~).
 - Side-aware navigation (~n~/~p~) and side-jumping (~o~).
 - Integration with ~ediff~.
 - Fully themeable (uses standard Emacs faces).
@@ -34,6 +35,7 @@ Alternatively, run ~M-x emeld-diff-dwim~ to automatically use open Dired buffers
 | f, v      | Find File (Open current side)          |
 | d         | Delete file/dir from current side      |
 | C         | Copy to the other side                 |
+| P         | Format as patch (unified diff)         |
 | w         | Copy filename (C-u w for full path)    |
 | SPC       | Fold/Unfold (Dir) or Soft Diff (File)  |
 | o         | Jump to the other side                 |

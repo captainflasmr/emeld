@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.8.0
+;; Version: 0.9.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -375,6 +375,7 @@ Prompts for confirmation or selection."
     (define-key map (kbd "M-n") #'emeld-next-change)
     (define-key map (kbd "M-p") #'emeld-previous-change)
     (define-key map (kbd "o")   #'emeld-jump-other-side)
+    (define-key map (kbd "P")   #'emeld-format-patch)
     (define-key map (kbd "C")   #'emeld-copy)
     (define-key map (kbd "w")   #'emeld-copy-path-at-point)
     (define-key map (kbd "d")   #'emeld-delete)
@@ -857,6 +858,68 @@ The root node is always visible."
               ((memq status '(left-only right-only)) emeld-show-added)
               (t t)))))
 
+(defun emeld--node-relpath (node)
+  "Return the relative path of NODE from the root."
+  (let ((parts nil)
+        (n node))
+    (while (and n (emeld-node-parent n))
+      (push (emeld-node-name n) parts)
+      (setq n (emeld-node-parent n)))
+    (mapconcat #'identity parts "/")))
+
+(defun emeld--collect-changed-leaves (nodes)
+  "Recursively collect leaf (non-directory) NODES with changes."
+  (let ((result nil))
+    (dolist (node nodes)
+      (if (emeld-node-is-dir node)
+          (setq result (nconc result (emeld--collect-changed-leaves (emeld-node-children node))))
+        (when (and (not (emeld-node-is-filtered node))
+                   (memq (emeld-node-diff-status node) '(different left-only right-only)))
+          (push node result))))
+    (nreverse result)))
+
+(defun emeld--write-patch-hunk (node)
+  "Generate a unified-diff hunk string for a single NODE.
+Patch direction is left→right: applying the patch to the right directory
+makes it match the left."
+  (let* ((left (emeld-node-left-path node))
+         (right (emeld-node-right-path node))
+         (status (emeld-node-diff-status node))
+         (rel (emeld--node-relpath node))
+         (patch nil))
+    (with-temp-buffer
+      (cond
+       ((eq status 'different)
+        (call-process "diff" nil t nil "-u" right left))
+       ((eq status 'left-only)
+        (call-process "diff" nil t nil "-u" "/dev/null" left))
+       ((eq status 'right-only)
+        (call-process "diff" nil t nil "-u" right "/dev/null")))
+      (goto-char (point-min))
+      (when (re-search-forward "^--- .*" nil t)
+        (replace-match (concat "--- a/" rel)))
+      (when (re-search-forward "^\\+\\+\\+ .*" nil t)
+        (replace-match (concat "+++ b/" rel)))
+      (buffer-string))))
+
+(defun emeld-format-patch ()
+  "Generate a unified-diff patch of all changed files and write to a file.
+Prompts for an output filename, defaulting to \"emeld.patch\"."
+  (interactive)
+  (unless emeld--root-node
+    (user-error "No comparison loaded"))
+  (let* ((default-name (expand-file-name "emeld.patch" default-directory))
+         (outfile (read-file-name "Write patch to: " nil default-name nil
+                                  (file-name-nondirectory default-name)))
+         (nodes (emeld--collect-changed-leaves (emeld-node-children emeld--root-node))))
+    (if (null nodes)
+        (message "No changes to write to patch")
+      (with-temp-buffer
+        (dolist (node nodes)
+          (insert (emeld--write-patch-hunk node)))
+        (write-region nil nil outfile nil 'silent)
+        (message "Wrote patch with %d change(s) to %s" (length nodes) outfile)))))
+
 (defun emeld--render-nodes (nodes indent-prefix column-width)
   "Render a list of NODES with INDENT-PREFIX and COLUMN-WIDTH."
   (let ((count (length nodes))
@@ -971,7 +1034,8 @@ The root node is always visible."
      ("M-n" "next change"        emeld-next-change :transient t)
      ("M-p" "previous change"    emeld-previous-change :transient t)
      ("SPC" "soft diff / fold"   emeld-soft-diff)
-     ("C"   "copy to other side" emeld-copy)
+     ("P"   "format as patch"    emeld-format-patch)
+     ("C"   "copy to other side"   emeld-copy)
      ("d"   "delete from side"   emeld-delete)
      ("w"   "copy path"          emeld-copy-path-at-point)
      ("RET" "action (ediff)"     emeld-action)]
