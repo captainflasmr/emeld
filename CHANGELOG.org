@@ -1,8 +1,8 @@
-#+TITLE: Changelog for Mild
+#+TITLE: Changelog for Emeld
 
 * [0.8.0] - 2026-05-20
 ** Added
-- ~mild-list-filter-groups~ (~l~ in the transient Filename column): opens a buffer listing every filter group with all its globs and active state.
+- ~emeld-list-filter-groups~ (~l~ in the transient Filename column): opens a buffer listing every filter group with all its globs and active state.
 - Transient Filename column shows glob count per group (e.g. ~✓ Backups (7)~).
 ** Changed
 - Header line ~f~ indicator renamed to ~F~ to match the keybinding.
@@ -10,11 +10,11 @@
 
 * [0.7.0] - 2026-05-20
 ** Added
-- ~mild-filter-groups~ entries now support an optional boolean (~t~/~nil~) after the name to set the default active state.  All five default groups active by default.
+- ~emeld-filter-groups~ entries now support an optional boolean (~t~/~nil~) after the name to set the default active state.  All five default groups active by default.
 - Transient menu reorganized: "File status" column (Same/Modified/Added) as first, "Filename" with per-group suffix entries, "Toggles" (filtered/tree-lines).
 ** Changed
-- ~mild-filter-globs~ removed; all filtering now exclusively through ~mild-filter-groups~.
-- ~mild-show-hidden~ and hidden-files toggle removed; dotfiles now filtered via filter groups only.
+- ~emeld-filter-globs~ removed; all filtering now exclusively through ~emeld-filter-groups~.
+- ~emeld-show-hidden~ and hidden-files toggle removed; dotfiles now filtered via filter groups only.
 - Header line simplified: no legend swatches, scan mode shown as bold/shadow ~FAST~/~NORMAL~ toggles.
 - Navigation column (~n~/~p~) removed from transient; ~M-n~/~M-p~ kept in Actions.
 - Scan mode labels renamed from ~SIMPLE~/~FULL~ to ~FAST~/~NORMAL~.
@@ -24,59 +24,59 @@
 - Transient menu (~?~ key) with Toggles, Actions, Navigation, Indent, and Filter Groups columns in a single row.
 ** Changed
 - Filter groups in transient via completion prompt with active-count header (avoids ~:setup-children~ compatibility issues).
-- ~mild--apply-dir-locals~ reads ~.dir-locals.el~ directly via ~locate-dominating-file~.
+- ~emeld--apply-dir-locals~ reads ~.dir-locals.el~ directly via ~locate-dominating-file~.
 ** Fixed
-- ~mild--move-to-node-name~: ~let~→~let*~ for dependent bindings.
+- ~emeld--move-to-node-name~: ~let~→~let*~ for dependent bindings.
 
 * [0.5.0] - 2026-05-20
 ** Added
 - Transient menu (~?~) with Toggles, Actions, Navigation, and Indent sections in a single row.
-- `mild-dispatch` transient prefix with `:transient t` on navigation and toggle commands.
+- `emeld-dispatch` transient prefix with `:transient t` on navigation and toggle commands.
 ** Changed
-- `mild--apply-dir-locals` now reads `.dir-locals.el` directly using `locate-dominating-file`.
+- `emeld--apply-dir-locals` now reads `.dir-locals.el` directly using `locate-dominating-file`.
 
 * [0.4.0] - 2026-05-20
 ** Added
-- ~mild-filter-groups~: named groups of globs toggleable with ~C-c f~. Active groups shown in brackets in the header line.
+- ~emeld-filter-groups~: named groups of globs toggleable with ~C-c f~. Active groups shown in brackets in the header line.
 - ~.dir-locals.el~ documentation for per-project filter configuration.
 ** Changed
-- ~mild--filtered-p~ now also checks active filter groups.
+- ~emeld--filtered-p~ now also checks active filter groups.
 - Header line shows active group names (e.g. ~[build] [logs]~).
 ** Added
-- ~mild-dir-face~ for directory names (font-lock-type-face + bold), distinct from file diff-status faces.
+- ~emeld-dir-face~ for directory names (font-lock-type-face + bold), distinct from file diff-status faces.
 
 * [0.3.0] - 2026-05-20
 ** Changed
-- ~mild-action~ is now side-aware: ~RET~ on the right column opens the right-side path.
-- ~mild-show-tree-lines~ now defaults to ~t~.
+- ~emeld-action~ is now side-aware: ~RET~ on the right column opens the right-side path.
+- ~emeld-show-tree-lines~ now defaults to ~t~.
 - Header line shows ~[SIMPLE]~ or ~[FULL]~ scan mode indicator.
 ** Added
-- ~G~ to force a full content-based scan (ignores ~mild-simple-comparison~).
-- ~mild-dir-prefix~ (default ~"📁 "~) for a configurable directory icon; directory names rendered in bold.
-- ~mild-refresh-full~ bound to ~G~.
+- ~G~ to force a full content-based scan (ignores ~emeld-simple-comparison~).
+- ~emeld-dir-prefix~ (default ~"📁 "~) for a configurable directory icon; directory names rendered in bold.
+- ~emeld-refresh-full~ bound to ~G~.
 ** Fixed
-- Bug in ~mild--move-to-node-name~: used ~let~ instead of ~let*~ for dependent bindings, causing void-variable errors (~has-left~, ~has-right~).
+- Bug in ~emeld--move-to-node-name~: used ~let~ instead of ~let*~ for dependent bindings, causing void-variable errors (~has-left~, ~has-right~).
 
 * [0.2.1] - 2026-05-20
 ** Added
 - Root directories now rendered as collapsible tree nodes at the top (different names on left/right columns via new ~name-right~ slot).  ~RET~ on the root prompts to change the directory for the current side.
-- ~M-n~/~M-p~ for next/previous change navigation (file-only), ~mild-next-change~ / ~mild-previous-change~.
-- ~d~ to delete the file/directory at point from the current side, ~mild-delete~.
+- ~M-n~/~M-p~ for next/previous change navigation (file-only), ~emeld-next-change~ / ~emeld-previous-change~.
+- ~d~ to delete the file/directory at point from the current side, ~emeld-delete~.
 
 * [0.2.0] - 2026-05-20
 ** Added
-- Initial implementation of `mild.el` side-by-side comparison.
+- Initial implementation of `emeld.el` side-by-side comparison.
 - Content-based comparison using ~diff -q~ for high accuracy.
-- Performance option ~mild-simple-comparison~ for size-only matching.
+- Performance option ~emeld-simple-comparison~ for size-only matching.
 - Recursive glob matching for filtering (matches filenames or relative paths).
 - Toggles for hidden and filtered files.
 - New visibility toggles for **Same** (~s~), **Modified** (~m~), and **Added/New** (~a~) files.
 - Directory folding and unfolding (~TAB~).
 - Added asynchronous directory scanning (~make-thread~) to prevent UI hangs.
 - Added contextual ~SPC~ behavior: Toggle expansion for directories or show Soft Diff for files.
-- Added ~mild-indent-offset~ to customize tree indentation depth.
-- Added ~mild-diff-dwim~ with robust directory detection and collision safety.
-- Added ~mild-simple-comparison~ option for fast, size-only matching.
+- Added ~emeld-indent-offset~ to customize tree indentation depth.
+- Added ~emeld-diff-dwim~ with robust directory detection and collision safety.
+- Added ~emeld-simple-comparison~ option for fast, size-only matching.
 - Added side-aware navigation (~n~/~p~) that remembers left/right column focus.
 - Added side-jumping navigation (~o~) to switch between columns.
 - Added ~w~ to copy filename at point (~C-u w~ for full path).

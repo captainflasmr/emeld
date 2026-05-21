@@ -1,8 +1,8 @@
-#+TITLE: Mild: Meld-Inspired Local Diff
+#+TITLE: Emeld: Meld-Inspired Local Diff
 #+AUTHOR: Antigravity
 
 * Introduction
-Mild is a simple, side-by-side directory comparison tool for Emacs. It is designed to be a lightweight and maintainable alternative to other directory diff tools, with a focus on ease of use and a clean hierarchy.
+Emeld is a simple, side-by-side directory comparison tool for Emacs. It is designed to be a lightweight and maintainable alternative to other directory diff tools, with a focus on ease of use and a clean hierarchy.
 
 * Features
 - Side-by-side view in a single buffer.
@@ -17,13 +17,13 @@ Mild is a simple, side-by-side directory comparison tool for Emacs. It is design
 * Installation
 Copy the files to your load path and add the following to your init file:
 #+begin_src elisp
-(add-to-list 'load-path "~/.emacs.d/offline-packages/local-packages/mild")
-(require 'mild)
+(add-to-list 'load-path "~/.emacs.d/offline-packages/local-packages/emeld")
+(require 'emeld)
 #+end_src
 
 * Usage
-Run ~M-x mild-diff~ and select the two directories you wish to compare.
-Alternatively, run ~M-x mild-diff-dwim~ to automatically use open Dired buffers as the comparison sources.
+Run ~M-x emeld-diff~ and select the two directories you wish to compare.
+Alternatively, run ~M-x emeld-diff-dwim~ to automatically use open Dired buffers as the comparison sources.
 
 * Key Bindings
 | Key       | Action                                 |
@@ -42,7 +42,7 @@ Alternatively, run ~M-x mild-diff-dwim~ to automatically use open Dired buffers 
 | s         | Toggle same (identical) files          |
 | m         | Toggle modified files                  |
 | a         | Toggle added (new) files               |
-| g         | Rescan (uses ~mild-simple-comparison~) |
+| g         | Rescan (uses ~emeld-simple-comparison~) |
 | G         | Force full content-diff scan           |
 | n/p       | Navigation (Side-aware)                |
 | M-n/M-p   | Jump to next/previous file change      |
@@ -50,7 +50,7 @@ Alternatively, run ~M-x mild-diff-dwim~ to automatically use open Dired buffers 
 
 * Customization
 
-- ~mild-filter-groups~: Named groups of globs toggleable with ~C-c f~.  Defaults:
+- ~emeld-filter-groups~: Named groups of globs toggleable with ~C-c f~.  Defaults:
 
   | Group           | Globs                                                                                                       |
   |-----------------+-------------------------------------------------------------------------------------------------------------|
@@ -60,19 +60,19 @@ Alternatively, run ~M-x mild-diff-dwim~ to automatically use open Dired buffers 
   | Binaries        | ~*.pyc~, ~*.a~, ~*.obj~, ~*.o~, ~*.so~, ~*.la~, ~*.lib~, ~*.dll~, ~*.exe~                                   |
   | Media           | ~*.jpg~, ~*.gif~, ~*.png~, ~*.bmp~, ~*.wav~, ~*.mp3~, ~*.ogg~, ~*.flac~, ~*.avi~, ~*.mpg~, ~*.xcf~, ~*.xpm~ |
 
-- ~mild-show-same~: Whether to show identical files (default nil).
-- ~mild-simple-comparison~: Set to t for fast size-only matching.
-- ~mild-dir-prefix~: Unicode prefix for directory names (default ~"📁 "~).
+- ~emeld-show-same~: Whether to show identical files (default nil).
+- ~emeld-simple-comparison~: Set to t for fast size-only matching.
+- ~emeld-dir-prefix~: Unicode prefix for directory names (default ~"📁 "~).
 
 * Per-Project Configuration with ~.dir-locals.el~
 
-Mild ships with Meld-style default filter groups (see above).  To override them per
+Emeld ships with Meld-style default filter groups (see above).  To override them per
 project, place a ~.dir-locals.el~ file above the left directory:
 
 #+begin_src elisp
 ;;; .dir-locals.el
 ((nil
-  . ((mild-filter-groups . (("Backups" t "*~" "*.bak" "*.orig")
+  . ((emeld-filter-groups . (("Backups" t "*~" "*.bak" "*.orig")
                             ("Hidden" nil ".*")
                             ("Logs" t "*.log" "logs/*")
                             ("Config" nil "*.cfg" "config/*"))))))

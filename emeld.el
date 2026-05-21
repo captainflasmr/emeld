@@ -1,4 +1,4 @@
-;;; mild.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
+;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
 ;; Version: 0.8.0
@@ -12,11 +12,11 @@
 (require 'dired)
 (require 'transient)
 
-(defgroup mild nil
+(defgroup emeld nil
   "Meld-Inspired Local Diff."
   :group 'tools)
 
-(defcustom mild-filter-groups
+(defcustom emeld-filter-groups
   '(("Backups" t "#*#" ".#*" "~*" "*~" "*.orig" "*.bak" "*.swp")
     ("OS metadata" t ".DS_Store" "._*" ".Spotlight-V100" ".Trashes"
      "Thumbs.db" "Desktop.ini")
@@ -30,12 +30,12 @@
 Each entry is (NAME [ACTIVE] GLOBS...).  NAME is a string.
 If the second element is t or nil, it sets the default active state;
 otherwise all elements after NAME are glob patterns and the group
-defaults to inactive.  Toggle groups on/off with `mild-toggle-filter-group'."
+defaults to inactive.  Toggle groups on/off with `emeld-toggle-filter-group'."
   :type '(repeat (list (string :tag "Group name")
                        (repeat :tag "Glob patterns" string)))
-  :group 'mild)
+  :group 'emeld)
 
-(put 'mild-filter-groups 'safe-local-variable
+(put 'emeld-filter-groups 'safe-local-variable
      (lambda (val)
        (and (listp val)
             (cl-every (lambda (entry)
@@ -43,54 +43,54 @@ defaults to inactive.  Toggle groups on/off with `mild-toggle-filter-group'."
                              (cl-every #'stringp (cdr entry))))
                       val))))
 
-(defcustom mild-show-filtered nil
+(defcustom emeld-show-filtered nil
   "Whether to show filtered files (matching active filter groups)."
   :type 'boolean
-  :group 'mild)
+  :group 'emeld)
 
-(defcustom mild-show-same nil
+(defcustom emeld-show-same nil
   "Whether to show identical files."
   :type 'boolean
-  :group 'mild)
+  :group 'emeld)
 
-(defcustom mild-show-different t
+(defcustom emeld-show-different t
   "Whether to show modified files."
   :type 'boolean
-  :group 'mild)
+  :group 'emeld)
 
-(defcustom mild-show-added t
+(defcustom emeld-show-added t
   "Whether to show new (orphan) files."
   :type 'boolean
-  :group 'mild)
+  :group 'emeld)
 
-(defcustom mild-dir-prefix "📁 "
+(defcustom emeld-dir-prefix "📁 "
   "Prefix string shown before directory names to distinguish from files.
 Set to \"\" for no prefix."
   :type 'string
-  :group 'mild)
+  :group 'emeld)
 
-(defcustom mild-indent-offset 2
+(defcustom emeld-indent-offset 2
   "Indentation offset for each directory level."
   :type 'integer
-  :group 'mild)
+  :group 'emeld)
 
-(defcustom mild-show-tree-lines t
+(defcustom emeld-show-tree-lines t
   "Whether to show hierarchical tree lines."
   :type 'boolean
-  :group 'mild)
+  :group 'emeld)
 
-(defcustom mild-simple-comparison nil
+(defcustom emeld-simple-comparison nil
   "If non-nil, only compare file sizes for diff status.
 This is much faster but less accurate than content comparison."
   :type 'boolean
-  :group 'mild)
+  :group 'emeld)
 
-(defun mild--apply-dir-locals ()
+(defun emeld--apply-dir-locals ()
   "Apply .dir-locals.el from `default-directory' to the current buffer."
   (hack-dir-local-variables-non-file-buffer))
 
-(cl-defstruct (mild-node
-               (:constructor mild-node-create))
+(cl-defstruct (emeld-node
+               (:constructor emeld-node-create))
   name
   (name-right nil)    ; display name for the right side (defaults to `name')
   left-path
@@ -102,17 +102,17 @@ This is much faster but less accurate than content comparison."
   (is-dir nil)
   (is-filtered nil))
 
-(defvar-local mild--scan-thread nil
+(defvar-local emeld--scan-thread nil
   "Current scanning thread for this buffer.")
-(defvar-local mild--last-scan-mode 'normal
+(defvar-local emeld--last-scan-mode 'normal
   "Scan mode used for the last refresh: `simple' or `full'.")
-(defvar-local mild--active-filter-groups nil
+(defvar-local emeld--active-filter-groups nil
   "List of currently active filter group names.")
-(defvar-local mild--right-root nil)
-(defvar-local mild--root-node nil)
-(defvar-local mild--column-width nil)
+(defvar-local emeld--right-root nil)
+(defvar-local emeld--root-node nil)
+(defvar-local emeld--column-width nil)
 
-(defun mild--glob-to-regexp (glob)
+(defun emeld--glob-to-regexp (glob)
   "Convert GLOB to a regular expression.
 If GLOB contains a slash, it matches against the relative path.
 Otherwise, it matches against the filename."
@@ -121,55 +121,55 @@ Otherwise, it matches against the filename."
         rx
       (concat "^" rx "$"))))
 
-(defun mild--group-globs (group)
+(defun emeld--group-globs (group)
   "Return the list of glob patterns from filter GROUP entry."
   (let ((rest (cdr group)))
     (if (booleanp (car rest)) (cdr rest) rest)))
 
-(defun mild--group-active-default (group)
+(defun emeld--group-active-default (group)
   "Return the default active state for filter GROUP."
   (let ((rest (cdr group)))
     (and (booleanp (car rest)) (car rest))))
 
-(defun mild--filtered-p (name rel-path)
+(defun emeld--filtered-p (name rel-path)
   "Check if NAME or REL-PATH is filtered.
 Check active filter groups."
   (or (cl-some (lambda (group)
-                 (when (member (car group) mild--active-filter-groups)
+                 (when (member (car group) emeld--active-filter-groups)
                    (cl-some (lambda (glob)
-                              (let ((rx (mild--glob-to-regexp glob)))
+                              (let ((rx (emeld--glob-to-regexp glob)))
                                 (if (string-match-p "/" glob)
                                     (string-match-p rx rel-path)
                                   (string-match-p rx name))))
-                            (mild--group-globs group))))
-               mild-filter-groups)))
+                            (emeld--group-globs group))))
+               emeld-filter-groups)))
 
-(defun mild-toggle-filter-group (group)
+(defun emeld-toggle-filter-group (group)
   "Toggle a named filter GROUP on or off.
-GROUP is the name of a group defined in `mild-filter-groups'."
+GROUP is the name of a group defined in `emeld-filter-groups'."
   (interactive
-   (let ((names (mapcar #'car mild-filter-groups)))
-     (unless names (user-error "No filter groups defined (customize `mild-filter-groups')"))
+   (let ((names (mapcar #'car emeld-filter-groups)))
+     (unless names (user-error "No filter groups defined (customize `emeld-filter-groups')"))
      (list (completing-read "Toggle filter group: " names nil t))))
-  (if (member group mild--active-filter-groups)
+  (if (member group emeld--active-filter-groups)
       (progn
-        (setq mild--active-filter-groups (delete group mild--active-filter-groups))
+        (setq emeld--active-filter-groups (delete group emeld--active-filter-groups))
         (message "Filter group \"%s\" disabled" group))
-    (push group mild--active-filter-groups)
+    (push group emeld--active-filter-groups)
     (message "Filter group \"%s\" enabled" group))
-   (mild-refresh))
+   (emeld-refresh))
 
-(defun mild-list-filter-groups ()
+(defun emeld-list-filter-groups ()
   "Display all filter groups and their glob patterns in a buffer."
   (interactive)
-  (with-current-buffer (get-buffer-create "*mild filter groups*")
+  (with-current-buffer (get-buffer-create "*emeld filter groups*")
     (let ((inhibit-read-only t))
       (erase-buffer)
-      (mild-filter-group-mode)
-      (dolist (g mild-filter-groups)
+      (emeld-filter-group-mode)
+      (dolist (g emeld-filter-groups)
         (let ((name (car g))
-              (active (member (car g) mild--active-filter-groups))
-              (globs (mild--group-globs g)))
+              (active (member (car g) emeld--active-filter-groups))
+              (globs (emeld--group-globs g)))
           (insert (propertize name 'face (if active 'bold 'shadow)) "\n")
           (insert (format "  active: %s\n" (if active "yes" "no")))
           (insert "  globs:\n")
@@ -179,16 +179,16 @@ GROUP is the name of a group defined in `mild-filter-groups'."
     (goto-char (point-min))
     (pop-to-buffer (current-buffer))))
 
-(define-derived-mode mild-filter-group-mode special-mode "Mild-Filters"
-  "Major mode for viewing mild filter group details."
+(define-derived-mode emeld-filter-group-mode special-mode "Emeld-Filters"
+  "Major mode for viewing emeld filter group details."
   (setq-local buffer-read-only t))
 
-(defun mild--get-files (dir)
+(defun emeld--get-files (dir)
   "Get all files in DIR except . and .."
   (when (and dir (file-directory-p dir))
     (directory-files dir t "^\\([^.]\\|\\.[^.]\\|\\.\\..\\)")))
 
-(defun mild--compare-files (left right)
+(defun emeld--compare-files (left right)
   "Compare LEFT and RIGHT files. Return 'same or 'different."
   (if (and left right
            (file-exists-p left)
@@ -197,7 +197,7 @@ GROUP is the name of a group defined in `mild-filter-groups'."
             (is-dir-right (file-directory-p right)))
         (cond ((not (eq is-dir-left is-dir-right)) 'different)
               (is-dir-left 'same) ; Directories are 'same' by default, children will update it
-              (t (if (if mild-simple-comparison
+              (t (if (if emeld-simple-comparison
                          (eq (file-attribute-size (file-attributes left))
                              (file-attribute-size (file-attributes right)))
                        (= 0 (process-file "diff" nil nil nil "-q"
@@ -209,12 +209,12 @@ GROUP is the name of a group defined in `mild-filter-groups'."
           (right 'right-only)
           (t 'same))))
 
-(defun mild--scan-dir (left-dir right-dir &optional parent rel-path)
+(defun emeld--scan-dir (left-dir right-dir &optional parent rel-path)
   "Recursively scan LEFT-DIR and RIGHT-DIR to build the tree.
-PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
+PARENT is the parent `emeld-node`. REL-PATH is the relative path from root."
   (let* ((all-names (delete-dups
-                     (append (mapcar #'file-name-nondirectory (mild--get-files left-dir))
-                             (mapcar #'file-name-nondirectory (mild--get-files right-dir)))))
+                     (append (mapcar #'file-name-nondirectory (emeld--get-files left-dir))
+                             (mapcar #'file-name-nondirectory (emeld--get-files right-dir)))))
          (nodes nil))
     (dolist (name (sort all-names #'string<))
       (thread-yield)
@@ -225,12 +225,12 @@ PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
              (this-rel-path (if rel-path (concat rel-path "/" name) name))
              (is-dir (or (and exists-left (file-directory-p left))
                          (and exists-right (file-directory-p right))))
-             (status (mild--compare-files (if exists-left left nil) (if exists-right right nil)))
-             (is-filtered (mild--filtered-p name this-rel-path)))
+             (status (emeld--compare-files (if exists-left left nil) (if exists-right right nil)))
+             (is-filtered (emeld--filtered-p name this-rel-path)))
         
         (when (or (not is-filtered)
-                  mild-show-filtered)
-          (let ((node (mild-node-create :name name
+                  emeld-show-filtered)
+          (let ((node (emeld-node-create :name name
                                        :left-path (if exists-left left nil)
                                        :right-path (if exists-right right nil)
                                        :parent parent
@@ -238,56 +238,56 @@ PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
                                        :diff-status (if is-filtered 'filtered status)
                                        :is-filtered is-filtered)))
             (when is-dir
-              (setf (mild-node-children node)
-                    (mild--scan-dir (if (and exists-left is-dir) left nil)
+              (setf (emeld-node-children node)
+                    (emeld--scan-dir (if (and exists-left is-dir) left nil)
                                     (if (and exists-right is-dir) right nil)
                                     node
                                     this-rel-path))
               ;; Update directory status based on children
-              (when (and (not is-filtered) (eq (mild-node-diff-status node) 'same))
-                (when (cl-some (lambda (child) (not (eq (mild-node-diff-status child) 'same)))
-                               (mild-node-children node))
-                  (setf (mild-node-diff-status node) 'different))))
+              (when (and (not is-filtered) (eq (emeld-node-diff-status node) 'same))
+                (when (cl-some (lambda (child) (not (eq (emeld-node-diff-status child) 'same)))
+                               (emeld-node-children node))
+                  (setf (emeld-node-diff-status node) 'different))))
             (push node nodes)))))
     (nreverse nodes)))
 
-(defun mild-diff (dir1 dir2)
+(defun emeld-diff (dir1 dir2)
   "Compare DIR1 and DIR2 side-by-side."
   (interactive "DLeft directory: \nDRight directory: ")
-  (let ((buf (get-buffer-create (format "*mild: %s <-> %s*" 
+  (let ((buf (get-buffer-create (format "*emeld: %s <-> %s*" 
                                         (file-name-nondirectory (directory-file-name dir1))
                                         (file-name-nondirectory (directory-file-name dir2))))))
     (with-current-buffer buf
-      (mild-mode)
+      (emeld-mode)
       (setq default-directory (file-name-as-directory (expand-file-name dir1)))
-      (mild--apply-dir-locals)
-      (setq mild--active-filter-groups
-            (cl-loop for g in mild-filter-groups
-                     when (mild--group-active-default g)
+      (emeld--apply-dir-locals)
+      (setq emeld--active-filter-groups
+            (cl-loop for g in emeld-filter-groups
+                     when (emeld--group-active-default g)
                      collect (car g)))
-      (setq mild--left-root (file-name-as-directory (expand-file-name dir1)))
-      (setq mild--right-root (file-name-as-directory (expand-file-name dir2)))
-      (setq mild--last-scan-mode (if mild-simple-comparison 'fast 'normal))
-      (setq mild--root-node (mild-node-create
+      (setq emeld--left-root (file-name-as-directory (expand-file-name dir1)))
+      (setq emeld--right-root (file-name-as-directory (expand-file-name dir2)))
+      (setq emeld--last-scan-mode (if emeld-simple-comparison 'fast 'normal))
+      (setq emeld--root-node (emeld-node-create
                               :name (file-name-nondirectory
-                                     (directory-file-name mild--left-root))
+                                     (directory-file-name emeld--left-root))
                               :name-right (file-name-nondirectory
-                                           (directory-file-name mild--right-root))
-                              :left-path mild--left-root
-                              :right-path mild--right-root
+                                           (directory-file-name emeld--right-root))
+                              :left-path emeld--left-root
+                              :right-path emeld--right-root
                               :is-dir t
                               :expanded t))
-      (setf (mild-node-children mild--root-node)
-            (mild--scan-dir mild--left-root mild--right-root mild--root-node))
+      (setf (emeld-node-children emeld--root-node)
+            (emeld--scan-dir emeld--left-root emeld--right-root emeld--root-node))
       ;; Set root status based on children
-      (when (cl-some (lambda (child) (not (eq (mild-node-diff-status child) 'same)))
-                     (mild-node-children mild--root-node))
-        (setf (mild-node-diff-status mild--root-node) 'different))
-      (mild--render))
+      (when (cl-some (lambda (child) (not (eq (emeld-node-diff-status child) 'same)))
+                     (emeld-node-children emeld--root-node))
+        (setf (emeld-node-diff-status emeld--root-node) 'different))
+      (emeld--render))
     (switch-to-buffer buf)
-    (mild-refresh)))
+    (emeld-refresh)))
 
-(defun mild--get-dwim-dirs ()
+(defun emeld--get-dwim-dirs ()
   "Try to guess directories based on visible dired buffers."
   (let ((dired-dirs (delq nil
                           (mapcar (lambda (w)
@@ -298,15 +298,15 @@ PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
     (delete-dups dired-dirs)))
 
 ;;;###autoload
-(defun mild-diff-dwim ()
-  "Start mild-diff guessing directories from visible dired buffers.
+(defun emeld-diff-dwim ()
+  "Start emeld-diff guessing directories from visible dired buffers.
 Prompts for confirmation or selection."
   (interactive)
   (require 'dired-aux)
   (let* ((target-b (dired-dwim-target-directory))
          (target-a (if (eq major-mode 'dired-mode)
                        default-directory
-                     (car (mild--get-dwim-dirs))))
+                     (car (emeld--get-dwim-dirs))))
          ;; If target-b is same as target-a, we only have one good candidate
          (has-two (and target-b (not (string= (expand-file-name target-a)
                                              (expand-file-name target-b)))))
@@ -323,88 +323,88 @@ Prompts for confirmation or selection."
          (right-abs (directory-file-name (expand-file-name right))))
     (if (string= left-abs right-abs)
         (user-error "Cannot compare a directory with itself: %s" left-abs)
-      (mild-diff left-abs right-abs))))
+      (emeld-diff left-abs right-abs))))
 
-(defface mild-same-face
+(defface emeld-same-face
   '((t :inherit font-lock-comment-face))
   "Face for files that are the same."
-  :group 'mild)
+  :group 'emeld)
 
-(defface mild-diff-face
+(defface emeld-diff-face
   '((t :inherit diff-changed :weight bold))
   "Face for files that are different."
-  :group 'mild)
+  :group 'emeld)
 
-(defface mild-left-only-face
+(defface emeld-left-only-face
   '((t :inherit diff-added))
   "Face for files that exist only on the left side."
-  :group 'mild)
+  :group 'emeld)
 
-(defface mild-right-only-face
+(defface emeld-right-only-face
   '((t :inherit diff-removed))
   "Face for files that exist only on the right side."
-  :group 'mild)
+  :group 'emeld)
 
-(defface mild-header-face
+(defface emeld-header-face
   '((t :inherit font-lock-function-name-face :weight bold :underline t))
   "Face for the directory headers."
-  :group 'mild)
+  :group 'emeld)
 
-(defface mild-dir-face
+(defface emeld-dir-face
   '((t :inherit font-lock-type-face :weight bold))
   "Face for directory names (overrides diff-status faces)."
-  :group 'mild)
+  :group 'emeld)
 
-(defface mild-filtered-face
+(defface emeld-filtered-face
   '((t :inherit shadow :strike-through t))
   "Face for filtered files."
-  :group 'mild)
+  :group 'emeld)
 
-(defvar mild-mode-map
+(defvar emeld-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "TAB") #'mild-toggle-expand)
-    (define-key map (kbd "RET") #'mild-action)
-    (define-key map (kbd "e")   #'mild-action)
-    (define-key map (kbd "=")   #'mild-action)
-    (define-key map (kbd "f")   #'mild-find-file)
-    (define-key map (kbd "v")   #'mild-find-file)
-    (define-key map (kbd "g")   #'mild-refresh)
-    (define-key map (kbd "G")   #'mild-refresh-full)
-    (define-key map (kbd "n")   #'mild-next-line)
-    (define-key map (kbd "p")   #'mild-previous-line)
-    (define-key map (kbd "M-n") #'mild-next-change)
-    (define-key map (kbd "M-p") #'mild-previous-change)
-    (define-key map (kbd "o")   #'mild-jump-other-side)
-    (define-key map (kbd "C")   #'mild-copy)
-    (define-key map (kbd "w")   #'mild-copy-path-at-point)
-    (define-key map (kbd "d")   #'mild-delete)
-    (define-key map (kbd "SPC") #'mild-soft-diff)
-    (define-key map (kbd "F")   #'mild-toggle-show-filtered)
-    (define-key map (kbd "s")   #'mild-toggle-show-same)
-    (define-key map (kbd "m")   #'mild-toggle-show-different)
-    (define-key map (kbd "a")   #'mild-toggle-show-added)
-    (define-key map (kbd "T")   #'mild-toggle-tree-lines)
-    (define-key map (kbd ">")   #'mild-increase-indent)
-    (define-key map (kbd "<")   #'mild-decrease-indent)
-    (define-key map (kbd "C-c f") #'mild-toggle-filter-group)
+    (define-key map (kbd "TAB") #'emeld-toggle-expand)
+    (define-key map (kbd "RET") #'emeld-action)
+    (define-key map (kbd "e")   #'emeld-action)
+    (define-key map (kbd "=")   #'emeld-action)
+    (define-key map (kbd "f")   #'emeld-find-file)
+    (define-key map (kbd "v")   #'emeld-find-file)
+    (define-key map (kbd "g")   #'emeld-refresh)
+    (define-key map (kbd "G")   #'emeld-refresh-full)
+    (define-key map (kbd "n")   #'emeld-next-line)
+    (define-key map (kbd "p")   #'emeld-previous-line)
+    (define-key map (kbd "M-n") #'emeld-next-change)
+    (define-key map (kbd "M-p") #'emeld-previous-change)
+    (define-key map (kbd "o")   #'emeld-jump-other-side)
+    (define-key map (kbd "C")   #'emeld-copy)
+    (define-key map (kbd "w")   #'emeld-copy-path-at-point)
+    (define-key map (kbd "d")   #'emeld-delete)
+    (define-key map (kbd "SPC") #'emeld-soft-diff)
+    (define-key map (kbd "F")   #'emeld-toggle-show-filtered)
+    (define-key map (kbd "s")   #'emeld-toggle-show-same)
+    (define-key map (kbd "m")   #'emeld-toggle-show-different)
+    (define-key map (kbd "a")   #'emeld-toggle-show-added)
+    (define-key map (kbd "T")   #'emeld-toggle-tree-lines)
+    (define-key map (kbd ">")   #'emeld-increase-indent)
+    (define-key map (kbd "<")   #'emeld-decrease-indent)
+    (define-key map (kbd "C-c f") #'emeld-toggle-filter-group)
     map)
-  "Keymap for `mild-mode'.")
+  "Keymap for `emeld-mode'.")
 
-(define-derived-mode mild-mode special-mode "Mild"
+(define-derived-mode emeld-mode special-mode "Emeld"
   "Major mode for Meld-Inspired Local Diff."
   (setq-local truncate-lines t)
   (setq-local buffer-read-only t)
-  (make-local-variable 'mild-show-filtered)
-  (make-local-variable 'mild-show-same)
-  (make-local-variable 'mild-show-different)
-  (make-local-variable 'mild-show-added)
-  (setq-local revert-buffer-function #'mild-refresh)
-  (mild--update-header-line))
+  (make-local-variable 'emeld-show-filtered)
+  (make-local-variable 'emeld-show-same)
+  (make-local-variable 'emeld-show-different)
+  (make-local-variable 'emeld-show-added)
+  (setq-local revert-buffer-function #'emeld-refresh)
+  (emeld--update-header-line))
 
-(defun mild--move-to-node-name (on-right)
+(defun emeld--move-to-node-name (on-right)
   "Move point to the node name on the current side (ON-RIGHT if non-nil).
 If the current side is empty but the other has a file, snap to it."
-  (let* ((width (or (bound-and-true-p mild--column-width) (/ (window-width) 2)))
+  (let* ((width (or (bound-and-true-p emeld--column-width) (/ (window-width) 2)))
          (limit (if on-right (line-end-position) (+ (line-beginning-position) width))))
     (if on-right
         (move-to-column width)
@@ -424,10 +424,10 @@ If the current side is empty but the other has a file, snap to it."
         (skip-chars-forward " └├│─")))
     
     ;; Smart snapping: only if this side is truly empty and the other side has a file
-    (let ((node (get-text-property (point) 'mild-node)))
-      (when (and node (mild-node-parent node)) ; Only snap for children, not root nodes
-        (let* ((has-left (mild-node-left-path node))
-               (has-right (mild-node-right-path node))
+    (let ((node (get-text-property (point) 'emeld-node)))
+      (when (and node (emeld-node-parent node)) ; Only snap for children, not root nodes
+        (let* ((has-left (emeld-node-left-path node))
+               (has-right (emeld-node-right-path node))
                (current-is-empty (not (if on-right has-right has-left))))
           (when (and current-is-empty (if on-right has-left has-right))
             (if on-right (beginning-of-line) (move-to-column width))
@@ -437,183 +437,183 @@ If the current side is empty but the other has a file, snap to it."
                           (looking-at "[] └├│─\\[+-]"))
                 (forward-char 1)))))))))
 
-(defun mild--change-status-p (node)
+(defun emeld--change-status-p (node)
   "Return non-nil if NODE represents a change (different, added, or removed)."
-  (memq (mild-node-diff-status node) '(different left-only right-only)))
+  (memq (emeld-node-diff-status node) '(different left-only right-only)))
 
-(defun mild-next-change ()
+(defun emeld-next-change ()
   "Move to the next change (different, added, or removed node)."
   (interactive)
-  (let* ((width (or (bound-and-true-p mild--column-width) (/ (window-width) 2)))
+  (let* ((width (or (bound-and-true-p emeld--column-width) (/ (window-width) 2)))
          (on-right (>= (current-column) width))
          (found nil)
          (orig (point)))
     (forward-line 1)
     (while (and (not found) (not (eobp)))
-      (let ((node (get-text-property (point) 'mild-node)))
-        (if (and node (mild--change-status-p node) (not (mild-node-is-dir node)))
+      (let ((node (get-text-property (point) 'emeld-node)))
+        (if (and node (emeld--change-status-p node) (not (emeld-node-is-dir node)))
             (setq found t)
           (forward-line 1))))
     (if found
-        (mild--move-to-node-name on-right)
+        (emeld--move-to-node-name on-right)
       (goto-char orig)
       (message "No next change"))))
 
-(defun mild-previous-change ()
+(defun emeld-previous-change ()
   "Move to the previous change (different, added, or removed node)."
   (interactive)
-  (let* ((width (or (bound-and-true-p mild--column-width) (/ (window-width) 2)))
+  (let* ((width (or (bound-and-true-p emeld--column-width) (/ (window-width) 2)))
          (on-right (>= (current-column) width))
          (found nil)
          (orig (point)))
     (forward-line -1)
     (while (and (not found) (not (bobp)))
-      (let ((node (get-text-property (point) 'mild-node)))
-        (if (and node (mild--change-status-p node) (not (mild-node-is-dir node)))
+      (let ((node (get-text-property (point) 'emeld-node)))
+        (if (and node (emeld--change-status-p node) (not (emeld-node-is-dir node)))
             (setq found t)
           (forward-line -1))))
     (if found
-        (mild--move-to-node-name on-right)
+        (emeld--move-to-node-name on-right)
       (goto-char orig)
       (message "No previous change"))))
 
-(defun mild-next-line ()
+(defun emeld-next-line ()
   "Move to the next line and align to node name."
   (interactive)
-  (let* ((width (or (bound-and-true-p mild--column-width) (/ (window-width) 2)))
+  (let* ((width (or (bound-and-true-p emeld--column-width) (/ (window-width) 2)))
          (on-right (>= (current-column) width)))
     (forward-line 1)
-    (mild--move-to-node-name on-right)))
+    (emeld--move-to-node-name on-right)))
 
-(defun mild-previous-line ()
+(defun emeld-previous-line ()
   "Move to the previous line and align to node name."
   (interactive)
-  (let* ((width (or (bound-and-true-p mild--column-width) (/ (window-width) 2)))
+  (let* ((width (or (bound-and-true-p emeld--column-width) (/ (window-width) 2)))
          (on-right (>= (current-column) width)))
     (forward-line -1)
-    (mild--move-to-node-name on-right)))
+    (emeld--move-to-node-name on-right)))
 
-(defun mild-jump-other-side ()
+(defun emeld-jump-other-side ()
   "Jump to the other side of the directory comparison."
   (interactive)
-  (let* ((width (or (bound-and-true-p mild--column-width) (/ (window-width) 2)))
+  (let* ((width (or (bound-and-true-p emeld--column-width) (/ (window-width) 2)))
          (target-on-right (< (current-column) width)))
-    (mild--move-to-node-name target-on-right)))
+    (emeld--move-to-node-name target-on-right)))
 
-(defun mild-toggle-show-filtered ()
+(defun emeld-toggle-show-filtered ()
   "Toggle showing filtered files."
   (interactive)
-  (setq mild-show-filtered (not mild-show-filtered))
-  (message "Show filtered: %s" (if mild-show-filtered "on" "off"))
-  (mild-refresh))
+  (setq emeld-show-filtered (not emeld-show-filtered))
+  (message "Show filtered: %s" (if emeld-show-filtered "on" "off"))
+  (emeld-refresh))
 
-(defun mild-toggle-show-same ()
+(defun emeld-toggle-show-same ()
   "Toggle showing identical files."
   (interactive)
-  (setq mild-show-same (not mild-show-same))
-  (message "Show same: %s" (if mild-show-same "on" "off"))
-  (mild--render))
+  (setq emeld-show-same (not emeld-show-same))
+  (message "Show same: %s" (if emeld-show-same "on" "off"))
+  (emeld--render))
 
-(defun mild-toggle-tree-lines ()
+(defun emeld-toggle-tree-lines ()
   "Toggle the display of tree lines."
   (interactive)
-  (setq mild-show-tree-lines (not mild-show-tree-lines))
-  (mild--render))
+  (setq emeld-show-tree-lines (not emeld-show-tree-lines))
+  (emeld--render))
 
-(defun mild-increase-indent ()
+(defun emeld-increase-indent ()
   "Increase the directory indentation."
   (interactive)
-  (setq mild-indent-offset (1+ mild-indent-offset))
-  (message "Indent: %d" mild-indent-offset)
-  (mild--render))
+  (setq emeld-indent-offset (1+ emeld-indent-offset))
+  (message "Indent: %d" emeld-indent-offset)
+  (emeld--render))
 
-(defun mild-decrease-indent ()
+(defun emeld-decrease-indent ()
   "Decrease the directory indentation."
   (interactive)
-  (setq mild-indent-offset (max 1 (1- mild-indent-offset)))
-  (message "Indent: %d" mild-indent-offset)
-  (mild--render))
+  (setq emeld-indent-offset (max 1 (1- emeld-indent-offset)))
+  (message "Indent: %d" emeld-indent-offset)
+  (emeld--render))
 
-(defun mild-toggle-show-different ()
+(defun emeld-toggle-show-different ()
   "Toggle showing modified files."
   (interactive)
-  (setq mild-show-different (not mild-show-different))
-  (message "Show modified: %s" (if mild-show-different "on" "off"))
-  (mild--render))
+  (setq emeld-show-different (not emeld-show-different))
+  (message "Show modified: %s" (if emeld-show-different "on" "off"))
+  (emeld--render))
 
-(defun mild-toggle-show-added ()
+(defun emeld-toggle-show-added ()
   "Toggle showing new files."
   (interactive)
-  (setq mild-show-added (not mild-show-added))
-  (message "Show new: %s" (if mild-show-added "on" "off"))
-  (mild--render))
+  (setq emeld-show-added (not emeld-show-added))
+  (message "Show new: %s" (if emeld-show-added "on" "off"))
+  (emeld--render))
 
-(defun mild-toggle-expand ()
+(defun emeld-toggle-expand ()
   "Toggle expansion of the node at point."
   (interactive)
-  (let ((node (get-text-property (point) 'mild-node)))
-    (when (and node (mild-node-is-dir node))
-      (setf (mild-node-expanded node) (not (mild-node-expanded node)))
+  (let ((node (get-text-property (point) 'emeld-node)))
+    (when (and node (emeld-node-is-dir node))
+      (setf (emeld-node-expanded node) (not (emeld-node-expanded node)))
       (let ((pos (point)))
-        (mild--render)
+        (emeld--render)
         (goto-char pos)))))
 
-(defun mild--stop-scan ()
+(defun emeld--stop-scan ()
   "Stop the currently running scanning thread if any."
-  (when (and mild--scan-thread (thread-live-p mild--scan-thread))
+  (when (and emeld--scan-thread (thread-live-p emeld--scan-thread))
     ;; Threads in Emacs are cooperative, so we can't force kill them easily,
     ;; but we can signal or just wait. For simplicity, we just clear the variable
     ;; so the callback won't update the UI for the old scan.
-    (setq mild--scan-thread nil)))
+    (setq emeld--scan-thread nil)))
 
-(defun mild-refresh (&optional force-full)
+(defun emeld-refresh (&optional force-full)
   "Refresh the comparison asynchronously.
 With non-nil FORCE-FULL, always use content comparison (diff -q)."
   (interactive "P")
-  (mild--stop-scan)
+  (emeld--stop-scan)
   (let* ((buf (current-buffer))
-         (left mild--left-root)
-         (right mild--right-root)
-         (root mild--root-node)
-         (simple (if force-full nil mild-simple-comparison)))
-    (setq mild--last-scan-mode (if simple 'fast 'normal))
-    (setq mild--scan-thread
+         (left emeld--left-root)
+         (right emeld--right-root)
+         (root emeld--root-node)
+         (simple (if force-full nil emeld-simple-comparison)))
+    (setq emeld--last-scan-mode (if simple 'fast 'normal))
+    (setq emeld--scan-thread
           (make-thread
            (lambda ()
-             (let ((mild-simple-comparison simple))
-               (let ((new-children (mild--scan-dir left right root)))
+             (let ((emeld-simple-comparison simple))
+               (let ((new-children (emeld--scan-dir left right root)))
                  ;; Use run-at-time to update UI from main thread context
                  (run-at-time 0 nil
                               (lambda (b nodes)
                                 (when (buffer-live-p b)
                                   (with-current-buffer b
-                                    (setf (mild-node-children mild--root-node) nodes)
-                                    (setf (mild-node-diff-status mild--root-node)
+                                    (setf (emeld-node-children emeld--root-node) nodes)
+                                    (setf (emeld-node-diff-status emeld--root-node)
                                           (if (cl-some (lambda (child)
-                                                          (not (eq (mild-node-diff-status child) 'same)))
+                                                          (not (eq (emeld-node-diff-status child) 'same)))
                                                         nodes)
                                               'different
                                             'same))
-                                    (setq mild--scan-thread nil)
-                                    (mild--update-header-line)
-                                    (mild--render)
+                                    (setq emeld--scan-thread nil)
+                                    (emeld--update-header-line)
+                                    (emeld--render)
                                     (message "Scanning done."))))
                               buf new-children))))
-           "mild-scan-thread"))
-    (mild--update-header-line)
-    (mild--render)
+           "emeld-scan-thread"))
+    (emeld--update-header-line)
+    (emeld--render)
     (message (if force-full
                  "Full content scan in background..."
                "Rescanning directories in background..."))))
 
-(defun mild-refresh-full ()
-  "Force a full content-based scan (ignores `mild-simple-comparison')."
+(defun emeld-refresh-full ()
+  "Force a full content-based scan (ignores `emeld-simple-comparison')."
   (interactive)
-  (mild-refresh t))
+  (emeld-refresh t))
 
-(defun mild--read-new-root (on-left)
+(defun emeld--read-new-root (on-left)
   "Prompt for a new root directory for side ON-LEFT and update the buffer."
-  (let* ((old-root (if on-left mild--left-root mild--right-root))
+  (let* ((old-root (if on-left emeld--left-root emeld--right-root))
          (side-label (if on-left "Left" "Right"))
          (new-dir (read-directory-name
                    (format "%s directory: " side-label)
@@ -622,115 +622,115 @@ With non-nil FORCE-FULL, always use content comparison (diff -q)."
                      (directory-file-name old-root))
       (if on-left
           (progn
-            (setq mild--left-root
+            (setq emeld--left-root
                   (file-name-as-directory (expand-file-name new-dir)))
-            (setq default-directory mild--left-root)
-            (mild--apply-dir-locals))
-        (setq mild--right-root
+            (setq default-directory emeld--left-root)
+            (emeld--apply-dir-locals))
+        (setq emeld--right-root
               (file-name-as-directory (expand-file-name new-dir))))
       (setf (if on-left
-                (mild-node-left-path mild--root-node)
-              (mild-node-right-path mild--root-node))
-            (if on-left mild--left-root mild--right-root))
-      (setf (mild-node-name mild--root-node)
+                (emeld-node-left-path emeld--root-node)
+              (emeld-node-right-path emeld--root-node))
+            (if on-left emeld--left-root emeld--right-root))
+      (setf (emeld-node-name emeld--root-node)
             (file-name-nondirectory
-             (directory-file-name mild--left-root)))
-      (setf (mild-node-name-right mild--root-node)
+             (directory-file-name emeld--left-root)))
+      (setf (emeld-node-name-right emeld--root-node)
             (file-name-nondirectory
-             (directory-file-name mild--right-root)))
-      (mild-refresh))))
+             (directory-file-name emeld--right-root)))
+      (emeld-refresh))))
 
-(defun mild-action ()
+(defun emeld-action ()
   "Perform default action on node (ediff or view).
 
 On the header line (directory paths), prompt to replace the
 current side's directory with a new one via completion.
 On files, run ediff or open.  On directories, open in dired."
   (interactive)
-  (let* ((node (get-text-property (point) 'mild-node))
-         (header (get-text-property (point) 'mild-header)))
+  (let* ((node (get-text-property (point) 'emeld-node))
+         (header (get-text-property (point) 'emeld-header)))
     (cond
      (header
       (let ((cur-col (current-column)))
-        (mild--read-new-root (< cur-col mild--column-width))))
+        (emeld--read-new-root (< cur-col emeld--column-width))))
      (node
       (let* ((cur-col (current-column))
-             (on-left (< cur-col mild--column-width))
-             (left (mild-node-left-path node))
-             (right (mild-node-right-path node))
+             (on-left (< cur-col emeld--column-width))
+             (left (emeld-node-left-path node))
+             (right (emeld-node-right-path node))
              (side-path (if on-left left right)))
-        (cond ((and left right (not (mild-node-is-dir node)))
-               (if (eq (mild-node-diff-status node) 'same)
+        (cond ((and left right (not (emeld-node-is-dir node)))
+               (if (eq (emeld-node-diff-status node) 'same)
                    (find-file-other-window side-path)
                  (ediff-files left right)))
               (side-path (find-file-other-window side-path))
               (t (message "No file on %s side"
                           (if on-left "left" "right")))))))))
 
-(defun mild-find-file ()
+(defun emeld-find-file ()
   "Open the file on the current side in another window."
   (interactive)
-  (let* ((node (get-text-property (point) 'mild-node))
+  (let* ((node (get-text-property (point) 'emeld-node))
          (cur-col (current-column)))
     (when node
-      (let ((path (if (< cur-col mild--column-width)
-                      (mild-node-left-path node)
-                    (mild-node-right-path node))))
+      (let ((path (if (< cur-col emeld--column-width)
+                      (emeld-node-left-path node)
+                    (emeld-node-right-path node))))
         (if path
             (find-file-other-window path)
-          (message "No file on %s side" (if (< cur-col mild--column-width) "left" "right")))))))
+          (message "No file on %s side" (if (< cur-col emeld--column-width) "left" "right")))))))
 
-(defun mild-soft-diff ()
+(defun emeld-soft-diff ()
   "Contextual action for SPC.
 If on a directory, toggle expansion.
 If on a file, show a quick diff of the current node."
   (interactive)
-  (let ((node (get-text-property (point) 'mild-node)))
+  (let ((node (get-text-property (point) 'emeld-node)))
     (if (not node)
         (message "No node at point")
-      (if (mild-node-is-dir node)
-          (mild-toggle-expand)
-        (let ((left (mild-node-left-path node))
-              (right (mild-node-right-path node)))
+      (if (emeld-node-is-dir node)
+          (emeld-toggle-expand)
+        (let ((left (emeld-node-left-path node))
+              (right (emeld-node-right-path node)))
           (if (and left right (not (file-directory-p left)) (not (file-directory-p right)))
               (diff left right)
             (message "Soft diff only works for comparing two files")))))))
 
-(defun mild-copy-path-at-point (arg)
+(defun emeld-copy-path-at-point (arg)
   "Copy the filename at point to the kill ring.
 With prefix ARG, copy the full absolute path.
 The side is determined by the current column."
   (interactive "P")
-  (let* ((node (get-text-property (point) 'mild-node))
+  (let* ((node (get-text-property (point) 'emeld-node))
          (cur-col (current-column)))
     (if (not node)
         (message "No node at point")
-      (let* ((path (if (< cur-col mild--column-width)
-                       (mild-node-left-path node)
-                     (mild-node-right-path node)))
-             (text (if arg path (mild-node-name node))))
+      (let* ((path (if (< cur-col emeld--column-width)
+                       (emeld-node-left-path node)
+                     (emeld-node-right-path node)))
+             (text (if arg path (emeld-node-name node))))
         (if text
             (progn
               (kill-new text)
               (message "Copied: %s" text))
           (message "No file on this side"))))))
 
-(defun mild-copy ()
+(defun emeld-copy ()
   "Copy the file/dir at point to the other side.
 Creates missing parent directories on the destination side if needed."
   (interactive)
-  (let* ((node (get-text-property (point) 'mild-node))
+  (let* ((node (get-text-property (point) 'emeld-node))
          (cur-col (current-column))
-         (on-left (< cur-col mild--column-width)))
+         (on-left (< cur-col emeld--column-width)))
     (unless node (user-error "No node at point"))
-    (let* ((source (if on-left (mild-node-left-path node) (mild-node-right-path node)))
-           (source-root (if on-left mild--left-root mild--right-root))
-           (dest-root (if on-left mild--right-root mild--left-root)))
+    (let* ((source (if on-left (emeld-node-left-path node) (emeld-node-right-path node)))
+           (source-root (if on-left emeld--left-root emeld--right-root))
+           (dest-root (if on-left emeld--right-root emeld--left-root)))
       (unless source (user-error "No file on current side to copy"))
       (let* ((rel-path (file-relative-name source source-root))
              (dest (directory-file-name (expand-file-name rel-path dest-root)))
              (dest-parent (file-name-directory dest)))
-        (when (yes-or-no-p (format "Copy %s to %s?" (mild-node-name node) dest-root))
+        (when (yes-or-no-p (format "Copy %s to %s?" (emeld-node-name node) dest-root))
           (condition-case err
               (progn
                 ;; Ensure dest-parent is a directory
@@ -747,99 +747,99 @@ Creates missing parent directories on the destination side if needed."
                         (delete-file dest))
                       (copy-directory source dest t t))
                   (copy-file source dest t))
-                (mild-refresh)
-                (message "Copied %s" (mild-node-name node)))
+                (emeld-refresh)
+                (message "Copied %s" (emeld-node-name node)))
             (error (message "Copy failed: %s" (error-message-string err)))))))))
 
-(defun mild-delete ()
+(defun emeld-delete ()
   "Delete the file/directory at point from the current side."
   (interactive)
-  (let* ((node (get-text-property (point) 'mild-node))
+  (let* ((node (get-text-property (point) 'emeld-node))
          (cur-col (current-column))
-         (on-left (< cur-col mild--column-width)))
+         (on-left (< cur-col emeld--column-width)))
     (unless node (user-error "No node at point"))
-    (let* ((path (if on-left (mild-node-left-path node) (mild-node-right-path node)))
+    (let* ((path (if on-left (emeld-node-left-path node) (emeld-node-right-path node)))
            (side (if on-left "left" "right")))
       (unless path (user-error "No file on %s side to delete" side))
-      (when (yes-or-no-p (format "Delete %s from %s side?" (mild-node-name node) side))
+      (when (yes-or-no-p (format "Delete %s from %s side?" (emeld-node-name node) side))
         (condition-case err
             (progn
               (if (file-directory-p path)
                   (delete-directory path t t)
                 (delete-file path t))
-              (mild-refresh)
-              (message "Deleted %s from %s side" (mild-node-name node) side))
+              (emeld-refresh)
+              (message "Deleted %s from %s side" (emeld-node-name node) side))
           (error (message "Delete failed: %s" (error-message-string err))))))))
 
-(defun mild--toggle-indicator (label enabled)
+(defun emeld--toggle-indicator (label enabled)
   "Return a propertized string for toggle LABEL showing ENABLED state."
   (propertize label 'face (if enabled 'bold 'shadow)))
 
-(defun mild--display-state-string ()
+(defun emeld--display-state-string ()
   "Return a compact string showing current display toggle states."
   (let ((groups (mapcar (lambda (g) (concat "[" g "]"))
-                        mild--active-filter-groups)))
+                        emeld--active-filter-groups)))
      (concat
-      (mild--toggle-indicator "F" mild-show-filtered)
-     (mild--toggle-indicator "s" mild-show-same)
-     (mild--toggle-indicator "m" mild-show-different)
-     (mild--toggle-indicator "a" mild-show-added)
-     (mild--toggle-indicator "T" mild-show-tree-lines)
+      (emeld--toggle-indicator "F" emeld-show-filtered)
+     (emeld--toggle-indicator "s" emeld-show-same)
+     (emeld--toggle-indicator "m" emeld-show-different)
+     (emeld--toggle-indicator "a" emeld-show-added)
+     (emeld--toggle-indicator "T" emeld-show-tree-lines)
      (when groups
        (concat " " (mapconcat #'identity groups " "))))))
 
-(defun mild--update-header-line ()
+(defun emeld--update-header-line ()
   "Update the header line with legend and status."
   (setq header-line-format
         '(:eval
-          (let ((scan-msg (if (and (boundp 'mild--scan-thread) 
-                                    mild--scan-thread 
-                                    (thread-live-p mild--scan-thread))
+          (let ((scan-msg (if (and (boundp 'emeld--scan-thread) 
+                                    emeld--scan-thread 
+                                    (thread-live-p emeld--scan-thread))
                                (propertize " [SCANNING...] " 'face 'highlight)
                              ""))
                 (mode-msg (concat
-                           (mild--toggle-indicator "FAST" (eq mild--last-scan-mode 'fast))
+                           (emeld--toggle-indicator "FAST" (eq emeld--last-scan-mode 'fast))
                            " "
-                           (mild--toggle-indicator "NORMAL" (not (eq mild--last-scan-mode 'fast))))))
+                           (emeld--toggle-indicator "NORMAL" (not (eq emeld--last-scan-mode 'fast))))))
             (concat
              scan-msg mode-msg
-              " [" (mild--display-state-string) "] ")))))
+              " [" (emeld--display-state-string) "] ")))))
 
 
-(defun mild--render ()
+(defun emeld--render ()
   "Render the tree in the current buffer, attempting to preserve point."
   (let ((inhibit-read-only t)
-        (old-node (get-text-property (point) 'mild-node))
+        (old-node (get-text-property (point) 'emeld-node))
         (old-col (current-column))
         (target-path nil))
     ;; Save path of current node to restore point later
     (when old-node
-      (setq target-path (or (mild-node-left-path old-node)
-                           (mild-node-right-path old-node))))
+      (setq target-path (or (emeld-node-left-path old-node)
+                           (emeld-node-right-path old-node))))
     
-    (setq mild--column-width (/ (window-width) 2))
+    (setq emeld--column-width (/ (window-width) 2))
     (erase-buffer)
-    ;; Headers (with mild-header property for interactive directory switching)
+    ;; Headers (with emeld-header property for interactive directory switching)
     (let ((header-start (point)))
-      (insert (propertize (truncate-string-to-width (abbreviate-file-name mild--left-root)
-                                                    mild--column-width nil ?\s)
-                          'face 'mild-header-face))
-      (insert (propertize (truncate-string-to-width (abbreviate-file-name mild--right-root)
-                                                    mild--column-width nil ?\s)
-                          'face 'mild-header-face))
-      (add-text-properties header-start (point) '(mild-header t mouse-face highlight)))
-    (insert "\n" (make-string (* 2 mild--column-width) ?-) "\n")
+      (insert (propertize (truncate-string-to-width (abbreviate-file-name emeld--left-root)
+                                                    emeld--column-width nil ?\s)
+                          'face 'emeld-header-face))
+      (insert (propertize (truncate-string-to-width (abbreviate-file-name emeld--right-root)
+                                                    emeld--column-width nil ?\s)
+                          'face 'emeld-header-face))
+      (add-text-properties header-start (point) '(emeld-header t mouse-face highlight)))
+    (insert "\n" (make-string (* 2 emeld--column-width) ?-) "\n")
     ;; Root node (collapsible)
-    (mild--render-nodes (list mild--root-node) "" mild--column-width)
+    (emeld--render-nodes (list emeld--root-node) "" emeld--column-width)
     
     ;; Restore point
     (if target-path
         (let ((found nil))
           (goto-char (point-min))
           (while (and (not found) (not (eobp)))
-            (let ((node (get-text-property (point) 'mild-node)))
-              (if (and node (or (string= (mild-node-left-path node) target-path)
-                                (string= (mild-node-right-path node) target-path)))
+            (let ((node (get-text-property (point) 'emeld-node)))
+              (if (and node (or (string= (emeld-node-left-path node) target-path)
+                                (string= (emeld-node-right-path node) target-path)))
                   (progn
                     (setq found t)
                     (move-to-column old-col))
@@ -847,46 +847,46 @@ Creates missing parent directories on the destination side if needed."
           (unless found (goto-char (point-min))))
       (goto-char (point-min)))))
 
-(defun mild--node-visible-p (node)
+(defun emeld--node-visible-p (node)
   "Determine if NODE should be visible based on status filters.
 The root node is always visible."
-  (or (eq node mild--root-node)
-      (let ((status (mild-node-diff-status node)))
-        (cond ((eq status 'same) mild-show-same)
-              ((eq status 'different) mild-show-different)
-              ((memq status '(left-only right-only)) mild-show-added)
+  (or (eq node emeld--root-node)
+      (let ((status (emeld-node-diff-status node)))
+        (cond ((eq status 'same) emeld-show-same)
+              ((eq status 'different) emeld-show-different)
+              ((memq status '(left-only right-only)) emeld-show-added)
               (t t)))))
 
-(defun mild--render-nodes (nodes indent-prefix column-width)
+(defun emeld--render-nodes (nodes indent-prefix column-width)
   "Render a list of NODES with INDENT-PREFIX and COLUMN-WIDTH."
   (let ((count (length nodes))
         (idx 0))
     (dolist (node nodes)
       (setq idx (1+ idx))
-      (when (mild--node-visible-p node)
-        (let* ((status (mild-node-diff-status node))
+      (when (emeld--node-visible-p node)
+        (let* ((status (emeld-node-diff-status node))
                (is-last (= idx count))
-               (branch (if mild-show-tree-lines
+               (branch (if emeld-show-tree-lines
                            (concat (if is-last "└" "├")
-                                   (make-string (1- mild-indent-offset) ?─))
-                         (make-string mild-indent-offset ?\s)))
+                                   (make-string (1- emeld-indent-offset) ?─))
+                         (make-string emeld-indent-offset ?\s)))
                (full-prefix (concat indent-prefix branch))
-               (face (cond ((eq status 'filtered) 'mild-filtered-face)
-                           ((eq status 'same) 'mild-same-face)
-                           ((eq status 'different) 'mild-diff-face)
-                           ((eq status 'left-only) 'mild-left-only-face)
-                           ((eq status 'right-only) 'mild-right-only-face)))
-               (name-face (if (mild-node-is-dir node) 'mild-dir-face face))
-               (dir-indicator (if (mild-node-is-dir node)
-                                    (concat (if (mild-node-expanded node) "[-] " "[+] ")
-                                            mild-dir-prefix)
+               (face (cond ((eq status 'filtered) 'emeld-filtered-face)
+                           ((eq status 'same) 'emeld-same-face)
+                           ((eq status 'different) 'emeld-diff-face)
+                           ((eq status 'left-only) 'emeld-left-only-face)
+                           ((eq status 'right-only) 'emeld-right-only-face)))
+               (name-face (if (emeld-node-is-dir node) 'emeld-dir-face face))
+               (dir-indicator (if (emeld-node-is-dir node)
+                                    (concat (if (emeld-node-expanded node) "[-] " "[+] ")
+                                            emeld-dir-prefix)
                                   "")))
            (let ((start (point)))
              ;; Left Side
              (insert (propertize full-prefix 'face 'shadow))
-             (when (mild-node-left-path node)
+             (when (emeld-node-left-path node)
                (insert dir-indicator)
-               (insert (propertize (mild-node-name node) 'face name-face)))
+               (insert (propertize (emeld-node-name node) 'face name-face)))
             
             ;; Padding to Right Side
             (let ((current-len (current-column)))
@@ -896,90 +896,90 @@ The root node is always visible."
             
             ;; Right Side
             (insert (propertize full-prefix 'face 'shadow))
-            (when (mild-node-right-path node)
+            (when (emeld-node-right-path node)
               (insert dir-indicator)
-               (insert (propertize (or (mild-node-name-right node)
-                                      (mild-node-name node))
+               (insert (propertize (or (emeld-node-name-right node)
+                                      (emeld-node-name node))
                                    'face name-face)))
             
-            (add-text-properties start (point) `(mild-node ,node mouse-face highlight))
+            (add-text-properties start (point) `(emeld-node ,node mouse-face highlight))
             (insert "\n")
             
             ;; Recurse
-            (when (and (mild-node-expanded node) (mild-node-children node))
-              (mild--render-nodes (mild-node-children node)
-                                  (if mild-show-tree-lines
+            (when (and (emeld-node-expanded node) (emeld-node-children node))
+              (emeld--render-nodes (emeld-node-children node)
+                                  (if emeld-show-tree-lines
                                       (concat indent-prefix 
                                               (if is-last " " "│")
-                                              (make-string (1- mild-indent-offset) ?\s))
-                                    (concat indent-prefix (make-string mild-indent-offset ?\s)))
+                                              (make-string (1- emeld-indent-offset) ?\s))
+                                    (concat indent-prefix (make-string emeld-indent-offset ?\s)))
                                    column-width))))))))
 
-(transient-define-prefix mild-dispatch ()
-   "Transient menu for Mild."
+(transient-define-prefix emeld-dispatch ()
+   "Transient menu for emeld."
     [["File status"
-     ("s" (lambda () (if mild-show-same "✓ same" "  same"))
-      (lambda () (interactive) (mild-toggle-show-same)) :transient t)
-     ("m" (lambda () (if mild-show-different "✓ modified" "  modified"))
-      (lambda () (interactive) (mild-toggle-show-different)) :transient t)
-     ("a" (lambda () (if mild-show-added "✓ added" "  added"))
-      (lambda () (interactive) (mild-toggle-show-added)) :transient t)]
+     ("s" (lambda () (if emeld-show-same "✓ same" "  same"))
+      (lambda () (interactive) (emeld-toggle-show-same)) :transient t)
+     ("m" (lambda () (if emeld-show-different "✓ modified" "  modified"))
+      (lambda () (interactive) (emeld-toggle-show-different)) :transient t)
+     ("a" (lambda () (if emeld-show-added "✓ added" "  added"))
+      (lambda () (interactive) (emeld-toggle-show-added)) :transient t)]
     ["Filename"
-     :if (lambda () mild-filter-groups)
+     :if (lambda () emeld-filter-groups)
      :class transient-column
      :setup-children
      (lambda (&rest _)
-       (when mild-filter-groups
+       (when emeld-filter-groups
          (let ((keys '("z" "x" "y" "w" "v" "u" "t" "r" "q" "j"))
                (suffixes nil))
-           (dolist (g mild-filter-groups)
+           (dolist (g emeld-filter-groups)
              (let* ((name (car g))
                     (key (pop keys)))
-               (unless (fboundp (intern (format "mild--toggle-group-%s" (downcase name))))
+               (unless (fboundp (intern (format "emeld--toggle-group-%s" (downcase name))))
                   (let ((n name))
-                    (defalias (intern (format "mild--toggle-group-%s" (downcase name)))
+                    (defalias (intern (format "emeld--toggle-group-%s" (downcase name)))
                       (lambda ()
                         (interactive)
-                        (mild-toggle-filter-group n)
+                        (emeld-toggle-filter-group n)
                         (run-at-time 0 nil
-                         (lambda () (transient-setup 'mild-dispatch))))
+                         (lambda () (transient-setup 'emeld-dispatch))))
                       (format "Toggle filter group `%s'." (downcase name)))))
                (push (transient-parse-suffix
-                       'mild-dispatch
+                       'emeld-dispatch
                        (list key
                              (format "%s %s (%d)"
-                                     (if (member name mild--active-filter-groups) "✓" "  ")
+                                     (if (member name emeld--active-filter-groups) "✓" "  ")
                                      name
-                                     (length (mild--group-globs g)))
-                              (intern (format "mild--toggle-group-%s" (downcase name)))
+                                     (length (emeld--group-globs g)))
+                              (intern (format "emeld--toggle-group-%s" (downcase name)))
                               :transient t))
                       suffixes)))
             (push (transient-parse-suffix
-                   'mild-dispatch
-                   '("l" "list all globs..." mild-list-filter-groups))
+                   'emeld-dispatch
+                   '("l" "list all globs..." emeld-list-filter-groups))
                   suffixes)
             (nreverse suffixes))))]
     ["Toggles"
-     ("F" (lambda () (if mild-show-filtered "✓ filtered" "  filtered"))
-      (lambda () (interactive) (mild-toggle-show-filtered)) :transient t)
-     ("T" (lambda () (if mild-show-tree-lines "✓ tree-lines" "  tree-lines"))
-      (lambda () (interactive) (mild-toggle-tree-lines)) :transient t)]
+     ("F" (lambda () (if emeld-show-filtered "✓ filtered" "  filtered"))
+      (lambda () (interactive) (emeld-toggle-show-filtered)) :transient t)
+     ("T" (lambda () (if emeld-show-tree-lines "✓ tree-lines" "  tree-lines"))
+      (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)]
     ["Actions"
-     ("g"   "rescan (simple)"    mild-refresh)
-     ("G"   "rescan (full diff)" mild-refresh-full)
-     ("o"   "jump other side"    mild-jump-other-side :transient t)
-     ("M-n" "next change"        mild-next-change :transient t)
-     ("M-p" "previous change"    mild-previous-change :transient t)
-     ("SPC" "soft diff / fold"   mild-soft-diff)
-     ("C"   "copy to other side" mild-copy)
-     ("d"   "delete from side"   mild-delete)
-     ("w"   "copy path"          mild-copy-path-at-point)
-     ("RET" "action (ediff)"     mild-action)]
+     ("g"   "rescan (simple)"    emeld-refresh)
+     ("G"   "rescan (full diff)" emeld-refresh-full)
+     ("o"   "jump other side"    emeld-jump-other-side :transient t)
+     ("M-n" "next change"        emeld-next-change :transient t)
+     ("M-p" "previous change"    emeld-previous-change :transient t)
+     ("SPC" "soft diff / fold"   emeld-soft-diff)
+     ("C"   "copy to other side" emeld-copy)
+     ("d"   "delete from side"   emeld-delete)
+     ("w"   "copy path"          emeld-copy-path-at-point)
+     ("RET" "action (ediff)"     emeld-action)]
     ["Indent"
-     (">" "more"  mild-increase-indent :transient t)
-     ("<" "less" mild-decrease-indent :transient t)]])
+     (">" "more"  emeld-increase-indent :transient t)
+     ("<" "less" emeld-decrease-indent :transient t)]])
 
-(define-key mild-mode-map (kbd "?") #'mild-dispatch)
+(define-key emeld-mode-map (kbd "?") #'emeld-dispatch)
 
-(provide 'mild)
-;;; mild.el ends here
+(provide 'emeld)
+;;; emeld.el ends here

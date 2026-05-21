@@ -1,4 +1,4 @@
-#+title: BUGS/Improvements for mild
+#+title: BUGS/Improvements for emeld
 #+author: James Dyer
 #+email: captainflasmr@gmail.com
 #+language: en
