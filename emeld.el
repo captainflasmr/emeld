@@ -160,28 +160,29 @@ GROUP is the name of a group defined in `emeld-filter-groups'."
    (emeld-refresh))
 
 (defun emeld-list-filter-groups ()
-  "Display all filter groups and their glob patterns in a buffer."
+  "Display all filter groups and their glob patterns in an org-mode buffer."
   (interactive)
-  (with-current-buffer (get-buffer-create "*emeld filter groups*")
-    (let ((inhibit-read-only t))
-      (erase-buffer)
-      (emeld-filter-group-mode)
-      (dolist (g emeld-filter-groups)
-        (let ((name (car g))
-              (active (member (car g) emeld--active-filter-groups))
-              (globs (emeld--group-globs g)))
-          (insert (propertize name 'face (if active 'bold 'shadow)) "\n")
-          (insert (format "  active: %s\n" (if active "yes" "no")))
-          (insert "  globs:\n")
-          (dolist (glob globs)
-            (insert (format "    %s\n" glob)))
-          (insert "\n"))))
-    (goto-char (point-min))
-    (pop-to-buffer (current-buffer))))
-
-(define-derived-mode emeld-filter-group-mode special-mode "Emeld-Filters"
-  "Major mode for viewing emeld filter group details."
-  (setq-local buffer-read-only t))
+  (let ((active-groups emeld--active-filter-groups))
+    (with-current-buffer (get-buffer-create "*emeld filter groups*")
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (org-mode)
+        (setq-local buffer-read-only t)
+        (insert "#+TITLE: Emeld Filter Groups\n\n"
+                "* Overview\n"
+                "Filter groups are toggled from the transient menu (~ca~, ~cb~, ...) or with ~C-c f~.\n\n")
+        (dolist (g emeld-filter-groups)
+          (let ((name (car g))
+                (active (member (car g) active-groups))
+                (globs (emeld--group-globs g)))
+            (insert (format "* %s  %s\n"
+                            name
+                            (if active "[x]" "[ ]")))
+            (dolist (glob globs)
+              (insert (format "  - ~%s~\n" glob)))
+            (insert "\n")))
+        (goto-char (point-min))))
+    (pop-to-buffer "*emeld filter groups*")))
 
 (defun emeld--get-files (dir)
   "Get all files in DIR except . and .."
@@ -1012,34 +1013,26 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
        :setup-children
        (lambda (&rest _)
          (when emeld-filter-groups
-           (let ((keys '("z" "x" "y" "w" "v" "u" "t" "r" "q" "j"))
-                 (suffixes nil)
-                 (max-len (apply #'max (mapcar (lambda (g) (length (car g)))
-                                               emeld-filter-groups))))
-             (dolist (g emeld-filter-groups)
-               (let* ((name (car g))
-                      (key (pop keys)))
-                 (unless (fboundp (intern (format "emeld--toggle-group-%s" (downcase name))))
-                    (let ((n name))
-                      (defalias (intern (format "emeld--toggle-group-%s" (downcase name)))
-                        (lambda ()
-                          (interactive)
-                          (emeld-toggle-filter-group n)
-                          (run-at-time 0 nil
-                           (lambda () (transient-setup 'emeld-dispatch))))
-                        (format "Toggle filter group `%s'." (downcase name)))))
-                 (push (transient-parse-suffix
-                         'emeld-dispatch
-                         (list key
-                               (format (concat "[%c] %-" (number-to-string max-len) "s")
-                                       (if (member name emeld--active-filter-groups) ?x ?\s)
-                                       name)
-                                (intern (format "emeld--toggle-group-%s" (downcase name)))
-                                :transient t))
-                        suffixes)))
+            (let ((idx 0)
+                  (suffixes nil)
+                  (max-len (apply #'max (mapcar (lambda (g) (length (car g)))
+                                                emeld-filter-groups))))
+              (dolist (g emeld-filter-groups)
+                 (let* ((name (car g))
+                        (key (format "c%c" (+ ?a idx))))
+                   (setq idx (1+ idx))
+                   (push (transient-parse-suffix
+                           'emeld-dispatch
+                           (list key
+                                 (format (concat "[%c] %-" (number-to-string max-len) "s")
+                                         (if (member name emeld--active-filter-groups) ?x ?\s)
+                                         name)
+                                  `(lambda () (interactive) (emeld-toggle-filter-group ,name))
+                                  :transient t))
+                          suffixes)))
               (push (transient-parse-suffix
                      'emeld-dispatch
-                     '("l" "list all globs..." emeld-list-filter-groups))
+                      '("cl" "list all globs..." emeld-list-filter-groups))
                     suffixes)
               (nreverse suffixes))))]])
 

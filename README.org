@@ -33,7 +33,7 @@ The transient menu is organized into four groups:
 - ~View~ :: Toggle file visibility (~s~ same, ~m~ modified, ~a~ added, ~F~ filtered, ~T~ tree-lines), indent (~>~/~<~).
 - ~Navigate~ :: Scan (~g~ simple, ~G~ full diff) and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
 - ~File~ :: Operate on files (~RET~ ediff/open, ~SPC~ soft diff/fold, ~C~ copy, ~d~ delete, ~w~ copy path, ~P~ format patch).
-- ~Filename~ :: Toggle filter groups on/off (~[x]~/~[ ]~ checkmarks), ~l~ list all globs.
+- ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~cl~ list all globs.
 
 * Key Bindings
 | Key       | Action                                 |
