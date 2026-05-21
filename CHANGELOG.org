@@ -1,5 +1,14 @@
 #+TITLE: Changelog for Mild
 
+* [0.6.0] - 2026-05-20
+** Added
+- Transient menu (~?~ key) with Toggles, Actions, Navigation, Indent, and Filter Groups columns in a single row.
+** Changed
+- Filter groups in transient via completion prompt with active-count header (avoids ~:setup-children~ compatibility issues).
+- ~mild--apply-dir-locals~ reads ~.dir-locals.el~ directly via ~locate-dominating-file~.
+** Fixed
+- ~mild--move-to-node-name~: ~let~→~let*~ for dependent bindings.
+
 * [0.5.0] - 2026-05-20
 ** Added
 - Transient menu (~?~) with Toggles, Actions, Navigation, and Indent sections in a single row.

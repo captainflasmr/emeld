@@ -1,7 +1,7 @@
 ;;; mild.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.5.0
+;; Version: 0.6.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -933,7 +933,13 @@ The root node is always visible."
     ("M-p" "previous change" mild-previous-change :transient t)]
    ["Indent"
     (">" "more"  mild-increase-indent :transient t)
-    ("<" "less" mild-decrease-indent :transient t)]])
+    ("<" "less" mild-decrease-indent :transient t)]
+   ["Filter groups"
+    :description
+    (lambda () (if mild--active-filter-groups
+                   (format "Groups (%d active)" (length mild--active-filter-groups))
+                 "Filter groups"))
+     ("f" "toggle group..." mild-toggle-filter-group :transient t)]])
 
 (provide 'mild)
 ;;; mild.el ends here
