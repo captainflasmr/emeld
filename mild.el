@@ -1,7 +1,7 @@
 ;;; mild.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.6.0
+;; Version: 0.7.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -16,31 +16,25 @@
   "Meld-Inspired Local Diff."
   :group 'tools)
 
-(defcustom mild-filter-globs '(".git" ".DS_Store" "*.elc" "*.pyc")
-  "List of glob patterns to filter out of the comparison.
-These match recursively."
-  :type '(repeat string)
-  :group 'mild)
-
 (defcustom mild-filter-groups
-  '(("Backups" "#*#" ".#*" "~*" "*~" "*.orig" "*.bak" "*.swp")
-    ("OS metadata" ".DS_Store" "._*" ".Spotlight-V100" ".Trashes"
+  '(("Backups" t "#*#" ".#*" "~*" "*~" "*.orig" "*.bak" "*.swp")
+    ("OS metadata" t ".DS_Store" "._*" ".Spotlight-V100" ".Trashes"
      "Thumbs.db" "Desktop.ini")
-    ("Version Control" ".git" ".svn" ".hg" "CVS" "_darcs" ".bzr"
+    ("Version Control" t ".git" ".svn" ".hg" "CVS" "_darcs" ".bzr"
      "_MTN" ".fslckout" "_FOSSIL_" ".fos" ".osc")
-    ("Binaries" "*.pyc" "*.a" "*.obj" "*.o" "*.so" "*.la" "*.lib"
+    ("Binaries" t "*.pyc" "*.a" "*.obj" "*.o" "*.so" "*.la" "*.lib"
      "*.dll" "*.exe")
-    ("Media" "*.jpg" "*.gif" "*.png" "*.bmp" "*.wav" "*.mp3"
+    ("Media" nil "*.jpg" "*.gif" "*.png" "*.bmp" "*.wav" "*.mp3"
      "*.ogg" "*.flac" "*.avi" "*.mpg" "*.xcf" "*.xpm"))
-  "List of named filter groups.  Each entry is (NAME GLOBS ...).
-Globs use the same format as `mild-filter-globs'.
-Toggle groups on/off with `mild-toggle-filter-group'."
+  "List of named filter groups.
+Each entry is (NAME [ACTIVE] GLOBS...).  NAME is a string.
+If the second element is t or nil, it sets the default active state;
+otherwise all elements after NAME are glob patterns and the group
+defaults to inactive.  Toggle groups on/off with `mild-toggle-filter-group'."
   :type '(repeat (list (string :tag "Group name")
                        (repeat :tag "Glob patterns" string)))
   :group 'mild)
 
-(put 'mild-filter-globs 'safe-local-variable
-     (lambda (val) (and (listp val) (cl-every #'stringp val))))
 (put 'mild-filter-groups 'safe-local-variable
      (lambda (val)
        (and (listp val)
@@ -50,7 +44,7 @@ Toggle groups on/off with `mild-toggle-filter-group'."
                       val))))
 
 (defcustom mild-show-filtered nil
-  "Whether to show filtered files (matching `mild-filter-globs`)."
+  "Whether to show filtered files (matching active filter groups)."
   :type 'boolean
   :group 'mild)
 
@@ -85,7 +79,7 @@ Set to \"\" for no prefix."
   :type 'boolean
   :group 'mild)
 
-(defcustom mild-simple-comparison t
+(defcustom mild-simple-comparison nil
   "If non-nil, only compare file sizes for diff status.
 This is much faster but less accurate than content comparison."
   :type 'boolean
@@ -127,23 +121,27 @@ Otherwise, it matches against the filename."
         rx
       (concat "^" rx "$"))))
 
+(defun mild--group-globs (group)
+  "Return the list of glob patterns from filter GROUP entry."
+  (let ((rest (cdr group)))
+    (if (booleanp (car rest)) (cdr rest) rest)))
+
+(defun mild--group-active-default (group)
+  "Return the default active state for filter GROUP."
+  (let ((rest (cdr group)))
+    (and (booleanp (car rest)) (car rest))))
+
 (defun mild--filtered-p (name rel-path)
   "Check if NAME or REL-PATH is filtered.
-Check `mild-filter-globs' and active filter groups."
-  (or (cl-some (lambda (glob)
-                 (let ((rx (mild--glob-to-regexp glob)))
-                   (if (string-match-p "/" glob)
-                       (string-match-p rx rel-path)
-                     (string-match-p rx name))))
-               mild-filter-globs)
-      (cl-some (lambda (group)
+Check active filter groups."
+  (or (cl-some (lambda (group)
                  (when (member (car group) mild--active-filter-groups)
                    (cl-some (lambda (glob)
                               (let ((rx (mild--glob-to-regexp glob)))
                                 (if (string-match-p "/" glob)
                                     (string-match-p rx rel-path)
                                   (string-match-p rx name))))
-                            (cdr group))))
+                            (mild--group-globs group))))
                mild-filter-groups)))
 
 (defun mild-toggle-filter-group (group)
@@ -239,6 +237,10 @@ PARENT is the parent `mild-node`. REL-PATH is the relative path from root."
       (mild-mode)
       (setq default-directory (file-name-as-directory (expand-file-name dir1)))
       (mild--apply-dir-locals)
+      (setq mild--active-filter-groups
+            (cl-loop for g in mild-filter-groups
+                     when (mild--group-active-default g)
+                     collect (car g)))
       (setq mild--left-root (file-name-as-directory (expand-file-name dir1)))
       (setq mild--right-root (file-name-as-directory (expand-file-name dir2)))
       (setq mild--last-scan-mode (if mild-simple-comparison 'fast 'normal))

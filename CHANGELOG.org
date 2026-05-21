@@ -1,5 +1,16 @@
 #+TITLE: Changelog for Mild
 
+* [0.7.0] - 2026-05-20
+** Added
+- ~mild-filter-groups~ entries now support an optional boolean (~t~/~nil~) after the name to set the default active state.  All five default groups active by default.
+- Transient menu reorganized: "File status" column (Same/Modified/Added) as first, "Filename" with per-group suffix entries, "Toggles" (filtered/tree-lines).
+** Changed
+- ~mild-filter-globs~ removed; all filtering now exclusively through ~mild-filter-groups~.
+- ~mild-show-hidden~ and hidden-files toggle removed; dotfiles now filtered via filter groups only.
+- Header line simplified: no legend swatches, scan mode shown as bold/shadow ~FAST~/~NORMAL~ toggles.
+- Navigation column (~n~/~p~) removed from transient; ~M-n~/~M-p~ kept in Actions.
+- Scan mode labels renamed from ~SIMPLE~/~FULL~ to ~FAST~/~NORMAL~.
+
 * [0.6.0] - 2026-05-20
 ** Added
 - Transient menu (~?~ key) with Toggles, Actions, Navigation, Indent, and Filter Groups columns in a single row.

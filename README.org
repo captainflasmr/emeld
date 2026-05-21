@@ -49,18 +49,17 @@ Alternatively, run ~M-x mild-diff-dwim~ to automatically use open Dired buffers 
 | C-c f     | Toggle a named filter group on/off     |
 
 * Customization
-- ~mild-filter-globs~: List of globs to ignore (e.g., ~".git"~, ~"*.elc"~).  Always applied.
+
 - ~mild-filter-groups~: Named groups of globs toggleable with ~C-c f~.  Defaults:
 
-  | Group           | Globs                                                            |
-  |-----------------+------------------------------------------------------------------|
-  | Backups         | ~#*#~, ~.#*~, ~~*~, ~*~~, ~*.orig~, ~*.bak~, ~*.swp~           |
-  | OS metadata     | ~.DS_Store~, ~._*~, ~.Spotlight-V100~, ~.Trashes~, ~Thumbs.db~, ~Desktop.ini~ |
-  | Version Control | ~.git~, ~.svn~, ~.hg~, ~CVS~, ~_darcs~, ~.bzr~, ~_MTN~, ~.fslckout~, ~_FOSSIL_~, ~.fos~, ~.osc~ |
-  | Binaries        | ~*.pyc~, ~*.a~, ~*.obj~, ~*.o~, ~*.so~, ~*.la~, ~*.lib~, ~*.dll~, ~*.exe~ |
+  | Group           | Globs                                                                                                       |
+  |-----------------+-------------------------------------------------------------------------------------------------------------|
+  | Backups         | ~#*#~, ~.#*~, ~~*~, ~*~~, ~*.orig~, ~*.bak~, ~*.swp~                                                        |
+  | OS metadata     | ~.DS_Store~, ~._*~, ~.Spotlight-V100~, ~.Trashes~, ~Thumbs.db~, ~Desktop.ini~                               |
+  | Version Control | ~.git~, ~.svn~, ~.hg~, ~CVS~, ~_darcs~, ~.bzr~, ~_MTN~, ~.fslckout~, ~_FOSSIL_~, ~.fos~, ~.osc~             |
+  | Binaries        | ~*.pyc~, ~*.a~, ~*.obj~, ~*.o~, ~*.so~, ~*.la~, ~*.lib~, ~*.dll~, ~*.exe~                                   |
   | Media           | ~*.jpg~, ~*.gif~, ~*.png~, ~*.bmp~, ~*.wav~, ~*.mp3~, ~*.ogg~, ~*.flac~, ~*.avi~, ~*.mpg~, ~*.xcf~, ~*.xpm~ |
 
-- ~mild-show-hidden~: Whether to show dotfiles.
 - ~mild-show-same~: Whether to show identical files (default nil).
 - ~mild-simple-comparison~: Set to t for fast size-only matching.
 - ~mild-dir-prefix~: Unicode prefix for directory names (default ~"📁 "~).
@@ -73,11 +72,10 @@ project, place a ~.dir-locals.el~ file above the left directory:
 #+begin_src elisp
 ;;; .dir-locals.el
 ((nil
-  . ((mild-filter-globs . ("node_modules" "build" "dist"))
-     (mild-filter-groups . (("Backups" "*~" "*.bak" "*.orig")
-                            ("Hidden" ".*")
-                            ("Logs" "*.log" "logs/*")
-                            ("Config" "*.cfg" "config/*"))))))
+  . ((mild-filter-groups . (("Backups" t "*~" "*.bak" "*.orig")
+                            ("Hidden" nil ".*")
+                            ("Logs" t "*.log" "logs/*")
+                            ("Config" nil "*.cfg" "config/*"))))))
 #+end_src
 
 Toggle named groups on/off from the transient menu (~?~ then ~f~) or directly with ~C-c f~.
