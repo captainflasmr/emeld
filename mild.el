@@ -358,7 +358,6 @@ Prompts for confirmation or selection."
     (define-key map (kbd ">")   #'mild-increase-indent)
     (define-key map (kbd "<")   #'mild-decrease-indent)
     (define-key map (kbd "C-c f") #'mild-toggle-filter-group)
-    (define-key map (kbd "?")   #'mild-dispatch)
     map)
   "Keymap for `mild-mode'.")
 
@@ -902,44 +901,70 @@ The root node is always visible."
                                    column-width))))))))
 
 (transient-define-prefix mild-dispatch ()
-  "Transient menu for Mild."
-  [["Toggles"
-    ("h" (lambda () (if mild-show-hidden "✓ hidden" "  hidden"))
-     (lambda () (interactive) (mild-toggle-show-hidden)) :transient t)
-    ("F" (lambda () (if mild-show-filtered "✓ filtered" "  filtered"))
-     (lambda () (interactive) (mild-toggle-show-filtered)) :transient t)
-    ("s" (lambda () (if mild-show-same "✓ same" "  same"))
-     (lambda () (interactive) (mild-toggle-show-same)) :transient t)
-    ("m" (lambda () (if mild-show-different "✓ modified" "  modified"))
-     (lambda () (interactive) (mild-toggle-show-different)) :transient t)
-    ("a" (lambda () (if mild-show-added "✓ added" "  added"))
-     (lambda () (interactive) (mild-toggle-show-added)) :transient t)
-    ("T" (lambda () (if mild-show-tree-lines "✓ tree-lines" "  tree-lines"))
-     (lambda () (interactive) (mild-toggle-tree-lines)) :transient t)]
-   ["Actions"
-    ("g"   "rescan (simple)"    mild-refresh)
-    ("G"   "rescan (full diff)" mild-refresh-full)
-    ("o"   "jump to other side" mild-jump-other-side :transient t)
-    ("SPC" "soft diff / fold"   mild-soft-diff)
-    ("C"   "copy to other side" mild-copy)
-    ("d"   "delete from side"   mild-delete)
-    ("w"   "copy path"          mild-copy-path-at-point)
-    ("C-c f" "toggle filter group" mild-toggle-filter-group)
-    ("RET" "action (ediff)"     mild-action)]
-   ["Navigation"
-    ("n"   "next line"       mild-next-line :transient t)
-    ("p"   "previous line"   mild-previous-line :transient t)
-    ("M-n" "next change"     mild-next-change :transient t)
-    ("M-p" "previous change" mild-previous-change :transient t)]
-   ["Indent"
-    (">" "more"  mild-increase-indent :transient t)
-    ("<" "less" mild-decrease-indent :transient t)]
-   ["Filter groups"
-    :description
-    (lambda () (if mild--active-filter-groups
-                   (format "Groups (%d active)" (length mild--active-filter-groups))
-                 "Filter groups"))
-     ("f" "toggle group..." mild-toggle-filter-group :transient t)]])
+   "Transient menu for Mild."
+    [["Filename"
+     :if (lambda () mild-filter-groups)
+     :class transient-column
+     :setup-children
+     (lambda (&rest _)
+       (when mild-filter-groups
+         (let ((keys '("z" "x" "y" "w" "v" "u" "t" "r" "q" "j"))
+               (suffixes nil))
+           (dolist (g mild-filter-groups)
+             (let* ((name (car g))
+                    (key (pop keys)))
+               (unless (fboundp (intern (format "mild--toggle-group-%s" (downcase name))))
+                  (let ((n name))
+                    (defalias (intern (format "mild--toggle-group-%s" (downcase name)))
+                      (lambda ()
+                        (interactive)
+                        (mild-toggle-filter-group n)
+                        (run-at-time 0 nil
+                         (lambda () (transient-setup 'mild-dispatch))))
+                      (format "Toggle filter group `%s'." (downcase name)))))
+                (push (transient-parse-suffix
+                       'mild-dispatch
+                       (list key
+                             (format "%s %s"
+                                     (if (member name mild--active-filter-groups) "✓" "  ")
+                                     name)
+                             (intern (format "mild--toggle-group-%s" (downcase name)))
+                             :transient t))
+                     suffixes)))
+           (nreverse suffixes))))]
+    ["Toggles"
+     ("h" (lambda () (if mild-show-hidden "✓ hidden" "  hidden"))
+      (lambda () (interactive) (mild-toggle-show-hidden)) :transient t)
+     ("F" (lambda () (if mild-show-filtered "✓ filtered" "  filtered"))
+      (lambda () (interactive) (mild-toggle-show-filtered)) :transient t)
+     ("s" (lambda () (if mild-show-same "✓ same" "  same"))
+      (lambda () (interactive) (mild-toggle-show-same)) :transient t)
+     ("m" (lambda () (if mild-show-different "✓ modified" "  modified"))
+      (lambda () (interactive) (mild-toggle-show-different)) :transient t)
+     ("a" (lambda () (if mild-show-added "✓ added" "  added"))
+      (lambda () (interactive) (mild-toggle-show-added)) :transient t)
+     ("T" (lambda () (if mild-show-tree-lines "✓ tree-lines" "  tree-lines"))
+      (lambda () (interactive) (mild-toggle-tree-lines)) :transient t)]
+    ["Actions"
+     ("g"   "rescan (simple)"    mild-refresh)
+     ("G"   "rescan (full diff)" mild-refresh-full)
+     ("o"   "jump to other side" mild-jump-other-side :transient t)
+     ("SPC" "soft diff / fold"   mild-soft-diff)
+     ("C"   "copy to other side" mild-copy)
+     ("d"   "delete from side"   mild-delete)
+     ("w"   "copy path"          mild-copy-path-at-point)
+     ("C-c f" "toggle filter group" mild-toggle-filter-group)
+     ("RET" "action (ediff)"     mild-action)]
+    ["Navigation"
+     ("n"   "next line"       mild-next-line :transient t)
+     ("p"   "previous line"   mild-previous-line :transient t)
+     ("M-n" "next change"     mild-next-change :transient t)
+     ("M-p" "previous change" mild-previous-change :transient t)]
+    ["Indent"
+     (">" "more"  mild-increase-indent :transient t)
+     ("<" "less" mild-decrease-indent :transient t)]])
+
+(define-key mild-mode-map (kbd "?") #'mild-dispatch)
 
 (provide 'mild)
 ;;; mild.el ends here
