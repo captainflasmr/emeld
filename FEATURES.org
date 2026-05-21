@@ -1,0 +1,82 @@
+#+TITLE: emeld Feature Roadmap
+#+OPTIONS: toc:2
+
+Gaps between emeld and Meld, ordered by usefulness for an Emacs variant.
+
+* TODO Three-Way Comparison
+
+** TODO Three-way file compare (LOCAL vs BASE vs REMOTE)
+
+  Currently emeld is strictly two-way.
+  
+** TODO Three-way folder compare
+
+** TODO Merge conflict resolution
+
+  Per-change merge actions across three panes.
+
+* TODO Export
+
+** TODO Export As Patch
+  
+* TODO Text / Content Filters
+
+** TODO Regex-based line filtering for diff comparison
+
+  Ignore matching lines during content diff (e.g., strip comments, ignore blank lines).  Complements existing filename/glob filters.
+  
+** TODO Built-in content filter presets
+
+  Script comment stripping, whitespace normalization, etc.
+  
+** TODO "Same when filtered" state
+
+  Files that differ but become identical after content filters — shown italicized.
+
+* TODO Folder Comparison Enhancements
+
+** TODO Swap Left and Right "panes"
+
+** TODO Flattened view
+
+  Collapse tree hierarchy to a flat file list with a "Location" column showing the relative path of each file.
+  
+** TODO Case-insensitive filename matching
+
+  Toggle via transient; useful on FAT/exFAT/HFS+ filesystems.
+  
+** TODO Marked comparison
+
+  Compare two /differently-named/ files across folders by selecting them.
+  
+** TODO File state emblems
+
+  Newest-file indicator, symbolic-link arrow, selected-for-comparison tick.
+  
+** TODO Per-file status bar
+
+  Detail line for the currently selected file.
+
+* TODO Navigation
+
+** TODO Change-count / jump-to-change-number
+
+  =M-x goto-change= or numeric prefix to jump to the Nth change.
+  
+** TODO Left/right arrow keys to move focus between panes in file view
+
+** TODO Scroll-based change navigation in the overview bar
+
+* TODO Session & UI Polish
+
+** TODO Multi-tab / multi-buffer sessions
+
+  Multiple comparisons open simultaneously.  emeld is single-buffer per comparison.
+
+* Deprioritized — Already Covered by Emacs Built-Ins
+
+** File Content Diff View
+  Meld's inline side-by-side diff, highlighting, per-chunk merge actions, and change navigation are already provided by =ediff=, which emeld delegates to (=RET=/=e=).
+
+** Version Control Integration
+  Meld's VC features (single-dir diff against HEAD, VC file states, git mergetool, VC operations) are redundant in Emacs.  =vc-mode=, =vc-dir=, and =magit= already cover all of this, and emeld benefits from being embedded alongside them.
