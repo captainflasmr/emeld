@@ -9,12 +9,6 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
-** TODO groups of defined filters
-
-** DOING better header line formatting
-
 ** TODO add directory tree display for dired?
 
 ** TODO sub directory refresh
-
-** TODO header for elisp

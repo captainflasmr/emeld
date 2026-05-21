@@ -1,7 +1,7 @@
 ;;; mild.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.7.0
+;; Version: 0.8.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -157,7 +157,31 @@ GROUP is the name of a group defined in `mild-filter-groups'."
         (message "Filter group \"%s\" disabled" group))
     (push group mild--active-filter-groups)
     (message "Filter group \"%s\" enabled" group))
-  (mild-refresh))
+   (mild-refresh))
+
+(defun mild-list-filter-groups ()
+  "Display all filter groups and their glob patterns in a buffer."
+  (interactive)
+  (with-current-buffer (get-buffer-create "*mild filter groups*")
+    (let ((inhibit-read-only t))
+      (erase-buffer)
+      (mild-filter-group-mode)
+      (dolist (g mild-filter-groups)
+        (let ((name (car g))
+              (active (member (car g) mild--active-filter-groups))
+              (globs (mild--group-globs g)))
+          (insert (propertize name 'face (if active 'bold 'shadow)) "\n")
+          (insert (format "  active: %s\n" (if active "yes" "no")))
+          (insert "  globs:\n")
+          (dolist (glob globs)
+            (insert (format "    %s\n" glob)))
+          (insert "\n"))))
+    (goto-char (point-min))
+    (pop-to-buffer (current-buffer))))
+
+(define-derived-mode mild-filter-group-mode special-mode "Mild-Filters"
+  "Major mode for viewing mild filter group details."
+  (setq-local buffer-read-only t))
 
 (defun mild--get-files (dir)
   "Get all files in DIR except . and .."
@@ -756,7 +780,7 @@ Creates missing parent directories on the destination side if needed."
   (let ((groups (mapcar (lambda (g) (concat "[" g "]"))
                         mild--active-filter-groups)))
      (concat
-      (mild--toggle-indicator "f" mild-show-filtered)
+      (mild--toggle-indicator "F" mild-show-filtered)
      (mild--toggle-indicator "s" mild-show-same)
      (mild--toggle-indicator "m" mild-show-different)
      (mild--toggle-indicator "a" mild-show-added)
@@ -921,15 +945,20 @@ The root node is always visible."
                          (lambda () (transient-setup 'mild-dispatch))))
                       (format "Toggle filter group `%s'." (downcase name)))))
                (push (transient-parse-suffix
-                      'mild-dispatch
-                      (list key
-                            (format "%s %s"
-                                    (if (member name mild--active-filter-groups) "✓" "  ")
-                                    name)
-                             (intern (format "mild--toggle-group-%s" (downcase name)))
-                             :transient t))
-                     suffixes)))
-           (nreverse suffixes))))]
+                       'mild-dispatch
+                       (list key
+                             (format "%s %s (%d)"
+                                     (if (member name mild--active-filter-groups) "✓" "  ")
+                                     name
+                                     (length (mild--group-globs g)))
+                              (intern (format "mild--toggle-group-%s" (downcase name)))
+                              :transient t))
+                      suffixes)))
+            (push (transient-parse-suffix
+                   'mild-dispatch
+                   '("l" "list all globs..." mild-list-filter-groups))
+                  suffixes)
+            (nreverse suffixes))))]
     ["Toggles"
      ("F" (lambda () (if mild-show-filtered "✓ filtered" "  filtered"))
       (lambda () (interactive) (mild-toggle-show-filtered)) :transient t)

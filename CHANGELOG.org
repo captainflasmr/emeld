@@ -1,5 +1,13 @@
 #+TITLE: Changelog for Mild
 
+* [0.8.0] - 2026-05-20
+** Added
+- ~mild-list-filter-groups~ (~l~ in the transient Filename column): opens a buffer listing every filter group with all its globs and active state.
+- Transient Filename column shows glob count per group (e.g. ~✓ Backups (7)~).
+** Changed
+- Header line ~f~ indicator renamed to ~F~ to match the keybinding.
+- Inline glob display removed from transient (moved to dedicated buffer).
+
 * [0.7.0] - 2026-05-20
 ** Added
 - ~mild-filter-groups~ entries now support an optional boolean (~t~/~nil~) after the name to set the default active state.  All five default groups active by default.
