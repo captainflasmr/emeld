@@ -9,6 +9,14 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
+** TODO better category glob formatting of buffer
+
+** TODO better alignment of transient
+
+** TODO after copy point jumps to start of buffer
+
+** TODO consider gitignore filtering
+
 ** TODO add directory tree display for dired?
 
 ** TODO sub directory refresh
