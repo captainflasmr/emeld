@@ -791,14 +791,8 @@ Creates missing parent directories on the destination side if needed."
                              (propertize " [FULL] " 'face 'success))))
             (concat
              scan-msg mode-msg
-             " [" (mild--display-state-string) "] "
-             (propertize "Mod" 'face 'mild-diff-face) "  "
-             (propertize "New(L)" 'face 'mild-left-only-face) "  "
-             (propertize "New(R)" 'face 'mild-right-only-face) "  "
-             (propertize "Same" 'face 'mild-same-face) "  "
-             (if mild-filter-globs
-                 (propertize "Filtered" 'face 'mild-filtered-face)
-               ""))))))
+              " [" (mild--display-state-string) "] ")))))
+
 
 (defun mild--render ()
   "Render the tree in the current buffer, attempting to preserve point."
@@ -911,7 +905,14 @@ The root node is always visible."
 
 (transient-define-prefix mild-dispatch ()
    "Transient menu for Mild."
-    [["Filename"
+    [["File status"
+     ("s" (lambda () (if mild-show-same "✓ same" "  same"))
+      (lambda () (interactive) (mild-toggle-show-same)) :transient t)
+     ("m" (lambda () (if mild-show-different "✓ modified" "  modified"))
+      (lambda () (interactive) (mild-toggle-show-different)) :transient t)
+     ("a" (lambda () (if mild-show-added "✓ added" "  added"))
+      (lambda () (interactive) (mild-toggle-show-added)) :transient t)]
+    ["Filename"
      :if (lambda () mild-filter-groups)
      :class transient-column
      :setup-children
@@ -931,12 +932,12 @@ The root node is always visible."
                         (run-at-time 0 nil
                          (lambda () (transient-setup 'mild-dispatch))))
                       (format "Toggle filter group `%s'." (downcase name)))))
-                (push (transient-parse-suffix
-                       'mild-dispatch
-                       (list key
-                             (format "%s %s"
-                                     (if (member name mild--active-filter-groups) "✓" "  ")
-                                     name)
+               (push (transient-parse-suffix
+                      'mild-dispatch
+                      (list key
+                            (format "%s %s"
+                                    (if (member name mild--active-filter-groups) "✓" "  ")
+                                    name)
                              (intern (format "mild--toggle-group-%s" (downcase name)))
                              :transient t))
                      suffixes)))
@@ -946,25 +947,18 @@ The root node is always visible."
       (lambda () (interactive) (mild-toggle-show-hidden)) :transient t)
      ("F" (lambda () (if mild-show-filtered "✓ filtered" "  filtered"))
       (lambda () (interactive) (mild-toggle-show-filtered)) :transient t)
-     ("s" (lambda () (if mild-show-same "✓ same" "  same"))
-      (lambda () (interactive) (mild-toggle-show-same)) :transient t)
-     ("m" (lambda () (if mild-show-different "✓ modified" "  modified"))
-      (lambda () (interactive) (mild-toggle-show-different)) :transient t)
-     ("a" (lambda () (if mild-show-added "✓ added" "  added"))
-      (lambda () (interactive) (mild-toggle-show-added)) :transient t)
      ("T" (lambda () (if mild-show-tree-lines "✓ tree-lines" "  tree-lines"))
       (lambda () (interactive) (mild-toggle-tree-lines)) :transient t)]
     ["Actions"
      ("g"   "rescan (simple)"    mild-refresh)
      ("G"   "rescan (full diff)" mild-refresh-full)
-      ("o"   "jump other side"    mild-jump-other-side :transient t)
-      ("M-n" "next change"        mild-next-change :transient t)
-      ("M-p" "previous change"    mild-previous-change :transient t)
-      ("SPC" "soft diff / fold"   mild-soft-diff)
+     ("o"   "jump other side"    mild-jump-other-side :transient t)
+     ("M-n" "next change"        mild-next-change :transient t)
+     ("M-p" "previous change"    mild-previous-change :transient t)
+     ("SPC" "soft diff / fold"   mild-soft-diff)
      ("C"   "copy to other side" mild-copy)
      ("d"   "delete from side"   mild-delete)
      ("w"   "copy path"          mild-copy-path-at-point)
-     ("C-c f" "toggle filter group" mild-toggle-filter-group)
      ("RET" "action (ediff)"     mild-action)]
     ["Indent"
      (">" "more"  mild-increase-indent :transient t)
