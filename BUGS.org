@@ -11,13 +11,11 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 ** TODO use built-in Emacs diff?
 
-** TODO better async
-
-** TODO squeeze both columns
+** DOING better async
 
 ** TODO mark and bulk copy
 
-** TODO after copy point jumps to start of buffer
+** DONE after copy point jumps to start of buffer
 
 ** TODO consider gitignore filtering
 

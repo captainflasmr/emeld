@@ -79,12 +79,6 @@ Set to \"\" for no prefix."
   :type 'boolean
   :group 'emeld)
 
-(defcustom emeld-simple-comparison nil
-  "If non-nil, only compare file sizes for diff status.
-This is much faster but less accurate than content comparison."
-  :type 'boolean
-  :group 'emeld)
-
 (defcustom emeld-column-ratio 50
   "Width of the left column as a percentage of the window width (10-90).
 Defaults to 50 for equal-width panes."
@@ -115,21 +109,200 @@ Has no effect when `file-equal-p' is available (Emacs >= 29)."
   (is-dir nil)
   (is-filtered nil))
 
-(defvar-local emeld--scan-timer nil
-  "Repeating `run-at-time' timer processing the scan queue.")
-(defvar-local emeld--scan-queue nil
-  "Queue of directory entries to scan.
-Each element is (LEFT RIGHT PARENT REL-PATH NAMES IDX NODES).")
+(defvar-local emeld--scan-process nil
+  "Currently running `make-process' for the async diff scan.")
+(defvar-local emeld--scan-phase nil
+  "Current scan phase: `diff' or nil.")
+(defvar-local emeld--scan-diff-lines nil
+  "Diff status lines from `diff -rq' output.")
 (defvar-local emeld--scan-buf nil
-  "Buffer that owns the current scan (to detect stale callbacks).")
-(defvar-local emeld--last-scan-mode 'normal
-  "Scan mode used for the last refresh: `simple' or `full'.")
+  "Buffer being scanned (for sentinel callbacks).")
 (defvar-local emeld--active-filter-groups nil
   "List of currently active filter group names.")
 (defvar-local emeld--left-root nil)
 (defvar-local emeld--right-root nil)
 (defvar-local emeld--root-node nil)
 (defvar-local emeld--column-width nil)
+
+;;;; ─── Async scan via make-process ─────────────────────────────────
+
+(defun emeld--sentinel-done-p (event)
+  "Return non-nil if EVENT indicates a process has finished (any exit code)."
+  (or (string-prefix-p "finished" event)
+      (string-prefix-p "exited" event)))
+
+(defun emeld--strip-dir-prefix (line dir)
+  "Strip the absolute DIR prefix from LINE, leaving a relative path."
+  (let ((prefix (file-name-as-directory (expand-file-name dir))))
+    (if (string-prefix-p prefix line)
+        (substring line (length prefix))
+      line)))
+
+(defun emeld--make-file-node (relpath parent status)
+  "Create emeld-node for a file at RELPATH (relative from root).
+Only sets the path for the side(s) where the file exists."
+  (let ((name (file-name-nondirectory relpath)))
+    (emeld-node-create
+     :name name
+     :left-path (and (memq status '(same different left-only))
+                     (expand-file-name relpath emeld--left-root))
+     :right-path (and (memq status '(same different right-only))
+                      (expand-file-name relpath emeld--right-root))
+     :parent parent
+     :diff-status status)))
+
+(defun emeld--entries-to-nodes (entries prefix parent)
+  "Convert ENTRIES (alist of (REL-PATH . STATUS)) into emeld-node tree."
+  (let ((dirs (make-hash-table :test 'equal))
+        (files nil))
+    (dolist (entry entries)
+      (let* ((path (car entry))
+             (status (cdr entry))
+             (name (file-name-nondirectory path))
+             (filt (emeld--filtered-p name path)))
+        (unless (and filt (not emeld-show-filtered))
+          (if (string-match "/" path)
+              (let* ((slash-pos (match-beginning 0))
+                     (dir-name (substring path 0 slash-pos))
+                     (rest (substring path (1+ slash-pos))))
+                (push (cons rest status)
+                      (gethash dir-name dirs)))
+            (push entry files)))))
+    (let ((dir-names (make-hash-table :test 'equal)))
+      (maphash (lambda (k _) (puthash k t dir-names)) dirs)
+      (let ((file-nodes
+             (delq nil
+                   (mapcar (lambda (entry)
+                             (let ((path (car entry))
+                                   (status (cdr entry)))
+                               (if (gethash path dir-names)
+                                   nil
+                                 (let ((sub-rel (if (string-empty-p prefix) path
+                                                  (concat prefix "/" path))))
+                                   (emeld--make-file-node sub-rel parent status)))))
+                           (sort files (lambda (a b) (string< (car a) (car b)))))))
+            (dir-nodes nil))
+        (maphash
+         (lambda (dir-name sub-entries)
+           (let ((sub-prefix (if (string-empty-p prefix) dir-name
+                                (concat prefix "/" dir-name))))
+             (unless (and (emeld--filtered-p dir-name sub-prefix)
+                          (not emeld-show-filtered))
+               (let* ((dir-node (emeld-node-create
+                                :name dir-name
+                                :left-path (expand-file-name sub-prefix emeld--left-root)
+                                :right-path (expand-file-name sub-prefix emeld--right-root)
+                                :parent parent
+                                :is-dir t
+                                :diff-status 'same))
+                     (sub-nodes (emeld--entries-to-nodes
+                                 sub-entries sub-prefix dir-node))
+                     (has-changes (cl-some (lambda (n)
+                                             (not (eq (emeld-node-diff-status n) 'same)))
+                                           sub-nodes)))
+                 (when has-changes
+                   (setf (emeld-node-diff-status dir-node) 'different))
+                 (setf (emeld-node-children dir-node) sub-nodes)
+                 (setq dir-nodes (cons dir-node dir-nodes))))))
+         dirs)
+        (sort (nconc file-nodes (nreverse dir-nodes))
+              (lambda (a b) (string< (emeld-node-name a) (emeld-node-name b))))))))
+
+(defun emeld--expand-dir-entries (entries)
+  "Expand left-only/right-only entries that are directories on disk.
+`diff -rq' only reports the directory name, not its contents, for
+directories that exist entirely on one side.  This function replaces
+such directory entries with individual file entries from that directory."
+  (let ((result nil))
+    (dolist (entry entries)
+      (let ((path (car entry))
+            (status (cdr entry)))
+        (cond
+         ((and (eq status 'left-only)
+               (file-directory-p (expand-file-name path emeld--left-root)))
+          (dolist (f (directory-files-recursively
+                      (expand-file-name path emeld--left-root) ".*"))
+            (push (cons (file-relative-name f emeld--left-root) 'left-only)
+                  result)))
+         ((and (eq status 'right-only)
+               (file-directory-p (expand-file-name path emeld--right-root)))
+          (dolist (f (directory-files-recursively
+                      (expand-file-name path emeld--right-root) ".*"))
+            (push (cons (file-relative-name f emeld--right-root) 'right-only)
+                  result)))
+         (t
+          (push entry result)))))
+    (nreverse result)))
+
+(defun emeld--build-tree (buf)
+  "Build tree from `diff -rq' output, then render."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (let ((left emeld--left-root)
+            (right emeld--right-root)
+            (root emeld--root-node)
+            (entries nil))
+        (dolist (line emeld--scan-diff-lines)
+          (let ((parsed (emeld--parse-diff-line line left right)))
+            (when parsed
+              (push parsed entries))))
+        (setq entries (emeld--expand-dir-entries entries))
+        (setf (emeld-node-children root)
+              (emeld--entries-to-nodes entries "" root))
+        (setf (emeld-node-diff-status root)
+              (if (cl-some (lambda (c) (not (eq (emeld-node-diff-status c) 'same)))
+                           (emeld-node-children root))
+                  'different 'same))
+        (setq emeld--scan-process nil
+              emeld--scan-phase nil
+              emeld--scan-diff-lines nil
+              emeld--scan-buf nil)
+        (emeld--update-header-line)
+        (emeld--render)
+        (message "Scanning done.")))))
+
+(defun emeld--start-diff (buf)
+  "Start async `diff -rq' for content comparison."
+  (setq emeld--scan-phase 'diff)
+  (setq emeld--scan-diff-lines nil)
+  (let ((proc (make-process
+               :name "emeld-diff"
+               :buffer (generate-new-buffer " *emeld-diff*")
+               :command `("diff" "-rq"
+                          "--exclude=.git" "--exclude=node_modules"
+                          ,(expand-file-name emeld--left-root)
+                          ,(expand-file-name emeld--right-root))
+               :sentinel
+               (lambda (proc event)
+                 (when (emeld--sentinel-done-p event)
+                   (when (buffer-live-p buf)
+                     (with-current-buffer buf
+                       (let ((raw (with-current-buffer (process-buffer proc)
+                                    (buffer-string))))
+                         (setq emeld--scan-diff-lines
+                               (split-string raw "[\n\r]+" t))
+                         (kill-buffer (process-buffer proc))
+                         (emeld--build-tree buf)))))))))
+    (setq emeld--scan-process proc)))
+
+(defun emeld--parse-diff-line (line left-dir right-dir)
+  "Parse a `diff -rq' output LINE into (REL-PATH . STATUS) or nil."
+  (cond
+   ((string-match "^Files \\(.+\\) and .+ differ$" line)
+    (let ((rel (emeld--strip-dir-prefix (match-string 1 line) left-dir)))
+      (cons rel 'different)))
+   ((string-match "^Only in \\(.+\\): \\(.+\\)$" line)
+    (let* ((dir-part (match-string 1 line))
+           (name (match-string 2 line))
+           (full-path (concat (file-name-as-directory dir-part) name))
+           (left-prefix (expand-file-name left-dir))
+           (rel (if (string-prefix-p left-prefix full-path)
+                    (emeld--strip-dir-prefix full-path left-dir)
+                  (emeld--strip-dir-prefix full-path right-dir)))
+           (side (if (string-prefix-p left-prefix full-path)
+                     'left-only 'right-only)))
+      (cons rel side)))
+   (t nil)))
 
 (defun emeld--glob-to-regexp (glob)
   "Convert GLOB to a regular expression.
@@ -227,7 +400,7 @@ Files larger than `emeld-max-content-size' are compared by size only."
                (string= buf1-string (buffer-string))))))))
 
 (defun emeld--compare-files (left right)
-  "Compare LEFT and RIGHT files. Return 'same or 'different."
+  "Compare LEFT and RIGHT files. Return \\='same or \\='different."
   (if (and left right
            (file-exists-p left)
            (file-exists-p right))
@@ -235,115 +408,11 @@ Files larger than `emeld-max-content-size' are compared by size only."
             (is-dir-right (file-directory-p right)))
         (cond ((not (eq is-dir-left is-dir-right)) 'different)
               (is-dir-left 'same)
-              (t (if emeld-simple-comparison
-                     (let ((size-left (file-attribute-size (file-attributes left)))
-                           (size-right (file-attribute-size (file-attributes right))))
-                       (if (= size-left size-right) 'same 'different))
-                   (if (emeld--files-equal-p left right)
-                       'same 'different)))))
+              (t (if (emeld--files-equal-p left right)
+                     'same 'different))))
     (cond (left 'left-only)
           (right 'right-only)
           (t 'same))))
-
-(defun emeld--finalize-scan ()
-  "Cancel the scan timer and render the completed tree."
-  (when emeld--scan-timer
-    (cancel-timer emeld--scan-timer)
-    (setq emeld--scan-timer nil))
-  (when (emeld-node-children emeld--root-node)
-    (setf (emeld-node-diff-status emeld--root-node)
-          (if (cl-some (lambda (c) (not (eq (emeld-node-diff-status c) 'same)))
-                       (emeld-node-children emeld--root-node))
-              'different 'same)))
-  (setq emeld--scan-buf nil)
-  (setq emeld--scan-queue nil)
-  (emeld--update-header-line)
-  (emeld--render)
-  (message "Scanning done."))
-
-(defun emeld--process-scan-chunk (&optional simple)
-  "Process a batch of directory scanning work.
-Called by `emeld--scan-timer' on the main thread.
-Processes up to 300 files per tick for responsive UI."
-  (let* ((buf emeld--scan-buf)
-         (alive (and buf (buffer-live-p buf))))
-    (if (not alive)
-        (emeld--stop-scan)
-      (with-current-buffer buf
-        (let ((emeld-simple-comparison simple)
-              (processed 0)
-              (max-files 300))
-          (while (and emeld--scan-queue (< processed max-files))
-            (let* ((task (car emeld--scan-queue))
-                   (left-dir (nth 0 task))
-                   (right-dir (nth 1 task))
-                   (parent (nth 2 task))
-                   (rel-path (nth 3 task))
-                   (names (nth 4 task))
-                   (idx (or (nth 5 task) 0))
-                   (nodes (nth 6 task)))
-              (unless names
-                (let ((l-files (emeld--get-files left-dir))
-                      (r-files (emeld--get-files right-dir)))
-                  (setq names (sort (delete-dups
-                                     (append (mapcar #'file-name-nondirectory l-files)
-                                             (mapcar #'file-name-nondirectory r-files)))
-                                    #'string<))
-                  (setcar (nthcdr 4 task) names)))
-              (let* ((total (length names))
-                     (budget (- max-files processed))
-                     (end (min total (+ idx budget))))
-                (cl-loop for i from idx below end do
-                         (let* ((name (nth i names))
-                                (left (and left-dir (expand-file-name name left-dir)))
-                                (right (and right-dir (expand-file-name name right-dir)))
-                                (exists-left (and left (file-exists-p left)))
-                                (exists-right (and right (file-exists-p right)))
-                                (this-rel-path (if rel-path
-                                                   (concat rel-path "/" name)
-                                                 name))
-                                (is-dir (or (and exists-left (file-directory-p left))
-                                            (and exists-right (file-directory-p right))))
-                                (status (emeld--compare-files
-                                         (if exists-left left nil)
-                                         (if exists-right right nil)))
-                                (filt (emeld--filtered-p name this-rel-path)))
-                           (when (or (not filt) emeld-show-filtered)
-                             (push (emeld-node-create
-                                    :name name
-                                    :left-path (if exists-left left nil)
-                                    :right-path (if exists-right right nil)
-                                    :parent parent
-                                    :is-dir is-dir
-                                    :diff-status (if filt 'filtered status)
-                                    :is-filtered filt)
-                                   nodes))))
-                (setq processed (+ processed (- end idx)))
-                (setcar (nthcdr 5 task) end)
-                (setcar (nthcdr 6 task) nodes)
-                (when (>= end total)
-                  (pop emeld--scan-queue)
-                  (let ((completed (nreverse nodes)))
-                    (setf (emeld-node-children parent) completed)
-                    (dolist (n completed)
-                      (when (and (emeld-node-is-dir n)
-                                 (emeld-node-expanded n))
-                        (push (list (emeld-node-left-path n)
-                                    (emeld-node-right-path n)
-                                    n
-                                    (if rel-path
-                                        (concat rel-path "/" (emeld-node-name n))
-                                      (emeld-node-name n))
-                                    nil 0 nil)
-                              emeld--scan-queue)))
-                    (when (and (not (emeld-node-is-filtered parent))
-                               (eq (emeld-node-diff-status parent) 'same))
-                      (when (cl-some (lambda (c)
-                                       (not (eq (emeld-node-diff-status c) 'same)))
-                                     completed)
-                        (setf (emeld-node-diff-status parent) 'different))))))))
-          (unless emeld--scan-queue
-            (emeld--finalize-scan)))))))
 
 (defun emeld-diff (dir1 dir2)
   "Compare DIR1 and DIR2 side-by-side."
@@ -361,7 +430,6 @@ Processes up to 300 files per tick for responsive UI."
                      collect (car g)))
       (setq emeld--left-root (file-name-as-directory (expand-file-name dir1)))
       (setq emeld--right-root (file-name-as-directory (expand-file-name dir2)))
-      (setq emeld--last-scan-mode (if emeld-simple-comparison 'fast 'normal))
       (setq emeld--root-node (emeld-node-create
                               :name (file-name-nondirectory
                                      (directory-file-name emeld--left-root))
@@ -458,7 +526,6 @@ Prompts for confirmation or selection."
     (define-key map (kbd "f")   #'emeld-find-file)
     (define-key map (kbd "v")   #'emeld-find-file)
     (define-key map (kbd "g")   #'emeld-refresh)
-    (define-key map (kbd "G")   #'emeld-refresh-full)
     (define-key map (kbd "n")   #'emeld-next-line)
     (define-key map (kbd "p")   #'emeld-previous-line)
     (define-key map (kbd "M-n") #'emeld-next-change)
@@ -666,41 +733,29 @@ If the current side is empty but the other has a file, snap to it."
         (goto-char pos)))))
 
 (defun emeld--stop-scan ()
-  "Cancel the active scan timer and clear the queue."
-  (when emeld--scan-timer
-    (cancel-timer emeld--scan-timer)
-    (setq emeld--scan-timer nil))
-  (setq emeld--scan-queue nil)
-  (setq emeld--scan-buf nil))
+  "Cancel the active async scan and clean up processes."
+  (when (and emeld--scan-process
+             (process-live-p emeld--scan-process))
+    (delete-process emeld--scan-process))
+  (setq emeld--scan-process nil
+        emeld--scan-phase nil
+        emeld--scan-diff-lines nil
+        emeld--scan-buf nil))
 
-(defun emeld-refresh (&optional force-full)
+(defun emeld-refresh ()
   "Refresh the comparison asynchronously.
-With non-nil FORCE-FULL, always use content comparison.
-Uses a repeating timer to process directory scanning in small chunks,
-keeping the UI responsive throughout."
-  (interactive "P")
+Uses `make-process' to run `diff' as an OS-level async process,
+so Emacs stays fully responsive during the scan."
+  (interactive)
   (emeld--stop-scan)
-  (let ((simple (if force-full nil emeld-simple-comparison)))
-    (setq emeld--last-scan-mode (if simple 'fast 'normal))
-    ;; Clear old tree
-    (setf (emeld-node-children emeld--root-node) nil)
-    ;; Seed the work queue with the root directory
-    (setq emeld--scan-buf (current-buffer))
-    (setq emeld--scan-queue
-          (list (list emeld--left-root emeld--right-root
-                      emeld--root-node nil nil 0 nil)))
-    (setq emeld--scan-timer
-          (run-at-time 0.02 0.02 #'emeld--process-scan-chunk simple))
+  (let* ((buf (current-buffer))
+         (root emeld--root-node))
+    (setq emeld--scan-buf buf)
+    (setf (emeld-node-children root) nil)
     (emeld--update-header-line)
     (emeld--render)
-    (message (if force-full
-                 "Full content scan in background..."
-               "Rescanning directories in background..."))))
-
-(defun emeld-refresh-full ()
-  "Force a full content-based scan (ignores `emeld-simple-comparison')."
-  (interactive)
-  (emeld-refresh t))
+    (emeld--start-diff buf)
+    (message "Scanning in background...")))
 
 (defun emeld--read-new-root (on-left)
   "Prompt for a new root directory for side ON-LEFT and update the buffer."
@@ -881,17 +936,13 @@ Creates missing parent directories on the destination side if needed."
   "Update the header line with legend and status."
   (setq header-line-format
         '(:eval
-          (let ((scan-msg (if (and (boundp 'emeld--scan-timer)
-                                    emeld--scan-timer)
-                               (propertize " [SCANNING...] " 'face 'highlight)
-                             ""))
-                (mode-msg (concat
-                           (emeld--toggle-indicator "FAST" (eq emeld--last-scan-mode 'fast))
-                           " "
-                           (emeld--toggle-indicator "NORMAL" (not (eq emeld--last-scan-mode 'fast))))))
+          (let ((scan-msg (if (and (boundp 'emeld--scan-process)
+                                    emeld--scan-process)
+                             (propertize " [SCANNING...] " 'face 'highlight)
+                           "")))
             (concat
-             scan-msg mode-msg
-              " [" (emeld--display-state-string) "] ")))))
+             scan-msg
+             " [" (emeld--display-state-string) "] ")))))
 
 (defun emeld--render ()
   "Render the tree in the current buffer, attempting to preserve point."
@@ -1080,9 +1131,8 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
        ("<" "indent less"  emeld-decrease-indent :transient t)
        ("}" "pane wider"   emeld-grow-column :transient t)
        ("{" "pane narrow"  emeld-shrink-column :transient t)]
-      ["Navigate"
-       ("g"   "rescan (simple)"    emeld-refresh)
-       ("G"   "rescan (full diff)" emeld-refresh-full)
+       ["Navigate"
+        ("g"   "rescan"             emeld-refresh)
        ("o"   "jump other side"    emeld-jump-other-side :transient t)
        ("M-n" "next change"        emeld-next-change :transient t)
        ("M-p" "previous change"    emeld-previous-change :transient t)]
