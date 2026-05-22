@@ -92,6 +92,10 @@ Has no effect when `file-equal-p' is available (Emacs >= 29)."
   :type 'integer
   :group 'emeld)
 
+(defvar emeld-simple-comparison nil
+  "Obsolete.  Removed in 0.9.4.  Kept for dir-locals compatibility.")
+(make-obsolete-variable 'emeld-simple-comparison nil "0.9.4")
+
 (defun emeld--apply-dir-locals ()
   "Apply .dir-locals.el from `default-directory' to the current buffer."
   (hack-dir-local-variables-non-file-buffer))
@@ -110,13 +114,19 @@ Has no effect when `file-equal-p' is available (Emacs >= 29)."
   (is-filtered nil))
 
 (defvar-local emeld--scan-process nil
-  "Currently running `make-process' for the async diff scan.")
+  "Currently running `make-process' for the async scan.")
 (defvar-local emeld--scan-phase nil
-  "Current scan phase: `diff' or nil.")
+  "Current scan phase: `fd', `diff', or nil.")
+(defvar-local emeld--scan-left-files nil
+  "File list from left `fd' output (relative paths).")
+(defvar-local emeld--scan-right-files nil
+  "File list from right `fd' output (relative paths).")
 (defvar-local emeld--scan-diff-lines nil
   "Diff status lines from `diff -rq' output.")
 (defvar-local emeld--scan-buf nil
   "Buffer being scanned (for sentinel callbacks).")
+(defvar-local emeld--scan-full nil
+  "Non-nil if `fd' full scan is in progress (not just diff-only).")
 (defvar-local emeld--active-filter-groups nil
   "List of currently active filter group names.")
 (defvar-local emeld--left-root nil)
@@ -137,6 +147,73 @@ Has no effect when `file-equal-p' is available (Emacs >= 29)."
     (if (string-prefix-p prefix line)
         (substring line (length prefix))
       line)))
+
+(defun emeld--fd-command (dir1 dir2)
+  "Return `fd' command listing all files in DIR1 and DIR2."
+  (list "fd" "." (expand-file-name dir1) (expand-file-name dir2)
+        "--type" "file" "-H" "--no-ignore"
+        "--exclude" "node_modules"))
+
+(defun emeld--parse-fd-output (output dir1 dir2)
+  "Parse `fd' OUTPUT into left and right relative file lists."
+  (let* ((left-prefix (file-name-as-directory (expand-file-name dir1)))
+         (right-prefix (file-name-as-directory (expand-file-name dir2)))
+         (left-len (length left-prefix))
+         (right-len (length right-prefix))
+         (left-files nil)
+         (right-files nil))
+    (dolist (line (split-string output "\n" t))
+      (setq line (string-trim line))
+      (unless (string-empty-p line)
+        (cond
+         ((string-prefix-p left-prefix line)
+          (push (substring line left-len) left-files))
+         ((string-prefix-p right-prefix line)
+          (push (substring line right-len) right-files)))))
+    (setq emeld--scan-left-files left-files
+          emeld--scan-right-files right-files)))
+
+(defun emeld--start-fd-scan (buf)
+  "Start async `fd' listing files in both directories simultaneously."
+  (setq emeld--scan-phase 'fd)
+  (setq emeld--scan-left-files nil
+        emeld--scan-right-files nil)
+  (let ((proc (make-process
+               :name "emeld-fd"
+               :buffer (generate-new-buffer " *emeld-fd*")
+               :command (emeld--fd-command emeld--left-root emeld--right-root)
+               :sentinel
+               (lambda (proc event)
+                 (when (and (buffer-live-p buf)
+                            (emeld--sentinel-done-p event))
+                   (with-current-buffer buf
+                     (let ((gc-cons-threshold most-positive-fixnum)
+                           (output (with-current-buffer (process-buffer proc)
+                                     (prog1 (buffer-string)
+                                       (kill-buffer (current-buffer))))))
+                       (emeld--parse-fd-output output
+                                               emeld--left-root
+                                               emeld--right-root)
+                        (emeld--build-tree-from-merge buf))))))))
+    (setq emeld--scan-process proc)))
+
+(defun emeld--merge-file-lists ()
+  "Merge left and right file lists into an alist of (PATH . STATUS)."
+  (let ((all (delete-dups
+              (append emeld--scan-left-files emeld--scan-right-files)))
+        (result nil)
+        (left-set (make-hash-table :test 'equal :size (length emeld--scan-left-files)))
+        (right-set (make-hash-table :test 'equal :size (length emeld--scan-right-files))))
+    (dolist (f emeld--scan-left-files) (puthash f t left-set))
+    (dolist (f emeld--scan-right-files) (puthash f t right-set))
+    (dolist (path all)
+      (push (cons path
+                  (cond ((and (gethash path left-set)
+                              (gethash path right-set)) 'same)
+                        ((gethash path left-set) 'left-only)
+                        (t 'right-only)))
+            result))
+    (nreverse result)))
 
 (defun emeld--make-file-node (relpath parent status)
   "Create emeld-node for a file at RELPATH (relative from root).
@@ -211,8 +288,7 @@ Only sets the path for the side(s) where the file exists."
 (defun emeld--expand-dir-entries (entries)
   "Expand left-only/right-only entries that are directories on disk.
 `diff -rq' only reports the directory name, not its contents, for
-directories that exist entirely on one side.  This function replaces
-such directory entries with individual file entries from that directory."
+directories that exist entirely on one side."
   (let ((result nil))
     (dolist (entry entries)
       (let ((path (car entry))
@@ -234,8 +310,9 @@ such directory entries with individual file entries from that directory."
           (push entry result)))))
     (nreverse result)))
 
-(defun emeld--build-tree (buf)
-  "Build tree from `diff -rq' output, then render."
+(defun emeld--build-tree-from-diff (buf)
+  "Build tree from `diff -rq' output only, then render.
+Fast: only shows differences, no fd full listing."
   (when (buffer-live-p buf)
     (with-current-buffer buf
       (let ((left emeld--left-root)
@@ -261,17 +338,96 @@ such directory entries with individual file entries from that directory."
         (emeld--render)
         (message "Scanning done.")))))
 
+(defun emeld--build-tree-from-merge (buf)
+  "Build tree from merged fd file lists, then start content diff.
+Full scan: includes all files (same and different).
+Falls back to diff-only if fd produced no files."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (if (and (null emeld--scan-left-files) (null emeld--scan-right-files))
+          (progn
+            (message "fd found no files, falling back to diff-only...")
+            (setq emeld--scan-full nil)
+            (emeld--start-diff buf))
+        (let ((entries (emeld--merge-file-lists))
+              (root emeld--root-node))
+          (setf (emeld-node-children root)
+                (emeld--entries-to-nodes entries "" root))
+          (setf (emeld-node-diff-status root)
+                (if (cl-some (lambda (c) (not (eq (emeld-node-diff-status c) 'same)))
+                             (emeld-node-children root))
+                    'different 'same))
+          (emeld--start-diff buf))))))
+
+(defun emeld--overlay-diff (buf)
+  "Overlay `diff -rq' results onto the built tree, then render."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (let ((left emeld--left-root)
+            (right emeld--right-root)
+            (root emeld--root-node)
+            (status-map (make-hash-table :test 'equal :size 200)))
+        (dolist (line emeld--scan-diff-lines)
+          (let ((parsed (emeld--parse-diff-line line left right)))
+            (when parsed
+              (puthash (car parsed) (cdr parsed) status-map))))
+        (let ((nodes-to-check (emeld-node-children root)))
+          (while nodes-to-check
+            (let ((node (car nodes-to-check)))
+              (unless (emeld-node-is-dir node)
+                (let* ((relpath (emeld--node-relpath node))
+                       (diff-status (gethash relpath status-map)))
+                  (when diff-status
+                    (setf (emeld-node-diff-status node) diff-status))))
+              (when (emeld-node-is-dir node)
+                (setq nodes-to-check
+                      (nconc nodes-to-check (emeld-node-children node)))))
+            (setq nodes-to-check (cdr nodes-to-check))))
+        (setf (emeld-node-diff-status root)
+              (if (cl-some (lambda (c) (not (eq (emeld-node-diff-status c) 'same)))
+                           (emeld-node-children root))
+                  'different 'same))
+        (setq emeld--scan-process nil
+              emeld--scan-phase nil
+              emeld--scan-left-files nil
+              emeld--scan-right-files nil
+              emeld--scan-diff-lines nil
+              emeld--scan-buf nil
+              emeld--scan-full nil)
+        (emeld--update-header-line)
+        (emeld--render)
+        (message "Full scan done.")))))
+
+(defun emeld--diff-exclude-args ()
+  "Return a list of `--exclude=PATTERN' args from active filter groups.
+Only includes patterns without `/', since `diff --exclude' matches
+the basename component, not the full relative path."
+  (let ((args nil))
+    (dolist (group emeld-filter-groups)
+      (when (member (car group) emeld--active-filter-groups)
+        (dolist (glob (emeld--group-globs group))
+          (unless (string-match-p "/" glob)
+            (push (concat "--exclude=" glob) args)))))
+    args))
+
 (defun emeld--start-diff (buf)
-  "Start async `diff -rq' for content comparison."
+  "Start async `diff -rq' for content comparison.
+When `emeld--scan-full' is set, overlays results onto the existing
+fd-built tree.  Otherwise, builds the tree from diff output alone.
+Active filter group patterns (without `/') are passed to `diff'
+as `--exclude' arguments so diff skips filtered files entirely."
   (setq emeld--scan-phase 'diff)
   (setq emeld--scan-diff-lines nil)
-  (let ((proc (make-process
-               :name "emeld-diff"
-               :buffer (generate-new-buffer " *emeld-diff*")
-               :command `("diff" "-rq"
-                          "--exclude=.git" "--exclude=node_modules"
-                          ,(expand-file-name emeld--left-root)
-                          ,(expand-file-name emeld--right-root))
+  (let* ((excludes (emeld--diff-exclude-args))
+         (command `("diff" "-rq"
+                    "--exclude=node_modules"
+                    ,@excludes
+                    ,(expand-file-name emeld--left-root)
+                    ,(expand-file-name emeld--right-root)))
+         (proc (make-process
+                :name "emeld-diff"
+                :buffer (generate-new-buffer " *emeld-diff*")
+                :command command
                :sentinel
                (lambda (proc event)
                  (when (emeld--sentinel-done-p event)
@@ -282,7 +438,9 @@ such directory entries with individual file entries from that directory."
                          (setq emeld--scan-diff-lines
                                (split-string raw "[\n\r]+" t))
                          (kill-buffer (process-buffer proc))
-                         (emeld--build-tree buf)))))))))
+                         (if emeld--scan-full
+                             (emeld--overlay-diff buf)
+                           (emeld--build-tree-from-diff buf))))))))))
     (setq emeld--scan-process proc)))
 
 (defun emeld--parse-diff-line (line left-dir right-dir)
@@ -526,6 +684,7 @@ Prompts for confirmation or selection."
     (define-key map (kbd "f")   #'emeld-find-file)
     (define-key map (kbd "v")   #'emeld-find-file)
     (define-key map (kbd "g")   #'emeld-refresh)
+    (define-key map (kbd "G")   #'emeld-refresh-full)
     (define-key map (kbd "n")   #'emeld-next-line)
     (define-key map (kbd "p")   #'emeld-previous-line)
     (define-key map (kbd "M-n") #'emeld-next-change)
@@ -739,23 +898,37 @@ If the current side is empty but the other has a file, snap to it."
     (delete-process emeld--scan-process))
   (setq emeld--scan-process nil
         emeld--scan-phase nil
+        emeld--scan-left-files nil
+        emeld--scan-right-files nil
         emeld--scan-diff-lines nil
-        emeld--scan-buf nil))
+        emeld--scan-buf nil
+        emeld--scan-full nil))
 
-(defun emeld-refresh ()
-  "Refresh the comparison asynchronously.
-Uses `make-process' to run `diff' as an OS-level async process,
-so Emacs stays fully responsive during the scan."
-  (interactive)
+(defun emeld-refresh (&optional full)
+  "Refresh the comparison.
+With prefix arg FULL, do a full scan using `fd' to show all files
+(including identical ones) so filter groups work properly.
+Without prefix, uses only `diff -rq' (fast, shows only differences)."
+  (interactive "P")
   (emeld--stop-scan)
   (let* ((buf (current-buffer))
          (root emeld--root-node))
-    (setq emeld--scan-buf buf)
+    (setq emeld--scan-buf buf
+          emeld--scan-full (not (not full)))
     (setf (emeld-node-children root) nil)
     (emeld--update-header-line)
     (emeld--render)
-    (emeld--start-diff buf)
-    (message "Scanning in background...")))
+    (if full
+        (progn
+          (emeld--start-fd-scan buf)
+          (message "Full scan in background..."))
+      (emeld--start-diff buf)
+      (message "Scanning in background..."))))
+
+(defun emeld-refresh-full ()
+  "Force a full scan using `fd' (shows all files)."
+  (interactive)
+  (emeld-refresh t))
 
 (defun emeld--read-new-root (on-left)
   "Prompt for a new root directory for side ON-LEFT and update the buffer."
@@ -1132,7 +1305,8 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
        ("}" "pane wider"   emeld-grow-column :transient t)
        ("{" "pane narrow"  emeld-shrink-column :transient t)]
        ["Navigate"
-        ("g"   "rescan"             emeld-refresh)
+        ("g"   "rescan (diff only)"   emeld-refresh)
+        ("G"   "rescan (full tree)"   emeld-refresh-full)
        ("o"   "jump other side"    emeld-jump-other-side :transient t)
        ("M-n" "next change"        emeld-next-change :transient t)
        ("M-p" "previous change"    emeld-previous-change :transient t)]
