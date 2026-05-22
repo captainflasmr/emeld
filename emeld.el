@@ -208,15 +208,15 @@ GROUP is the name of a group defined in `emeld-filter-groups'."
   (when (and dir (file-directory-p dir))
     (directory-files dir t "^\\([^.]\\|\\.[^.]\\|\\.\\..\\)")))
 
-(defun emeld--pure-elisp-equal-p (file1 file2)
-  "Check FILE1 and FILE2 for content equality using pure Elisp.
-Files larger than `emeld-max-content-size' are considered matching
-by size alone to avoid blocking on large I/O."
+(defun emeld--files-equal-p (file1 file2)
+  "Return t if FILE1 and FILE2 have identical contents.
+Compares byte-by-byte using pure Elisp.
+Files larger than `emeld-max-content-size' are compared by size only."
   (let* ((attrs1 (file-attributes file1))
          (attrs2 (file-attributes file2))
-         (size1 (file-attribute-size attrs1))
-         (size2 (file-attribute-size attrs2)))
-    (and (= size1 size2)
+         (size1 (and attrs1 (file-attribute-size attrs1)))
+         (size2 (and attrs2 (file-attribute-size attrs2))))
+    (and size1 size2 (= size1 size2)
          (if (> size1 emeld-max-content-size)
              t
            (with-temp-buffer
@@ -234,18 +234,13 @@ by size alone to avoid blocking on large I/O."
       (let ((is-dir-left (file-directory-p left))
             (is-dir-right (file-directory-p right)))
         (cond ((not (eq is-dir-left is-dir-right)) 'different)
-              (is-dir-left 'same) ; Directories are 'same' by default, children will update it
-              (t (let ((size-match (eq (file-attribute-size (file-attributes left))
-                                       (file-attribute-size (file-attributes right)))))
-                   (if emeld-simple-comparison
-                       (if size-match 'same 'different)
-                     ;; Full content-based scan
-                     (if (and size-match
-                              (if (fboundp 'file-equal-p)
-                                  (file-equal-p left right)
-                                (emeld--pure-elisp-equal-p left right)))
-                         'same
-                       'different))))))
+              (is-dir-left 'same)
+              (t (if emeld-simple-comparison
+                     (let ((size-left (file-attribute-size (file-attributes left)))
+                           (size-right (file-attribute-size (file-attributes right))))
+                       (if (= size-left size-right) 'same 'different))
+                   (if (emeld--files-equal-p left right)
+                       'same 'different)))))
     (cond (left 'left-only)
           (right 'right-only)
           (t 'same))))
@@ -275,7 +270,7 @@ Processes up to 300 files per tick for responsive UI."
     (if (not alive)
         (emeld--stop-scan)
       (with-current-buffer buf
-        (let ((emeld-simple-comparison (or simple emeld-simple-comparison))
+        (let ((emeld-simple-comparison simple)
               (processed 0)
               (max-files 300))
           (while (and emeld--scan-queue (< processed max-files))
