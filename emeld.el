@@ -195,6 +195,18 @@ GROUP is the name of a group defined in `emeld-filter-groups'."
   (when (and dir (file-directory-p dir))
     (directory-files dir t "^\\([^.]\\|\\.[^.]\\|\\.\\..\\)")))
 
+(defun emeld--pure-elisp-equal-p (file1 file2)
+  "Fallback check for content equality utilizing cooperative threading safe structures."
+  (let ((size1 (file-attribute-size (file-attributes file1)))
+        (size2 (file-attribute-size (file-attributes file2))))
+    (and (= size1 size2)
+         (with-temp-buffer
+           (insert-file-contents-literally file1)
+           (let ((buf1-string (buffer-string)))
+             (erase-buffer)
+             (insert-file-contents-literally file2)
+             (string= buf1-string (buffer-string)))))))
+
 (defun emeld--compare-files (left right)
   "Compare LEFT and RIGHT files. Return 'same or 'different."
   (if (and left right
@@ -204,14 +216,17 @@ GROUP is the name of a group defined in `emeld-filter-groups'."
             (is-dir-right (file-directory-p right)))
         (cond ((not (eq is-dir-left is-dir-right)) 'different)
               (is-dir-left 'same) ; Directories are 'same' by default, children will update it
-              (t (if (if emeld-simple-comparison
-                         (eq (file-attribute-size (file-attributes left))
-                             (file-attribute-size (file-attributes right)))
-                       (= 0 (process-file "diff" nil nil nil "-q"
-                                          (expand-file-name left)
-                                          (expand-file-name right))))
-                     'same
-                   'different))))
+              (t (let ((size-match (eq (file-attribute-size (file-attributes left))
+                                       (file-attribute-size (file-attributes right)))))
+                   (if emeld-simple-comparison
+                       (if size-match 'same 'different)
+                     ;; Full content-based scan
+                     (if (and size-match
+                              (if (fboundp 'file-equal-p)
+                                  (file-equal-p left right)
+                                (emeld--pure-elisp-equal-p left right)))
+                         'same
+                       'different))))))
     (cond (left 'left-only)
           (right 'right-only)
           (t 'same))))
@@ -226,8 +241,9 @@ PARENT is the parent `emeld-node`. REL-PATH is the relative path from root."
           (yield-count 0))
     (dolist (name (sort all-names #'string<))
       (setq yield-count (1+ yield-count))
-      (when (= 0 (mod yield-count 10))
-        (sleep-for 0.001))
+      ;; Yield control back to UI every 25 elements to handle IO locks smoothly
+      (when (= 0 (mod yield-count 25))
+        (thread-yield))
       (let* ((left (and left-dir (expand-file-name name left-dir)))
              (right (and right-dir (expand-file-name name right-dir)))
              (exists-left (and left (file-exists-p left)))
@@ -433,7 +449,7 @@ If the current side is empty but the other has a file, snap to it."
     
     ;; Smart snapping: only if this side is truly empty and the other side has a file
     (let ((node (get-text-property (point) 'emeld-node)))
-      (when (and node (emeld-node-parent node)) ; Only snap for children, not root nodes
+      (when (and node (emeld-node-parent node)) ;; Only snap for children, not root nodes
         (let* ((has-left (emeld-node-left-path node))
                (has-right (emeld-node-right-path node))
                (current-is-empty (not (if on-right has-right has-left))))
@@ -583,14 +599,11 @@ If the current side is empty but the other has a file, snap to it."
 (defun emeld--stop-scan ()
   "Stop the currently running scanning thread if any."
   (when (and emeld--scan-thread (thread-live-p emeld--scan-thread))
-    ;; Threads in Emacs are cooperative, so we can't force kill them easily,
-    ;; but we can signal or just wait. For simplicity, we just clear the variable
-    ;; so the callback won't update the UI for the old scan.
     (setq emeld--scan-thread nil)))
 
 (defun emeld-refresh (&optional force-full)
   "Refresh the comparison asynchronously.
-With non-nil FORCE-FULL, always use content comparison (diff -q)."
+With non-nil FORCE-FULL, always use content comparison."
   (interactive "P")
   (emeld--stop-scan)
   (let* ((buf (current-buffer))
@@ -604,7 +617,6 @@ With non-nil FORCE-FULL, always use content comparison (diff -q)."
            (lambda ()
              (let ((emeld-simple-comparison simple))
                (let ((new-children (emeld--scan-dir left right root)))
-                 ;; Use run-at-time to update UI from main thread context
                  (run-at-time 0 nil
                               (lambda (b nodes)
                                 (when (buffer-live-p b)
@@ -761,10 +773,8 @@ Creates missing parent directories on the destination side if needed."
                   (make-directory dest-parent t))
                 ;; Perform the copy
                 (if (file-directory-p source)
-                    ;; For directories, if dest exists, we must handle it to avoid nesting
-                    (if (fboundp 'copy-directory-contents) ; Hypothetical, but let's use the real args
-                        (copy-directory source dest t t t) ; Emacs 28+
-                      ;; Emacs 27 fallback: remove dest if it exists as a file
+                    (if (fboundp 'copy-directory-contents)
+                        (copy-directory source dest t t t)
                       (when (and (file-exists-p dest) (not (file-directory-p dest)))
                         (delete-file dest))
                       (copy-directory source dest t t))
@@ -826,7 +836,6 @@ Creates missing parent directories on the destination side if needed."
             (concat
              scan-msg mode-msg
               " [" (emeld--display-state-string) "] ")))))
-
 
 (defun emeld--render ()
   "Render the tree in the current buffer, attempting to preserve point."
@@ -906,8 +915,7 @@ makes it match the left."
   (let* ((left (emeld-node-left-path node))
          (right (emeld-node-right-path node))
          (status (emeld-node-diff-status node))
-         (rel (emeld--node-relpath node))
-         (patch nil))
+         (rel (emeld--node-relpath node)))
     (with-temp-buffer
       (cond
        ((eq status 'different)
