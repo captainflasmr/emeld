@@ -43,11 +43,6 @@ defaults to inactive.  Toggle groups on/off with `emeld-toggle-filter-group'."
                              (cl-every #'stringp (cdr entry))))
                       val))))
 
-(defcustom emeld-show-filtered nil
-  "Whether to show filtered files (matching active filter groups)."
-  :type 'boolean
-  :group 'emeld)
-
 (defcustom emeld-show-same nil
   "Whether to show identical files."
   :type 'boolean
@@ -109,7 +104,7 @@ Has no effect when `file-equal-p' is available (Emacs >= 29)."
   parent
   children
   (expanded t)
-  (diff-status nil) ; 'same, 'different, 'left-only, 'right-only, 'filtered
+  (diff-status nil) ; 'same, 'different, 'left-only, 'right-only
   (is-dir nil)
   (is-filtered nil))
 
@@ -159,11 +154,10 @@ Only sets the path for the side(s) where the file exists."
         (files nil))
     (dolist (entry entries)
       (let* ((path (car entry))
-             (orig-status (cdr entry))
+             (status (cdr entry))
              (name (file-name-nondirectory path))
-             (filt (emeld--filtered-p name path))
-             (status (if (and filt emeld-show-filtered) 'filtered orig-status)))
-        (unless (and filt (not emeld-show-filtered))
+             (filt (emeld--filtered-p name path)))
+        (unless filt
           (if (string-match "/" path)
               (let* ((slash-pos (match-beginning 0))
                      (dir-name (substring path 0 slash-pos))
@@ -189,8 +183,7 @@ Only sets the path for the side(s) where the file exists."
          (lambda (dir-name sub-entries)
            (let ((sub-prefix (if (string-empty-p prefix) dir-name
                                 (concat prefix "/" dir-name))))
-             (unless (and (emeld--filtered-p dir-name sub-prefix)
-                          (not emeld-show-filtered))
+              (unless (emeld--filtered-p dir-name sub-prefix)
                (let* ((dir-node (emeld-node-create
                                 :name dir-name
                                 :left-path (expand-file-name sub-prefix emeld--left-root)
@@ -265,15 +258,14 @@ Fast: only shows differences, no fd full listing."
 
 (defun emeld--diff-exclude-args ()
   "Return `--exclude=PATTERN' args from active filter groups.
-When `emeld-show-filtered' is non-nil, no excludes are added so
-filtered files appear in diff output and can be shown in the tree."
+Only includes patterns without `/', since `diff --exclude' matches
+the basename component, not the full relative path."
   (let ((args '("--exclude=node_modules")))
-    (unless emeld-show-filtered
-      (dolist (group emeld-filter-groups)
-        (when (member (car group) emeld--active-filter-groups)
-          (dolist (glob (emeld--group-globs group))
-            (unless (string-match-p "/" glob)
-              (push (concat "--exclude=" glob) args))))))
+    (dolist (group emeld-filter-groups)
+      (when (member (car group) emeld--active-filter-groups)
+        (dolist (glob (emeld--group-globs group))
+          (unless (string-match-p "/" glob)
+            (push (concat "--exclude=" glob) args)))))
     args))
 
 (defun emeld--start-diff (buf)
@@ -530,11 +522,6 @@ Prompts for confirmation or selection."
   "Face for directory names (overrides diff-status faces)."
   :group 'emeld)
 
-(defface emeld-filtered-face
-  '((t :inherit shadow :strike-through t))
-  "Face for filtered files."
-  :group 'emeld)
-
 (defvar emeld-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "TAB") #'emeld-toggle-expand)
@@ -554,7 +541,6 @@ Prompts for confirmation or selection."
     (define-key map (kbd "w")   #'emeld-copy-path-at-point)
     (define-key map (kbd "d")   #'emeld-delete)
     (define-key map (kbd "SPC") #'emeld-soft-diff)
-    (define-key map (kbd "F")   #'emeld-toggle-show-filtered)
     (define-key map (kbd "s")   #'emeld-toggle-show-same)
     (define-key map (kbd "m")   #'emeld-toggle-show-different)
     (define-key map (kbd "a")   #'emeld-toggle-show-added)
@@ -571,7 +557,6 @@ Prompts for confirmation or selection."
   "Major mode for Meld-Inspired Local Diff."
   (setq-local truncate-lines t)
   (setq-local buffer-read-only t)
-  (make-local-variable 'emeld-show-filtered)
   (make-local-variable 'emeld-show-same)
   (make-local-variable 'emeld-show-different)
   (make-local-variable 'emeld-show-added)
@@ -677,13 +662,6 @@ If the current side is empty but the other has a file, snap to it."
   (let* ((width (or (bound-and-true-p emeld--column-width) (/ (* (window-width) emeld-column-ratio) 100)))
          (target-on-right (< (current-column) width)))
     (emeld--move-to-node-name target-on-right)))
-
-(defun emeld-toggle-show-filtered ()
-  "Toggle showing filtered files."
-  (interactive)
-  (setq emeld-show-filtered (not emeld-show-filtered))
-  (message "Show filtered: %s" (if emeld-show-filtered "on" "off"))
-  (emeld-refresh))
 
 (defun emeld-toggle-show-same ()
   "Toggle showing identical files."
@@ -941,8 +919,7 @@ Creates missing parent directories on the destination side if needed."
   (let ((groups (mapcar (lambda (g) (concat "[" g "]"))
                         emeld--active-filter-groups)))
      (concat
-      (emeld--toggle-indicator "F" emeld-show-filtered)
-     (emeld--toggle-indicator "s" emeld-show-same)
+      (emeld--toggle-indicator "s" emeld-show-same)
      (emeld--toggle-indicator "m" emeld-show-different)
      (emeld--toggle-indicator "a" emeld-show-added)
      (emeld--toggle-indicator "T" emeld-show-tree-lines)
@@ -1087,8 +1064,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
                                    (make-string (1- emeld-indent-offset) ?─))
                          (make-string emeld-indent-offset ?\s)))
                (full-prefix (concat indent-prefix branch))
-               (face (cond ((eq status 'filtered) 'emeld-filtered-face)
-                           ((eq status 'same) 'emeld-same-face)
+                (face (cond ((eq status 'same) 'emeld-same-face)
                            ((eq status 'different) 'emeld-diff-face)
                            ((eq status 'left-only) 'emeld-left-only-face)
                            ((eq status 'right-only) 'emeld-right-only-face)))
@@ -1149,9 +1125,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
         (lambda () (interactive) (emeld-toggle-show-different)) :transient t)
        ("a" (lambda () (if emeld-show-added "[x] added" "[ ] added"))
         (lambda () (interactive) (emeld-toggle-show-added)) :transient t)
-       ("F" (lambda () (if emeld-show-filtered "[x] filtered" "[ ] filtered"))
-        (lambda () (interactive) (emeld-toggle-show-filtered)) :transient t)
-       ("T" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
+        ("T" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
         (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
        (">" "indent more"  emeld-increase-indent :transient t)
        ("<" "indent less"  emeld-decrease-indent :transient t)

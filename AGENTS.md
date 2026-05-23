@@ -21,13 +21,15 @@ emacs -Q -L . -l emeld.el --eval '(emeld-diff "dir1" "dir2")'
 ## Key conventions
 
 - `lexical-binding: t` — be careful with closures in scan threads.
-- Uses Emacs `make-thread` for async scanning — UI must update via `run-at-time` from main thread.
-- `diff -q` for content comparison; set `emeld-simple-comparison` for size-only (faster).
+- Uses `make-process` for async `diff -rq` scanning — UI stays responsive.
+- Only `diff -rq` (no `fd`). Filter groups are passed as `--exclude` to `diff`.
 - Glob filter: `"*.elc"` matches filenames; `"tmp/*"` matches relative paths (contains `/`).
 - `emeld-node` struct stores the entire tree; properties attached via text-property `'emeld-node`.
 - Buffer-local vars (`emeld-show-*`) must be `make-local-variable`'d in mode body.
 - Node rendering uses standard Emacs `diff-*` faces for theming.
+- Use `car`/`cdr` instead of `pop` in `lexical-binding: t` threads (gv-let-place compatibility).
+- `directory-files-recursively` expands "Only in" directories found by `diff -rq`.
 
 ## Minimum Emacs version
 
-Requires Emacs 27+ (uses `make-thread`, 4-arg `copy-directory`).
+Requires Emacs 27+ (uses `make-process`, 4-arg `copy-directory`).

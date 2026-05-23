@@ -6,8 +6,9 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 
 * Features
 - Side-by-side view in a single buffer.
-- Recursive glob-based filtering (like Meld).
+- Recursive glob-based filtering (like Meld) — excluded at the ~diff~ level.
 - Instant toggles for New, Modified, and Identical files.
+- Filter groups toggleable from the transient menu.
 - Tree folding (~TAB~).
 - File copying between directories (~C~).
 - Export changes as a unified-diff patch (~P~).
@@ -30,8 +31,8 @@ Alternatively, run ~M-x emeld-diff-dwim~ to automatically use open Dired buffers
 
 The transient menu is organized into four groups:
 
-- ~View~ :: Toggle file visibility (~s~ same, ~m~ modified, ~a~ added, ~F~ filtered, ~T~ tree-lines), indent (~>~/~<~), pane resize (~{~/~}~).
-- ~Navigate~ :: Scan (~g~ simple, ~G~ full diff) and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
+- ~View~ :: Toggle file visibility (~s~ same, ~m~ modified, ~a~ added, ~T~ tree-lines), indent (~>~/~<~), pane resize (~{~/~}~).
+- ~Navigate~ :: Rescan (~g~) and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
 - ~File~ :: Operate on files (~RET~ ediff/open, ~SPC~ soft diff/fold, ~C~ copy, ~d~ delete, ~w~ copy path, ~P~ format patch).
 - ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~cl~ list all globs.
 
@@ -48,13 +49,11 @@ The transient menu is organized into four groups:
 | w         | Copy filename (C-u w for full path)    |
 | SPC       | Fold/Unfold (Dir) or Soft Diff (File)  |
 | o         | Jump to the other side                 |
-| h         | Toggle hidden files                    |
-| F         | Toggle filtered (glob) files           |
 | s         | Toggle same (identical) files          |
 | m         | Toggle modified files                  |
 | a         | Toggle added (new) files               |
-| g         | Rescan (uses ~emeld-simple-comparison~) |
-| G         | Force full content-diff scan           |
+| T         | Toggle tree-line display               |
+| g         | Rescan (~diff -rq~)                   |
 | n/p       | Navigation (Side-aware)                |
 | M-n/M-p   | Jump to next/previous file change      |
 | { / }     | Shrink/grow left pane width            |
@@ -62,7 +61,7 @@ The transient menu is organized into four groups:
 
 * Customization
 
-- ~emeld-filter-groups~: Named groups of globs toggleable with ~C-c f~.  Defaults:
+- ~emeld-filter-groups~: Named groups of globs toggleable from the transient menu.  Defaults:
 
   | Group           | Globs                                                                                                       |
   |-----------------+-------------------------------------------------------------------------------------------------------------|
@@ -73,7 +72,6 @@ The transient menu is organized into four groups:
   | Media           | ~*.jpg~, ~*.gif~, ~*.png~, ~*.bmp~, ~*.wav~, ~*.mp3~, ~*.ogg~, ~*.flac~, ~*.avi~, ~*.mpg~, ~*.xcf~, ~*.xpm~ |
 
 - ~emeld-show-same~: Whether to show identical files (default nil).
-- ~emeld-simple-comparison~: Set to t for fast size-only matching.
 - ~emeld-dir-prefix~: Unicode prefix for directory names (default ~"📁 "~).
 - ~emeld-column-ratio~: Left pane width as percentage of window (default 50).
 
@@ -91,5 +89,5 @@ project, place a ~.dir-locals.el~ file above the left directory:
                             ("Config" nil "*.cfg" "config/*"))))))
 #+end_src
 
-Toggle named groups on/off from the transient menu (~?~ then ~f~) or directly with ~C-c f~.
+Toggle named groups on/off from the transient menu (~?~) or directly with ~C-c f~.
 The header line shows the current display state and active groups in brackets.
