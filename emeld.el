@@ -1125,26 +1125,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
          (lambda () (interactive) (emeld-toggle-show-different)) :transient t)
         ("a" (lambda () (if emeld-show-added "[x] added" "[ ] added"))
          (lambda () (interactive) (emeld-toggle-show-added)) :transient t)]
-       ["View"
-        ("T" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
-         (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
-        (">" "indent more"  emeld-increase-indent :transient t)
-        ("<" "indent less"  emeld-decrease-indent :transient t)
-        ("}" "pane wider"   emeld-grow-column :transient t)
-        ("{" "pane narrow"  emeld-shrink-column :transient t)]
-       ["Navigate"
-        ("g"   "rescan"             emeld-refresh)
-       ("o"   "jump other side"    emeld-jump-other-side :transient t)
-       ("M-n" "next change"        emeld-next-change :transient t)
-       ("M-p" "previous change"    emeld-previous-change :transient t)]
-      ["File"
-       ("SPC" "soft diff / fold"   emeld-soft-diff)
-       ("RET" "action (ediff)"     emeld-action)
-       ("C"   "copy to other side" emeld-copy)
-       ("d"   "delete from side"   emeld-delete)
-       ("w"   "copy path"          emeld-copy-path-at-point)
-       ("P"   "format as patch"    emeld-format-patch)]
-      ["Filename"
+             ["Filename"
         :if (lambda () emeld-filter-groups)
         :class transient-column
         :setup-children
@@ -1179,6 +1160,25 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
                      (list "cl" "list all globs..." 'emeld-list-filter-groups))
                     suffixes)
               (nreverse suffixes))))]
+       ["View"
+        ("T" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
+         (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
+        (">" "indent more"  emeld-increase-indent :transient t)
+        ("<" "indent less"  emeld-decrease-indent :transient t)
+        ("}" "pane wider"   emeld-grow-column :transient t)
+        ("{" "pane narrow"  emeld-shrink-column :transient t)]
+       ["Navigate"
+        ("g"   "rescan"             emeld-refresh)
+       ("o"   "jump other side"    emeld-jump-other-side :transient t)
+       ("M-n" "next change"        emeld-next-change :transient t)
+       ("M-p" "previous change"    emeld-previous-change :transient t)]
+      ["File"
+       ("SPC" "soft diff / fold"   emeld-soft-diff)
+       ("RET" "action (ediff)"     emeld-action)
+       ("C"   "copy to other side" emeld-copy)
+       ("d"   "delete from side"   emeld-delete)
+       ("w"   "copy path"          emeld-copy-path-at-point)
+       ("P"   "format as patch"    emeld-format-patch)]
 ])
 
 (define-key emeld-mode-map (kbd "?") #'emeld-dispatch)
