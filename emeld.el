@@ -153,7 +153,8 @@ Only sets the path for the side(s) where the file exists."
      :diff-status status)))
 
 (defun emeld--entries-to-nodes (entries prefix parent)
-  "Convert ENTRIES (alist of (REL-PATH . STATUS)) into emeld-node tree."
+  "Convert ENTRIES (alist of (REL-PATH . STATUS)) into emeld-node tree.
+Directories are grouped first, followed by files, each sorted alphabetically."
   (let ((dirs (make-hash-table :test 'equal))
         (files nil))
     (dolist (entry entries)
@@ -205,8 +206,16 @@ Only sets the path for the side(s) where the file exists."
                   (setf (emeld-node-children dir-node) sub-nodes)
                   (setq dir-nodes (cons dir-node dir-nodes))))))
          dirs)
+        ;; MODIFIED HERE: Sort directories first, then files.
         (sort (nconc file-nodes (nreverse dir-nodes))
-              (lambda (a b) (string< (emeld-node-name a) (emeld-node-name b))))))))
+              (lambda (a b)
+                (let ((a-dir (emeld-node-is-dir a))
+                      (b-dir (emeld-node-is-dir b)))
+                  (if (eq a-dir b-dir)
+                      ;; If both are dirs or both are files, sort alphabetically
+                      (string< (emeld-node-name a) (emeld-node-name b))
+                    ;; Otherwise, the one that is a directory comes first
+                    a-dir))))))))
 
 (defun emeld--expand-dir-entries (entries)
   "Expand left-only/right-only entries that are directories on disk.
