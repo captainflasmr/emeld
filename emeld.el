@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.9.3
+;; Version: 0.10.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -114,12 +114,16 @@ Has no effect when `file-equal-p' is available (Emacs >= 29)."
   "Diff status lines from `diff -rq' output.")
 (defvar-local emeld--scan-buf nil
   "Buffer being scanned (for sentinel callbacks).")
+(defvar-local emeld--cached-full-lines nil
+  "Non-nil when a `-s' scan has completed (identical files available in tree).")
 (defvar-local emeld--active-filter-groups nil
   "List of currently active filter group names.")
 (defvar-local emeld--left-root nil)
 (defvar-local emeld--right-root nil)
 (defvar-local emeld--root-node nil)
 (defvar-local emeld--column-width nil)
+(defvar-local emeld--saved-expanded nil
+  "Saved expanded directory paths to restore after refresh.")
 
 ;;;; ─── Async scan via make-process ─────────────────────────────────
 
@@ -230,21 +234,23 @@ directories that exist entirely on one side."
     (nreverse result)))
 
 (defun emeld--build-tree-from-diff (buf)
-  "Build tree from `diff -rq' output only, then render.
-Fast: only shows differences, no fd full listing."
+  "Build tree from `diff -rq' output only, then render."
   (when (buffer-live-p buf)
     (with-current-buffer buf
       (let ((left emeld--left-root)
             (right emeld--right-root)
             (root emeld--root-node)
+            (gc-cons-threshold most-positive-fixnum)
             (entries nil))
         (dolist (line emeld--scan-diff-lines)
           (let ((parsed (emeld--parse-diff-line line left right)))
             (when parsed
               (push parsed entries))))
-        (setq entries (emeld--expand-dir-entries entries))
+        (when (cl-some (lambda (e) (memq (cdr e) '(left-only right-only))) entries)
+          (setq entries (emeld--expand-dir-entries entries)))
         (setf (emeld-node-children root)
               (emeld--entries-to-nodes entries "" root))
+        (emeld--restore-expanded root)
         (setf (emeld-node-diff-status root)
               (if (cl-some (lambda (c) (not (eq (emeld-node-diff-status c) 'same)))
                            (emeld-node-children root))
@@ -252,6 +258,8 @@ Fast: only shows differences, no fd full listing."
         (setq emeld--scan-process nil
               emeld--scan-diff-lines nil
               emeld--scan-buf nil)
+        (when emeld-show-same
+          (setq emeld--cached-full-lines t))
         (emeld--update-header-line)
         (emeld--render)
         (message "Scanning done.")))))
@@ -274,8 +282,9 @@ Active filter group patterns (without `/') are passed to `diff'
 as `--exclude' arguments so diff skips filtered files entirely."
   (setq emeld--scan-diff-lines nil)
   (let* ((excludes (emeld--diff-exclude-args))
-         (command `("diff" "-rq"
-                    ,@excludes
+         (flags (if emeld-show-same "-rqs" "-rq"))
+         (command `("diff" ,flags
+                     ,@excludes
                     ,(expand-file-name emeld--left-root)
                     ,(expand-file-name emeld--right-root)))
          (proc (make-process
@@ -301,6 +310,9 @@ as `--exclude' arguments so diff skips filtered files entirely."
    ((string-match "^Files \\(.+\\) and .+ differ$" line)
     (let ((rel (emeld--strip-dir-prefix (match-string 1 line) left-dir)))
       (cons rel 'different)))
+   ((string-match "^Files \\(.+\\) and .+ are identical$" line)
+    (let ((rel (emeld--strip-dir-prefix (match-string 1 line) left-dir)))
+      (cons rel 'same)))
    ((string-match "^Only in \\(.+\\): \\(.+\\)$" line)
     (let* ((dir-part (match-string 1 line))
            (name (match-string 2 line))
@@ -664,11 +676,14 @@ If the current side is empty but the other has a file, snap to it."
     (emeld--move-to-node-name target-on-right)))
 
 (defun emeld-toggle-show-same ()
-  "Toggle showing identical files."
+  "Toggle showing identical files.
+Uses cached data when available to avoid re-scanning."
   (interactive)
   (setq emeld-show-same (not emeld-show-same))
   (message "Show same: %s" (if emeld-show-same "on" "off"))
-  (emeld--render))
+  (if (and emeld-show-same (not emeld--cached-full-lines))
+      (emeld-refresh)
+    (emeld--render)))
 
 (defun emeld-toggle-tree-lines ()
   "Toggle the display of tree lines."
@@ -745,12 +760,36 @@ so Emacs stays fully responsive during the scan."
   (emeld--stop-scan)
   (let* ((buf (current-buffer))
          (root emeld--root-node))
-    (setq emeld--scan-buf buf)
+    (setq emeld--scan-buf buf
+          emeld--saved-expanded (emeld--collect-expanded root)
+          emeld--cached-full-lines nil)
     (setf (emeld-node-children root) nil)
     (emeld--update-header-line)
     (emeld--render)
     (emeld--start-diff buf)
     (message "Scanning in background...")))
+
+(defun emeld--collect-expanded (node)
+  "Return a list of relative paths for expanded directories under NODE."
+  (let ((paths nil))
+    (when (emeld-node-children node)
+      (dolist (child (emeld-node-children node))
+        (when (emeld-node-is-dir child)
+          (let ((rel (emeld--node-relpath child)))
+            (when (emeld-node-expanded child)
+              (push rel paths))
+            (setq paths (nconc (emeld--collect-expanded child) paths))))))
+    paths))
+
+(defun emeld--restore-expanded (node)
+  "Restore expansion state from `emeld--saved-expanded' for tree under NODE."
+  (when emeld--saved-expanded
+    (dolist (child (emeld-node-children node))
+      (when (emeld-node-is-dir child)
+        (let ((rel (emeld--node-relpath child)))
+          (unless (member rel emeld--saved-expanded)
+            (setf (emeld-node-expanded child) nil))
+          (emeld--restore-expanded child))))))
 
 (defun emeld--read-new-root (on-left)
   "Prompt for a new root directory for side ON-LEFT and update the buffer."

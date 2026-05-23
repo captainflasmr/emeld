@@ -72,7 +72,7 @@ The transient menu is organized into four groups:
   | Binaries        | ~*.pyc~, ~*.a~, ~*.obj~, ~*.o~, ~*.so~, ~*.la~, ~*.lib~, ~*.dll~, ~*.exe~                                   |
   | Media           | ~*.jpg~, ~*.gif~, ~*.png~, ~*.bmp~, ~*.wav~, ~*.mp3~, ~*.ogg~, ~*.flac~, ~*.avi~, ~*.mpg~, ~*.xcf~, ~*.xpm~ |
 
-- ~emeld-show-same~: Whether to show identical files (default nil).
+- ~emeld-show-same~: Whether to show identical files (default nil).  When enabled, ~diff -s~ reports identical files and they appear in the tree.
 - ~emeld-dir-prefix~: Unicode prefix for directory names (default ~"📁 "~).
 - ~emeld-column-ratio~: Left pane width as percentage of window (default 50).
 

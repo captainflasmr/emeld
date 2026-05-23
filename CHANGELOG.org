@@ -1,5 +1,24 @@
 #+TITLE: Changelog for Emeld
 
+* [0.10.0] - 2026-05-23
+** Added
+- ~diff -rqs~ mode for showing identical files (toggle ~s~).  First scan fetches and caches; subsequent toggles are instant re-renders.
+- ~emeld-dynamic-suffix~ transient suffix class for live ~[x]~/~[ ]~ updates on filter group toggles.
+- Tree expansion state preserved across rescans (collapsed directories stay collapsed).
+- GC and performance optimizations in diff sentinel for large trees (10,000+ files).
+- ~emeld-simple-comparison~ kept as obsolete alias for ~.dir-locals.el~ compatibility.
+** Removed
+- ~fd~ dependency entirely (was causing performance and compatibility issues).  All scanning is now ~diff -rq~ only.
+- ~emeld-simple-comparison~ defcustom (no more size-only vs content mode).
+- ~emeld-refresh-full~ and ~G~ keybinding (no separate full-scan mode).
+- ~emeld-show-filtered~ toggle, ~F~ keybinding, and ~emeld-filtered-face~ (filter groups controlled entirely via ~ca~–~cz~ in the transient).
+** Changed
+- Filter groups now passed as ~--exclude~ patterns to ~diff~, so filtering happens at the scan level (like Meld).
+- ~diff -rq~ no longer has hard-coded ~--exclude=.git~; the Version Control filter group (which includes ~.git~) controls it.
+- Transient menu reorganized into ~File Status~ (~s~ same, ~m~ modified, ~a~ added) and ~View~ (~T~ tree-lines, indent, pane resize) groups.
+- ~emeld--entries-to-nodes~ simplified (removed filtered-file status override).
+- ~g~ now always does a single scan (no simple/full distinction).
+
 * [0.9.2] - 2026-05-21
 ** Added
 - ~emeld-column-ratio~ customizable left-pane width percentage (default 50).
