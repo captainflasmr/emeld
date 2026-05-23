@@ -187,24 +187,24 @@ Directories are grouped first, followed by files, each sorted alphabetically."
         (maphash
          (lambda (dir-name sub-entries)
            (let ((sub-prefix (if (string-empty-p prefix) dir-name
-                                (concat prefix "/" dir-name))))
-              (unless (emeld--filtered-p dir-name sub-prefix)
+                               (concat prefix "/" dir-name))))
+             (unless (emeld--filtered-p dir-name sub-prefix)
                (let* ((dir-node (emeld-node-create
-                                :name dir-name
-                                :left-path (expand-file-name sub-prefix emeld--left-root)
-                                :right-path (expand-file-name sub-prefix emeld--right-root)
-                                :parent parent
-                                :is-dir t
-                                :diff-status 'same))
+                                 :name dir-name
+                                 :left-path (expand-file-name sub-prefix emeld--left-root)
+                                 :right-path (expand-file-name sub-prefix emeld--right-root)
+                                 :parent parent
+                                 :is-dir t
+                                 :diff-status 'same))
                       (sub-nodes (emeld--entries-to-nodes
                                   sub-entries sub-prefix dir-node))
                       (has-changes (cl-some (lambda (n)
                                               (not (eq (emeld-node-diff-status n) 'same)))
                                             sub-nodes)))
-                  (when has-changes
-                    (setf (emeld-node-diff-status dir-node) 'different))
-                  (setf (emeld-node-children dir-node) sub-nodes)
-                  (setq dir-nodes (cons dir-node dir-nodes))))))
+                 (when has-changes
+                   (setf (emeld-node-diff-status dir-node) 'different))
+                 (setf (emeld-node-children dir-node) sub-nodes)
+                 (setq dir-nodes (cons dir-node dir-nodes))))))
          dirs)
         ;; MODIFIED HERE: Sort directories first, then files.
         (sort (nconc file-nodes (nreverse dir-nodes))
@@ -293,7 +293,7 @@ as `--exclude' arguments so diff skips filtered files entirely."
   (let* ((excludes (emeld--diff-exclude-args))
          (flags (if emeld-show-same "-rqs" "-rq"))
          (command `("diff" ,flags
-                     ,@excludes
+                    ,@excludes
                     ,(expand-file-name emeld--left-root)
                     ,(expand-file-name emeld--right-root)))
          (proc (make-process
@@ -380,7 +380,7 @@ GROUP is the name of a group defined in `emeld-filter-groups'."
         (message "Filter group \"%s\" disabled" group))
     (push group emeld--active-filter-groups)
     (message "Filter group \"%s\" enabled" group))
-   (emeld-refresh))
+  (emeld-refresh))
 
 (defun emeld-list-filter-groups ()
   "Display all filter groups and their glob patterns in an org-mode buffer."
@@ -497,7 +497,7 @@ Prompts for confirmation or selection."
                      (car (emeld--get-dwim-dirs))))
          ;; If target-b is same as target-a, we only have one good candidate
          (has-two (and target-b (not (string= (expand-file-name target-a)
-                                             (expand-file-name target-b)))))
+                                              (expand-file-name target-b)))))
          (left (read-directory-name "Left directory: " nil target-a t))
          (left-abs (directory-file-name (expand-file-name left)))
          ;; For right side, use target-b if it's different from what was chosen for left.
@@ -966,8 +966,8 @@ Creates missing parent directories on the destination side if needed."
   "Return a compact string showing current display toggle states."
   (let ((groups (mapcar (lambda (g) (concat "[" g "]"))
                         emeld--active-filter-groups)))
-     (concat
-      (emeld--toggle-indicator "s" emeld-show-same)
+    (concat
+     (emeld--toggle-indicator "s" emeld-show-same)
      (emeld--toggle-indicator "m" emeld-show-different)
      (emeld--toggle-indicator "a" emeld-show-added)
      (emeld--toggle-indicator "T" emeld-show-tree-lines)
@@ -979,9 +979,9 @@ Creates missing parent directories on the destination side if needed."
   (setq header-line-format
         '(:eval
           (let ((scan-msg (if (and (boundp 'emeld--scan-process)
-                                    emeld--scan-process)
-                             (propertize " [SCANNING...] " 'face 'highlight)
-                           "")))
+                                   emeld--scan-process)
+                              (propertize " [SCANNING...] " 'face 'highlight)
+                            "")))
             (concat
              scan-msg
              " [" (emeld--display-state-string) "] ")))))
@@ -995,7 +995,7 @@ Creates missing parent directories on the destination side if needed."
     ;; Save path of current node to restore point later
     (when old-node
       (setq target-path (or (emeld-node-left-path old-node)
-                           (emeld-node-right-path old-node))))
+                            (emeld-node-right-path old-node))))
     
     (setq emeld--column-width (/ (* (window-width) emeld-column-ratio) 100))
     (erase-buffer)
@@ -1112,21 +1112,21 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
                                    (make-string (1- emeld-indent-offset) ?─))
                          (make-string emeld-indent-offset ?\s)))
                (full-prefix (concat indent-prefix branch))
-                (face (cond ((eq status 'same) 'emeld-same-face)
+               (face (cond ((eq status 'same) 'emeld-same-face)
                            ((eq status 'different) 'emeld-diff-face)
                            ((eq status 'left-only) 'emeld-left-only-face)
                            ((eq status 'right-only) 'emeld-right-only-face)))
                (name-face (if (emeld-node-is-dir node) 'emeld-dir-face face))
                (dir-indicator (if (emeld-node-is-dir node)
-                                    (concat (if (emeld-node-expanded node) "[-] " "[+] ")
-                                            emeld-dir-prefix)
-                                  "")))
-           (let ((start (point)))
-             ;; Left Side
-             (insert (propertize full-prefix 'face 'shadow))
-             (when (emeld-node-left-path node)
-               (insert dir-indicator)
-               (insert (propertize (emeld-node-name node) 'face name-face)))
+                                  (concat (if (emeld-node-expanded node) "[-] " "[+] ")
+                                          emeld-dir-prefix)
+                                "")))
+          (let ((start (point)))
+            ;; Left Side
+            (insert (propertize full-prefix 'face 'shadow))
+            (when (emeld-node-left-path node)
+              (insert dir-indicator)
+              (insert (propertize (emeld-node-name node) 'face name-face)))
             
             ;; Padding to Right Side
             (let ((current-len (current-column)))
@@ -1138,9 +1138,9 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
             (insert (propertize full-prefix 'face 'shadow))
             (when (emeld-node-right-path node)
               (insert dir-indicator)
-               (insert (propertize (or (emeld-node-name-right node)
+              (insert (propertize (or (emeld-node-name-right node)
                                       (emeld-node-name node))
-                                   'face name-face)))
+                                  'face name-face)))
             
             (add-text-properties start (point) `(emeld-node ,node mouse-face highlight))
             (insert "\n")
@@ -1148,12 +1148,12 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
             ;; Recurse
             (when (and (emeld-node-expanded node) (emeld-node-children node))
               (emeld--render-nodes (emeld-node-children node)
-                                  (if emeld-show-tree-lines
-                                      (concat indent-prefix 
-                                              (if is-last " " "│")
-                                              (make-string (1- emeld-indent-offset) ?\s))
-                                    (concat indent-prefix (make-string emeld-indent-offset ?\s)))
-                                    column-width))))))))
+                                   (if emeld-show-tree-lines
+                                       (concat indent-prefix 
+                                               (if is-last " " "│")
+                                               (make-string (1- emeld-indent-offset) ?\s))
+                                     (concat indent-prefix (make-string emeld-indent-offset ?\s)))
+                                   column-width))))))))
 
 (defclass emeld-dynamic-suffix (transient-suffix)
   ((dynamic-description :initarg :dynamic-description :initform nil))
@@ -1165,69 +1165,69 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
     (if fn (funcall fn) (cl-call-next-method))))
 
 (transient-define-prefix emeld-dispatch ()
-   "Transient menu for emeld."
-      [["File Status"
-        ("s" (lambda () (if emeld-show-same "[x] same" "[ ] same"))
-         (lambda () (interactive) (emeld-toggle-show-same)) :transient t)
-        ("m" (lambda () (if emeld-show-different "[x] modified" "[ ] modified"))
-         (lambda () (interactive) (emeld-toggle-show-different)) :transient t)
-        ("a" (lambda () (if emeld-show-added "[x] added" "[ ] added"))
-         (lambda () (interactive) (emeld-toggle-show-added)) :transient t)]
-             ["Filename"
-        :if (lambda () emeld-filter-groups)
-        :class transient-column
-        :setup-children
-        (lambda (&rest _)
-          (when emeld-filter-groups
-            (let ((idx 0)
-                  (suffixes nil)
-                  (max-len (apply #'max (mapcar (lambda (g) (length (car g)))
-                                                emeld-filter-groups))))
-              (dolist (g emeld-filter-groups)
-                (let* ((group-name (car g))
-                       (key (format "c%c" (+ ?a idx)))
-                       (cmd (let ((g-name group-name))
-                              (lambda ()
-                                (interactive)
-                                (emeld-toggle-filter-group g-name))))
-                       (desc-func (let ((g-name group-name) (len max-len))
-                                    (lambda ()
-                                      (format (concat "[%c] %-" (number-to-string len) "s")
-                                              (if (member g-name emeld--active-filter-groups) ?x ?\s)
-                                              g-name)))))
-                   (setq idx (1+ idx))
-                   (push (transient-parse-suffix
-                         'emeld-dispatch
-                         (list key "" cmd
-                               :class 'emeld-dynamic-suffix
-                               :dynamic-description desc-func
-                               :transient t))
-                        suffixes)))
+  "Transient menu for emeld."
+  [["File Status"
+    ("s" (lambda () (if emeld-show-same "[x] Same" "[ ] Same"))
+     (lambda () (interactive) (emeld-toggle-show-same)) :transient t)
+    ("a" (lambda () (if emeld-show-added "[x] New" "[ ] New"))
+     (lambda () (interactive) (emeld-toggle-show-added)) :transient t)
+    ("m" (lambda () (if emeld-show-different "[x] Modified" "[ ] Modified"))
+     (lambda () (interactive) (emeld-toggle-show-different)) :transient t)]
+   ["Filename"
+    :if (lambda () emeld-filter-groups)
+    :class transient-column
+    :setup-children
+    (lambda (&rest _)
+      (when emeld-filter-groups
+        (let ((idx 0)
+              (suffixes nil)
+              (max-len (apply #'max (mapcar (lambda (g) (length (car g)))
+                                            emeld-filter-groups))))
+          (dolist (g emeld-filter-groups)
+            (let* ((group-name (car g))
+                   (key (format "c%c" (+ ?a idx)))
+                   (cmd (let ((g-name group-name))
+                          (lambda ()
+                            (interactive)
+                            (emeld-toggle-filter-group g-name))))
+                   (desc-func (let ((g-name group-name) (len max-len))
+                                (lambda ()
+                                  (format (concat "[%c] %-" (number-to-string len) "s")
+                                          (if (member g-name emeld--active-filter-groups) ?x ?\s)
+                                          g-name)))))
+              (setq idx (1+ idx))
               (push (transient-parse-suffix
                      'emeld-dispatch
-                     (list "cl" "list all globs..." 'emeld-list-filter-groups))
-                    suffixes)
-              (nreverse suffixes))))]
-       ["View"
-        ("T" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
-         (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
-        (">" "indent more"  emeld-increase-indent :transient t)
-        ("<" "indent less"  emeld-decrease-indent :transient t)
-        ("}" "pane wider"   emeld-grow-column :transient t)
-        ("{" "pane narrow"  emeld-shrink-column :transient t)]
-       ["Navigate"
-        ("g"   "rescan"             emeld-refresh)
-       ("o"   "jump other side"    emeld-jump-other-side :transient t)
-       ("M-n" "next change"        emeld-next-change :transient t)
-       ("M-p" "previous change"    emeld-previous-change :transient t)]
-      ["Action"
-       ("SPC" "soft diff / fold"   emeld-soft-diff)
-       ("RET" "action (ediff)"     emeld-action)
-       ("C"   "copy to other side" emeld-copy)
-       ("d"   "delete from side"   emeld-delete)
-       ("w"   "copy path"          emeld-copy-path-at-point)
-       ("P"   "format as patch"    emeld-format-patch)]
-])
+                     (list key "" cmd
+                           :class 'emeld-dynamic-suffix
+                           :dynamic-description desc-func
+                           :transient t))
+                    suffixes)))
+          (push (transient-parse-suffix
+                 'emeld-dispatch
+                 (list "cl" "list all globs..." 'emeld-list-filter-groups))
+                suffixes)
+          (nreverse suffixes))))]
+   ["View"
+    ("T" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
+     (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
+    (">" "indent more"  emeld-increase-indent :transient t)
+    ("<" "indent less"  emeld-decrease-indent :transient t)
+    ("}" "pane wider"   emeld-grow-column :transient t)
+    ("{" "pane narrow"  emeld-shrink-column :transient t)]
+   ["Navigate"
+    ("g"   "rescan"             emeld-refresh)
+    ("o"   "jump other side"    emeld-jump-other-side :transient t)
+    ("M-n" "next change"        emeld-next-change :transient t)
+    ("M-p" "previous change"    emeld-previous-change :transient t)]
+   ["Action"
+    ("SPC" "soft diff / fold"   emeld-soft-diff)
+    ("RET" "action (ediff)"     emeld-action)
+    ("C"   "copy to other side" emeld-copy)
+    ("d"   "delete from side"   emeld-delete)
+    ("w"   "copy path"          emeld-copy-path-at-point)
+    ("P"   "format as patch"    emeld-format-patch)]
+   ])
 
 (define-key emeld-mode-map (kbd "?") #'emeld-dispatch)
 
