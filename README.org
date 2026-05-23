@@ -31,7 +31,8 @@ Alternatively, run ~M-x emeld-diff-dwim~ to automatically use open Dired buffers
 
 The transient menu is organized into four groups:
 
-- ~View~ :: Toggle file visibility (~s~ same, ~m~ modified, ~a~ added, ~T~ tree-lines), indent (~>~/~<~), pane resize (~{~/~}~).
+- ~File Status~ :: Toggle file visibility (~s~ same, ~m~ modified, ~a~ added).
+- ~View~ :: Toggle tree-lines (~T~), indent (~>~/~<~), pane resize (~{~/~}~).
 - ~Navigate~ :: Rescan (~g~) and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
 - ~File~ :: Operate on files (~RET~ ediff/open, ~SPC~ soft diff/fold, ~C~ copy, ~d~ delete, ~w~ copy path, ~P~ format patch).
 - ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~cl~ list all globs.

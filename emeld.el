@@ -1118,19 +1118,20 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
 
 (transient-define-prefix emeld-dispatch ()
    "Transient menu for emeld."
-     [["View"
-       ("s" (lambda () (if emeld-show-same "[x] same" "[ ] same"))
-        (lambda () (interactive) (emeld-toggle-show-same)) :transient t)
-       ("m" (lambda () (if emeld-show-different "[x] modified" "[ ] modified"))
-        (lambda () (interactive) (emeld-toggle-show-different)) :transient t)
-       ("a" (lambda () (if emeld-show-added "[x] added" "[ ] added"))
-        (lambda () (interactive) (emeld-toggle-show-added)) :transient t)
+      [["File Status"
+        ("s" (lambda () (if emeld-show-same "[x] same" "[ ] same"))
+         (lambda () (interactive) (emeld-toggle-show-same)) :transient t)
+        ("m" (lambda () (if emeld-show-different "[x] modified" "[ ] modified"))
+         (lambda () (interactive) (emeld-toggle-show-different)) :transient t)
+        ("a" (lambda () (if emeld-show-added "[x] added" "[ ] added"))
+         (lambda () (interactive) (emeld-toggle-show-added)) :transient t)]
+       ["View"
         ("T" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
-        (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
-       (">" "indent more"  emeld-increase-indent :transient t)
-       ("<" "indent less"  emeld-decrease-indent :transient t)
-       ("}" "pane wider"   emeld-grow-column :transient t)
-       ("{" "pane narrow"  emeld-shrink-column :transient t)]
+         (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
+        (">" "indent more"  emeld-increase-indent :transient t)
+        ("<" "indent less"  emeld-decrease-indent :transient t)
+        ("}" "pane wider"   emeld-grow-column :transient t)
+        ("{" "pane narrow"  emeld-shrink-column :transient t)]
        ["Navigate"
         ("g"   "rescan"             emeld-refresh)
        ("o"   "jump other side"    emeld-jump-other-side :transient t)
