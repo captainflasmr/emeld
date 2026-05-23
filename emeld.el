@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.10.0
+;; Version: 0.11.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -71,6 +71,14 @@ Set to \"\" for no prefix."
 
 (defcustom emeld-show-tree-lines t
   "Whether to show hierarchical tree lines."
+  :type 'boolean
+  :group 'emeld)
+
+(defcustom emeld-show-strikethrough t
+  "Whether to show strikethrough for orphan files on the missing side.
+When non-nil, a file that exists only on one side shows its tree path
+and filename with strikethrough on the other side, mimicking Meld's
+display.  When nil, the other side shows nothing for the orphan."
   :type 'boolean
   :group 'emeld)
 
@@ -578,6 +586,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "m")   #'emeld-toggle-show-different)
     (define-key map (kbd "a")   #'emeld-toggle-show-added)
     (define-key map (kbd "T")   #'emeld-toggle-tree-lines)
+    (define-key map (kbd "S")   #'emeld-toggle-show-strikethrough)
     (define-key map (kbd ">")   #'emeld-increase-indent)
     (define-key map (kbd "<")   #'emeld-decrease-indent)
     (define-key map (kbd "}")   #'emeld-grow-column)
@@ -593,6 +602,7 @@ Mimics Meld's display of missing files."
   (make-local-variable 'emeld-show-same)
   (make-local-variable 'emeld-show-different)
   (make-local-variable 'emeld-show-added)
+  (make-local-variable 'emeld-show-strikethrough)
   (setq-local revert-buffer-function #'emeld-refresh)
   (add-hook 'kill-buffer-hook #'emeld--stop-scan nil t)
   (emeld--update-header-line))
@@ -710,6 +720,16 @@ Uses cached data when available to avoid re-scanning."
   "Toggle the display of tree lines."
   (interactive)
   (setq emeld-show-tree-lines (not emeld-show-tree-lines))
+  (emeld--render))
+
+(defun emeld-toggle-show-strikethrough ()
+  "Toggle strikethrough display for orphan files on the missing side.
+When enabled, orphan files are shown with strikethrough on the side
+where they are missing (Meld-style).  When disabled, the missing side
+shows nothing for the orphan."
+  (interactive)
+  (setq emeld-show-strikethrough (not emeld-show-strikethrough))
+  (message "Strikethrough: %s" (if emeld-show-strikethrough "on" "off"))
   (emeld--render))
 
 (defun emeld-increase-indent ()
@@ -983,6 +1003,7 @@ Creates missing parent directories on the destination side if needed."
      (emeld--toggle-indicator "m" emeld-show-different)
      (emeld--toggle-indicator "a" emeld-show-added)
      (emeld--toggle-indicator "T" emeld-show-tree-lines)
+     (emeld--toggle-indicator "S" emeld-show-strikethrough)
      (when groups
        (concat " " (mapconcat #'identity groups " "))))))
 
@@ -1140,7 +1161,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
                 (progn
                   (insert dir-indicator)
                   (insert (propertize (emeld-node-name node) 'face name-face)))
-              (when (eq status 'right-only)
+              (when (and emeld-show-strikethrough (eq status 'right-only))
                 (insert dir-indicator)
                 (insert (propertize (emeld-node-name node)
                                     'face 'emeld-right-only-strike-face))))
@@ -1159,7 +1180,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
                   (insert (propertize (or (emeld-node-name-right node)
                                           (emeld-node-name node))
                                       'face name-face)))
-              (when (eq status 'left-only)
+              (when (and emeld-show-strikethrough (eq status 'left-only))
                 (insert dir-indicator)
                 (insert (propertize (emeld-node-name node)
                                     'face 'emeld-left-only-strike-face))))
@@ -1233,6 +1254,8 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
    ["View"
     ("T" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
      (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
+    ("S" (lambda () (if emeld-show-strikethrough "[x] strikethrough" "[ ] strikethrough"))
+     (lambda () (interactive) (emeld-toggle-show-strikethrough)) :transient t)
     (">" "indent more"  emeld-increase-indent :transient t)
     ("<" "indent less"  emeld-decrease-indent :transient t)
     ("}" "pane wider"   emeld-grow-column :transient t)

@@ -1,5 +1,10 @@
 #+TITLE: Changelog for Emeld
 
+* [0.11.0] - 2026-05-23
+** Added
+- Strikethrough display for orphan files on the missing side (Meld-style).  When a file exists only on one side, the other side shows the tree path and filename with ~:strike-through~.  Toggle with ~S~.
+- ~emeld-show-strikethrough~ defcustom for controlling strikethrough display (default ~t~).
+
 * [0.10.0] - 2026-05-23
 ** Added
 - ~diff -rqs~ mode for showing identical files (toggle ~s~).  First scan fetches and caches; subsequent toggles are instant re-renders.

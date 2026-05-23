@@ -8,6 +8,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Side-by-side view in a single buffer.
 - Recursive glob-based filtering (like Meld) — excluded at the ~diff~ level.
 - Instant toggles for New, Modified, and Identical files.
+- Orphan files shown with strikethrough on the missing side (Meld-style, toggle ~S~).
 - Filter groups toggleable from the transient menu.
 - Tree folding (~TAB~).
 - File copying between directories (~C~).
@@ -32,7 +33,7 @@ Alternatively, run ~M-x emeld-diff-dwim~ to automatically use open Dired buffers
 The transient menu is organized into four groups:
 
 - ~File Status~ :: Toggle file visibility (~s~ same, ~m~ modified, ~a~ added).
-- ~View~ :: Toggle tree-lines (~T~), indent (~>~/~<~), pane resize (~{~/~}~).
+- ~View~ :: Toggle tree-lines (~T~), strikethrough (~S~), indent (~>~/~<~), pane resize (~{~/~}~).
 - ~Navigate~ :: Rescan (~g~) and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
 - ~File~ :: Operate on files (~RET~ ediff/open, ~SPC~ soft diff/fold, ~C~ copy, ~d~ delete, ~w~ copy path, ~P~ format patch).
 - ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~cl~ list all globs.
@@ -53,6 +54,7 @@ The transient menu is organized into four groups:
 | s         | Toggle same (identical) files          |
 | m         | Toggle modified files                  |
 | a         | Toggle added (new) files               |
+| S         | Toggle strikethrough display            |
 | T         | Toggle tree-line display               |
 | g         | Rescan (~diff -rq~)                   |
 | n/p       | Navigation (Side-aware)                |
@@ -73,6 +75,7 @@ The transient menu is organized into four groups:
   | Media           | ~*.jpg~, ~*.gif~, ~*.png~, ~*.bmp~, ~*.wav~, ~*.mp3~, ~*.ogg~, ~*.flac~, ~*.avi~, ~*.mpg~, ~*.xcf~, ~*.xpm~ |
 
 - ~emeld-show-same~: Whether to show identical files (default nil).  When enabled, ~diff -s~ reports identical files and they appear in the tree.
+- ~emeld-show-strikethrough~: Show strikethrough for orphan files on the missing side (default ~t~).  When nil, the missing side shows nothing.
 - ~emeld-dir-prefix~: Unicode prefix for directory names (default ~"📁 "~).
 - ~emeld-column-ratio~: Left pane width as percentage of window (default 50).
 
