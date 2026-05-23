@@ -1,9 +1,21 @@
 #+TITLE: Changelog for Emeld
 
+* [0.12.0] - 2026-05-23
+** Added
+- Confirmation prompt when toggling show-same (~s~): warns about potential freeze and asks to proceed when no cached data.
+- Point position preserved across async refresh cycle (point returns to the same file after copy, rescan, etc.).
+** Changed
+- Marks now cleared after bulk copy completes.
+** Fixed
+- ~emeld--move-to-node-name~ regex fixed to include ~*~ in the skip character class (nav was stuck on mark column).
+
 * [0.11.0] - 2026-05-23
 ** Added
 - Strikethrough display for orphan files on the missing side (Meld-style).  When a file exists only on one side, the other side shows the tree path and filename with ~:strike-through~.  Toggle with ~S~.
 - ~emeld-show-strikethrough~ defcustom for controlling strikethrough display (default ~t~).
+- Dired-style marking system: ~m~ to mark, ~u~ to unmark, ~U~ to unmark all.  When marks exist, ~C~ copies all marked nodes to the other side.
+** Changed
+- Keybinding reorganization: ~m~ and ~u~/~U~ now handle marking (was ~emeld-toggle-show-different~); ~emeld-toggle-show-different~ moved to ~M-m~.
 
 * [0.10.0] - 2026-05-23
 ** Added

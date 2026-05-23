@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.11.0
+;; Version: 0.12.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -132,6 +132,12 @@ Has no effect when `file-equal-p' is available (Emacs >= 29)."
 (defvar-local emeld--column-width nil)
 (defvar-local emeld--saved-expanded nil
   "Saved expanded directory paths to restore after refresh.")
+(defvar-local emeld--saved-point-path nil
+  "Saved point path to restore across async refresh cycle.")
+(defvar-local emeld--saved-point-col nil
+  "Saved point column to restore across async refresh cycle.")
+(defvar-local emeld--marked-paths nil
+  "Hash table of relative paths for marked nodes (Dired-style marking).")
 
 ;;;; ─── Async scan via make-process ─────────────────────────────────
 
@@ -467,6 +473,7 @@ Files larger than `emeld-max-content-size' are compared by size only."
             (cl-loop for g in emeld-filter-groups
                      when (emeld--group-active-default g)
                      collect (car g)))
+      (setq emeld--marked-paths (make-hash-table :test 'equal))
       (setq emeld--left-root (file-name-as-directory (expand-file-name dir1)))
       (setq emeld--right-root (file-name-as-directory (expand-file-name dir2)))
       (setq emeld--root-node (emeld-node-create
@@ -582,8 +589,11 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "w")   #'emeld-copy-path-at-point)
     (define-key map (kbd "d")   #'emeld-delete)
     (define-key map (kbd "SPC") #'emeld-soft-diff)
+    (define-key map (kbd "m")   #'emeld-mark)
+    (define-key map (kbd "u")   #'emeld-unmark)
+    (define-key map (kbd "U")   #'emeld-unmark-all)
     (define-key map (kbd "s")   #'emeld-toggle-show-same)
-    (define-key map (kbd "m")   #'emeld-toggle-show-different)
+    (define-key map (kbd "M-m") #'emeld-toggle-show-different)
     (define-key map (kbd "a")   #'emeld-toggle-show-added)
     (define-key map (kbd "T")   #'emeld-toggle-tree-lines)
     (define-key map (kbd "S")   #'emeld-toggle-show-strikethrough)
@@ -616,18 +626,17 @@ If the current side is empty but the other has a file, snap to it."
         (move-to-column width)
       (beginning-of-line))
     
-    ;; Skip prefixes/icons/spaces on current side
+    ;; Skip mark char, prefixes, icons, and spaces on current side
     (let ((start-on-side (point)))
       (while (and (< (point) (line-end-position))
                   (< (point) limit)
-                  (looking-at "[] └├│─\\[+-]"))
+                  (looking-at "[]* └├│─\\[+-]"))
         (forward-char 1))
-      
+
       ;; If we reached the limit on the left side, back up slightly to stay on the left
       (when (and (not on-right) (>= (current-column) width))
         (goto-char start-on-side)
-        ;; Only skip tree chars, not all spaces
-        (skip-chars-forward " └├│─")))
+        (skip-chars-forward "* └├│─")))
     
     ;; Smart snapping: only if this side is truly empty and the other side has a file
     (let ((node (get-text-property (point) 'emeld-node)))
@@ -640,7 +649,7 @@ If the current side is empty but the other has a file, snap to it."
             (let ((new-limit (if on-right (+ (line-beginning-position) width) (line-end-position))))
               (while (and (< (point) (line-end-position))
                           (< (point) new-limit)
-                          (looking-at "[] └├│─\\[+-]"))
+                          (looking-at "[]* └├│─\\[+-]"))
                 (forward-char 1)))))))))
 
 (defun emeld--change-status-p (node)
@@ -805,9 +814,14 @@ so Emacs stays fully responsive during the scan."
   (interactive)
   (emeld--stop-scan)
   (let* ((buf (current-buffer))
-         (root emeld--root-node))
+         (root emeld--root-node)
+         (node (get-text-property (point) 'emeld-node)))
     (setq emeld--scan-buf buf
           emeld--saved-expanded (emeld--collect-expanded root)
+          emeld--saved-point-path (when node
+                                    (or (emeld-node-left-path node)
+                                        (emeld-node-right-path node)))
+          emeld--saved-point-col (current-column)
           emeld--cached-full-lines nil)
     (setf (emeld-node-children root) nil)
     (emeld--update-header-line)
@@ -922,6 +936,35 @@ If on a file, show a quick diff of the current node."
               (diff left right)
             (message "Soft diff only works for comparing two files")))))))
 
+(defun emeld-mark ()
+  "Mark the node at point (Dired-style)."
+  (interactive)
+  (let ((node (get-text-property (point) 'emeld-node)))
+    (unless node (user-error "No node at point"))
+    (let ((rel (emeld--node-relpath node)))
+      (puthash rel t emeld--marked-paths)
+      (emeld--render)
+      (forward-line 1)
+      (emeld--move-to-node-name (>= (current-column) emeld--column-width)))))
+
+(defun emeld-unmark ()
+  "Unmark the node at point."
+  (interactive)
+  (let ((node (get-text-property (point) 'emeld-node)))
+    (unless node (user-error "No node at point"))
+    (let ((rel (emeld--node-relpath node)))
+      (remhash rel emeld--marked-paths)
+      (emeld--render)
+      (forward-line 1)
+      (emeld--move-to-node-name (>= (current-column) emeld--column-width)))))
+
+(defun emeld-unmark-all ()
+  "Unmark all nodes."
+  (interactive)
+  (clrhash emeld--marked-paths)
+  (emeld--render)
+  (message "Marks cleared"))
+
 (defun emeld-copy-path-at-point (arg)
   "Copy the filename at point to the kill ring.
 With prefix ARG, copy the full absolute path.
@@ -934,46 +977,92 @@ The side is determined by the current column."
       (let* ((path (if (< cur-col emeld--column-width)
                        (emeld-node-left-path node)
                      (emeld-node-right-path node)))
-             (text (if arg path (emeld-node-name node))))
+              (text (if arg path (emeld-node-name node))))
         (if text
             (progn
               (kill-new text)
               (message "Copied: %s" text))
           (message "No file on this side"))))))
 
+(defun emeld--copy-one (source dest-root)
+  "Copy a single file or directory at SOURCE to DEST-ROOT preserving path.
+Creates missing parent directories."
+  (let* ((rel-path (file-relative-name source
+                                       (if (string-prefix-p (expand-file-name emeld--left-root)
+                                                            (expand-file-name source))
+                                           emeld--left-root
+                                         emeld--right-root)))
+         (dest (directory-file-name (expand-file-name rel-path dest-root)))
+         (dest-parent (file-name-directory dest)))
+    (unless (file-directory-p dest-parent)
+      (when (file-exists-p dest-parent) (delete-file dest-parent))
+      (make-directory dest-parent t))
+    (if (file-directory-p source)
+        (if (fboundp 'copy-directory-contents)
+            (copy-directory source dest t t t)
+          (when (and (file-exists-p dest) (not (file-directory-p dest)))
+            (delete-file dest))
+          (copy-directory source dest t t))
+      (copy-file source dest t))
+    (message "Copied %s" rel-path)))
+
 (defun emeld-copy ()
-  "Copy the file/dir at point to the other side.
+  "Copy marked files/dirs to the other side.
+When marks exist, all marked nodes are copied.
+Otherwise, copy the node at point.
 Creates missing parent directories on the destination side if needed."
   (interactive)
-  (let* ((node (get-text-property (point) 'emeld-node))
-         (cur-col (current-column))
-         (on-left (< cur-col emeld--column-width)))
-    (unless node (user-error "No node at point"))
-    (let* ((source (if on-left (emeld-node-left-path node) (emeld-node-right-path node)))
-           (source-root (if on-left emeld--left-root emeld--right-root))
-           (dest-root (if on-left emeld--right-root emeld--left-root)))
-      (unless source (user-error "No file on current side to copy"))
-      (let* ((rel-path (file-relative-name source source-root))
-             (dest (directory-file-name (expand-file-name rel-path dest-root)))
-             (dest-parent (file-name-directory dest)))
-        (when (yes-or-no-p (format "Copy %s to %s?" (emeld-node-name node) dest-root))
-          (condition-case err
-              (progn
-                ;; Ensure dest-parent is a directory
-                (unless (file-directory-p dest-parent)
-                  (when (file-exists-p dest-parent) (delete-file dest-parent))
-                  (make-directory dest-parent t))
-                ;; Perform the copy
-                (if (file-directory-p source)
-                    (if (fboundp 'copy-directory-contents)
-                        (copy-directory source dest t t t)
-                      (when (and (file-exists-p dest) (not (file-directory-p dest)))
-                        (delete-file dest))
-                      (copy-directory source dest t t))
-                  (copy-file source dest t))
-                (emeld-refresh)
-                (message "Copied %s" (emeld-node-name node)))
-            (error (message "Copy failed: %s" (error-message-string err)))))))))
+  (let ((marked (let (paths)
+                  (maphash (lambda (k _) (push k paths)) emeld--marked-paths)
+                  (nreverse paths))))
+    (if marked
+        (let ((count 0) (errors 0))
+          (when (yes-or-no-p (format "Copy %d marked node(s) to %s? "
+                                     (length marked) emeld--right-root))
+            (dolist (rel marked)
+              (let ((left (expand-file-name rel emeld--left-root))
+                    (right (expand-file-name rel emeld--right-root)))
+                (cond ((file-exists-p left)
+                       (condition-case nil
+                           (progn (emeld--copy-one left emeld--right-root)
+                                  (setq count (1+ count)))
+                         (error (setq errors (1+ errors)))))
+                      ((file-exists-p right)
+                       (condition-case nil
+                           (progn (emeld--copy-one right emeld--left-root)
+                                  (setq count (1+ count)))
+                         (error (setq errors (1+ errors))))))))
+            (emeld-refresh)
+            (clrhash emeld--marked-paths)
+            (message "Copied %d node(s)%s" count
+                     (if (> errors 0) (format " (%d errors)" errors) ""))))
+      (let* ((node (get-text-property (point) 'emeld-node))
+             (cur-col (current-column))
+             (on-left (< cur-col emeld--column-width)))
+        (unless node (user-error "No node at point"))
+        (let* ((source (if on-left (emeld-node-left-path node) (emeld-node-right-path node)))
+               (source-root (if on-left emeld--left-root emeld--right-root))
+               (dest-root (if on-left emeld--right-root emeld--left-root)))
+          (unless source (user-error "No file on current side to copy"))
+          (let* ((rel-path (file-relative-name source source-root))
+                 (dest (directory-file-name (expand-file-name rel-path dest-root)))
+                 (dest-parent (file-name-directory dest)))
+            (when (yes-or-no-p (format "Copy %s to %s?" (emeld-node-name node) dest-root))
+              (condition-case err
+                  (progn
+                    (unless (file-directory-p dest-parent)
+                      (when (file-exists-p dest-parent) (delete-file dest-parent))
+                      (make-directory dest-parent t))
+                    (if (file-directory-p source)
+                        (if (fboundp 'copy-directory-contents)
+                            (copy-directory source dest t t t)
+                          (when (and (file-exists-p dest) (not (file-directory-p dest)))
+                            (delete-file dest))
+                          (copy-directory source dest t t))
+                      (copy-file source dest t))
+                    (emeld-refresh)
+                    (message "Copied %s" (emeld-node-name node)))
+                (error (message "Copy failed: %s" (error-message-string err)))))))))))
 
 (defun emeld-delete ()
   "Delete the file/directory at point from the current side."
@@ -1028,12 +1117,13 @@ Creates missing parent directories on the destination side if needed."
   "Render the tree in the current buffer, attempting to preserve point."
   (let ((inhibit-read-only t)
         (old-node (get-text-property (point) 'emeld-node))
-        (old-col (current-column))
-        (target-path nil))
-    ;; Save path of current node to restore point later
-    (when old-node
-      (setq target-path (or (emeld-node-left-path old-node)
-                            (emeld-node-right-path old-node))))
+        (old-col (or emeld--saved-point-col (current-column)))
+        (target-path (or emeld--saved-point-path
+                         (when-let ((n (get-text-property (point) 'emeld-node)))
+                           (or (emeld-node-left-path n)
+                               (emeld-node-right-path n))))))
+    (setq emeld--saved-point-path nil
+          emeld--saved-point-col nil)
     
     (setq emeld--column-width (/ (* (window-width) emeld-column-ratio) 100))
     (erase-buffer)
@@ -1159,7 +1249,12 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
                                   (concat (if (emeld-node-expanded node) "[-] " "[+] ")
                                           emeld-dir-prefix)
                                 "")))
-          (let ((start (point)))
+          (let ((start (point))
+                (mark-char (if (and emeld--marked-paths
+                                   (gethash (emeld--node-relpath node) emeld--marked-paths))
+                               (propertize "*" 'face 'font-lock-keyword-face)
+                             " ")))
+            (insert mark-char " ")
             ;; Left Side
             (insert (propertize full-prefix 'face 'shadow))
             (if (emeld-node-left-path node)

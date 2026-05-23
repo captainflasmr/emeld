@@ -9,6 +9,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Recursive glob-based filtering (like Meld) — excluded at the ~diff~ level.
 - Instant toggles for New, Modified, and Identical files.
 - Orphan files shown with strikethrough on the missing side (Meld-style, toggle ~S~).
+- Dired-style marking (~m~/~u~/~U~) with bulk copy (~C~).
 - Filter groups toggleable from the transient menu.
 - Tree folding (~TAB~).
 - File copying between directories (~C~).
@@ -32,7 +33,7 @@ Alternatively, run ~M-x emeld-diff-dwim~ to automatically use open Dired buffers
 
 The transient menu is organized into four groups:
 
-- ~File Status~ :: Toggle file visibility (~s~ same, ~m~ modified, ~a~ added).
+- ~File Status~ :: Toggle file visibility (~s~ same, ~M-m~ modified, ~a~ added).
 - ~View~ :: Toggle tree-lines (~T~), strikethrough (~S~), indent (~>~/~<~), pane resize (~{~/~}~).
 - ~Navigate~ :: Rescan (~g~) and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
 - ~File~ :: Operate on files (~RET~ ediff/open, ~SPC~ soft diff/fold, ~C~ copy, ~d~ delete, ~w~ copy path, ~P~ format patch).
@@ -46,13 +47,16 @@ The transient menu is organized into four groups:
 | RET, e, = | Action (Ediff if different)            |
 | f, v      | Find File (Open current side)          |
 | d         | Delete file/dir from current side      |
-| C         | Copy to the other side                 |
+| C         | Copy marked nodes (or node at point)   |
 | P         | Format as patch (unified diff)         |
 | w         | Copy filename (C-u w for full path)    |
 | SPC       | Fold/Unfold (Dir) or Soft Diff (File)  |
 | o         | Jump to the other side                 |
 | s         | Toggle same (identical) files          |
-| m         | Toggle modified files                  |
+| M-m       | Toggle modified files                  |
+| m         | Mark node                              |
+| u         | Unmark node                            |
+| U         | Unmark all nodes                       |
 | a         | Toggle added (new) files               |
 | S         | Toggle strikethrough display            |
 | T         | Toggle tree-line display               |
