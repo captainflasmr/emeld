@@ -533,6 +533,18 @@ Prompts for confirmation or selection."
   "Face for files that exist only on the right side."
   :group 'emeld)
 
+(defface emeld-left-only-strike-face
+  '((t :inherit emeld-left-only-face :strike-through t))
+  "Face for left-only files rendered on the right side with strikethrough.
+Mimics Meld's display of missing files."
+  :group 'emeld)
+
+(defface emeld-right-only-strike-face
+  '((t :inherit emeld-right-only-face :strike-through t))
+  "Face for right-only files rendered on the left side with strikethrough.
+Mimics Meld's display of missing files."
+  :group 'emeld)
+
 (defface emeld-header-face
   '((t :inherit font-lock-function-name-face :weight bold :underline t))
   "Face for the directory headers."
@@ -1124,23 +1136,33 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
           (let ((start (point)))
             ;; Left Side
             (insert (propertize full-prefix 'face 'shadow))
-            (when (emeld-node-left-path node)
-              (insert dir-indicator)
-              (insert (propertize (emeld-node-name node) 'face name-face)))
-            
+            (if (emeld-node-left-path node)
+                (progn
+                  (insert dir-indicator)
+                  (insert (propertize (emeld-node-name node) 'face name-face)))
+              (when (eq status 'right-only)
+                (insert dir-indicator)
+                (insert (propertize (emeld-node-name node)
+                                    'face 'emeld-right-only-strike-face))))
+
             ;; Padding to Right Side
             (let ((current-len (current-column)))
               (if (< current-len column-width)
                   (insert (make-string (- column-width current-len) ?\s))
                 (insert "  ")))
-            
+
             ;; Right Side
             (insert (propertize full-prefix 'face 'shadow))
-            (when (emeld-node-right-path node)
-              (insert dir-indicator)
-              (insert (propertize (or (emeld-node-name-right node)
-                                      (emeld-node-name node))
-                                  'face name-face)))
+            (if (emeld-node-right-path node)
+                (progn
+                  (insert dir-indicator)
+                  (insert (propertize (or (emeld-node-name-right node)
+                                          (emeld-node-name node))
+                                      'face name-face)))
+              (when (eq status 'left-only)
+                (insert dir-indicator)
+                (insert (propertize (emeld-node-name node)
+                                    'face 'emeld-left-only-strike-face))))
             
             (add-text-properties start (point) `(emeld-node ,node mouse-face highlight))
             (insert "\n")
