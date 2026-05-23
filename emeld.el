@@ -710,11 +710,16 @@ If the current side is empty but the other has a file, snap to it."
   "Toggle showing identical files.
 Uses cached data when available to avoid re-scanning."
   (interactive)
-  (setq emeld-show-same (not emeld-show-same))
-  (message "Show same: %s" (if emeld-show-same "on" "off"))
-  (if (and emeld-show-same (not emeld--cached-full-lines))
-      (emeld-refresh)
-    (emeld--render)))
+  (let ((new-val (not emeld-show-same)))
+    (when (and new-val (not emeld--cached-full-lines)
+               (not (y-or-n-p "Show identical files?  This can take a while and may temporarily freeze Emacs.  Proceed? ")))
+      (message "Show same: off")
+      (setq new-val nil))
+    (setq emeld-show-same new-val)
+    (message "Show same: %s" (if emeld-show-same "on" "off"))
+    (if (and emeld-show-same (not emeld--cached-full-lines))
+        (emeld-refresh)
+      (emeld--render))))
 
 (defun emeld-toggle-tree-lines ()
   "Toggle the display of tree lines."
