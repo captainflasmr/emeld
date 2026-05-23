@@ -1172,7 +1172,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
        ("o"   "jump other side"    emeld-jump-other-side :transient t)
        ("M-n" "next change"        emeld-next-change :transient t)
        ("M-p" "previous change"    emeld-previous-change :transient t)]
-      ["File"
+      ["Action"
        ("SPC" "soft diff / fold"   emeld-soft-diff)
        ("RET" "action (ediff)"     emeld-action)
        ("C"   "copy to other side" emeld-copy)
