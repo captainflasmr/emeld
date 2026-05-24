@@ -204,7 +204,7 @@ Values can be 'idle, 'running-diff, 'building-tree, or 'done.")
 (defun emeld--make-file-node (relpath parent status)
   "Create emeld-node for a file at RELPATH (relative from root).
 Only sets the path for the side(s) where the file exists."
-  (let ((name (file-name-nondirectory relpath)))
+  (let ((name (file-name-nondirectory (directory-file-name relpath))))
     (emeld-node-create
      :name name
      :left-path (and (memq status '(same different left-only))
@@ -222,7 +222,7 @@ Directories are grouped first, followed by files, each sorted alphabetically."
     (dolist (entry entries)
       (let* ((path (car entry))
              (status (cdr entry))
-             (name (file-name-nondirectory path))
+             (name (file-name-nondirectory (directory-file-name path)))
              (filt (emeld--filtered-p name path)))
         (unless filt
           (if (string-match "/" path)
@@ -400,8 +400,8 @@ allowing identical/same branches to populate quietly afterward."
     (dolist (entry entries)
       (let* ((path (car entry))
              (status (cdr entry))
-             (name (file-name-nondirectory path)))
-        (unless (emeld--filtered-p name path)
+             (name (file-name-nondirectory (directory-file-name path))))
+         (unless (emeld--filtered-p name path)
           (if (string-match "/" path)
               (let* ((slash-pos (match-beginning 0))
                      (dir-name (substring path 0 slash-pos))
@@ -1412,7 +1412,8 @@ Returns t if successfully positioned, otherwise nil."
 The root node is always visible.  Directory nodes are always shown
 so collapsed folder rows remain navigable."
   (or (eq node emeld--root-node)
-      (emeld-node-is-dir node)
+      (and (emeld-node-is-dir node)
+           (not (eq (emeld-node-diff-status node) 'same)))
       (let ((status (emeld-node-diff-status node)))
         (cond ((eq status 'same) emeld-show-same)
               ((eq status 'different) emeld-show-different)
