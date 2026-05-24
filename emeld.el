@@ -341,51 +341,51 @@ Lower numbers keep Emacs snappier; higher numbers process faster."
         
         (cl-labels
             ((process-lines-chunk
-              ()
-              (if (not (buffer-live-p buf))
-                  (setq gc-cons-threshold old-gc)
-                (with-current-buffer buf
-                  (if (input-pending-p)
-                      (run-with-timer 0.05 nil #'process-lines-chunk)
-                    (let ((chunk-count 0))
-                      (while (and remaining-lines (< chunk-count emeld-batch-size))
-                        (let ((parsed (emeld--parse-diff-line (car remaining-lines) left right)))
-                          (when parsed
-                            (push parsed entries)))
-                        (setq remaining-lines (cdr remaining-lines))
-                        (setq chunk-count (1+ chunk-count))
-                        (setq processed-count (1+ processed-count)))
-                      
-                      (if remaining-lines
-                          (run-with-timer 0.002 nil #'process-lines-chunk)
-                        (emeld--bench-push "parse done")
-                        (if (cl-some (lambda (e) (memq (cdr e) '(left-only right-only))) entries)
-                            (setq entries (emeld--expand-dir-entries entries)))
-                        
-                        (message "Structuring tree nodes progressively...")
-                        (emeld--entries-to-nodes-progressive
-                         entries "" root buf
-                         (lambda (top-level-children)
-                           (setf (emeld-node-children root) top-level-children)
-                           (emeld--render))
-                         (lambda ()
-                           (with-current-buffer buf
-                             (setf (emeld-node-diff-status root)
-                                   (if (cl-some (lambda (c) (not (eq (emeld-node-diff-status c) 'same)))
-                                                (emeld-node-children root))
-                                       'different 'same))
-                             (setq emeld--status-phase 'done)
-                             (setq emeld--scan-process nil
-                                   emeld--scan-buf nil)
-                             (when emeld-show-same
-                               (setq emeld--cached-full-lines t))
-                             (emeld--restore-expanded root)
-                             (emeld--render)
-                             (emeld--update-header-line)
-                             (emeld--bench-push "tree built")
-                             (emeld--bench-report)
-                             (setq gc-cons-threshold old-gc)
-                             (message "Progressive assembly fully stabilized.")))))))))))
+               ()
+               (if (not (buffer-live-p buf))
+                   (setq gc-cons-threshold old-gc)
+                 (with-current-buffer buf
+                   (if (input-pending-p)
+                       (run-with-timer 0.05 nil #'process-lines-chunk)
+                     (let ((chunk-count 0))
+                       (while (and remaining-lines (< chunk-count emeld-batch-size))
+                         (let ((parsed (emeld--parse-diff-line (car remaining-lines) left right)))
+                           (when parsed
+                             (push parsed entries)))
+                         (setq remaining-lines (cdr remaining-lines))
+                         (setq chunk-count (1+ chunk-count))
+                         (setq processed-count (1+ processed-count)))
+                       
+                       (if remaining-lines
+                           (run-with-timer 0.002 nil #'process-lines-chunk)
+                         (emeld--bench-push "parse done")
+                         (if (cl-some (lambda (e) (memq (cdr e) '(left-only right-only))) entries)
+                             (setq entries (emeld--expand-dir-entries entries)))
+                         
+                         (message "Structuring tree nodes progressively...")
+                         (emeld--entries-to-nodes-progressive
+                          entries "" root buf
+                          (lambda (top-level-children)
+                            (setf (emeld-node-children root) top-level-children)
+                            (emeld--render))
+                          (lambda ()
+                            (with-current-buffer buf
+                              (setf (emeld-node-diff-status root)
+                                    (if (cl-some (lambda (c) (not (eq (emeld-node-diff-status c) 'same)))
+                                                 (emeld-node-children root))
+                                        'different 'same))
+                              (setq emeld--status-phase 'done)
+                              (setq emeld--scan-process nil
+                                    emeld--scan-buf nil)
+                              (when emeld-show-same
+                                (setq emeld--cached-full-lines t))
+                              (emeld--restore-expanded root)
+                              (emeld--render)
+                              (emeld--update-header-line)
+                              (emeld--bench-push "tree built")
+                              (emeld--bench-report)
+                              (setq gc-cons-threshold old-gc)
+                              (message "Progressive assembly fully stabilized.")))))))))))
           (run-with-timer 0.002 nil #'process-lines-chunk))))))
 
 (defun emeld--entries-to-nodes-progressive (entries prefix parent buf initial-render-cb final-cb)
@@ -459,43 +459,43 @@ allowing identical/same branches to populate quietly afterward."
         
         (cl-labels
             ((process-dir-queue
-              (p-tail s-tail)
-              (if (not (buffer-live-p buf)) nil
-                (cond
-                 (p-tail
-                  (if (input-pending-p)
-                      (run-with-timer 0.04 nil (lambda () (process-dir-queue p-tail s-tail)))
-                    (let* ((next-branch (car p-tail))
-                           (sub-entries (nth 0 next-branch))
-                           (sub-prefix  (nth 1 next-branch))
-                           (dir-node    (nth 2 next-branch)))
-                      (emeld--entries-to-nodes-progressive
-                       sub-entries sub-prefix dir-node buf
-                       (lambda (sub-tier-nodes)
-                         (setf (emeld-node-children dir-node) sub-tier-nodes)
-                         (let ((any-diff (cl-some (lambda (n) (not (eq (emeld-node-diff-status n) 'same))) sub-tier-nodes)))
-                           (setf (emeld-node-diff-status dir-node) (if any-diff 'different 'same))))
-                       (lambda ()
-                         (with-current-buffer buf (emeld--render))
-                         (process-dir-queue (cdr p-tail) s-tail))))))
-                 
-                 (s-tail
-                  (if (input-pending-p)
-                      (run-with-timer 0.04 nil (lambda () (process-dir-queue nil s-tail)))
-                    (let* ((next-branch (car s-tail))
-                           (sub-entries (nth 0 next-branch))
-                           (sub-prefix  (nth 1 next-branch))
-                           (dir-node    (nth 2 next-branch)))
-                      (emeld--entries-to-nodes-progressive
-                       sub-entries sub-prefix dir-node buf
-                       (lambda (sub-tier-nodes)
-                         (setf (emeld-node-children dir-node) sub-tier-nodes))
-                       (lambda ()
-                         (when (or (null (cdr s-tail)) (= (% (length s-tail) 5) 0))
-                           (with-current-buffer buf (emeld--render)))
-                         (process-dir-queue nil (cdr s-tail)))))))
-                 
-                 (t (funcall final-cb))))))
+               (p-tail s-tail)
+               (if (not (buffer-live-p buf)) nil
+                 (cond
+                  (p-tail
+                   (if (input-pending-p)
+                       (run-with-timer 0.04 nil (lambda () (process-dir-queue p-tail s-tail)))
+                     (let* ((next-branch (car p-tail))
+                            (sub-entries (nth 0 next-branch))
+                            (sub-prefix  (nth 1 next-branch))
+                            (dir-node    (nth 2 next-branch)))
+                       (emeld--entries-to-nodes-progressive
+                        sub-entries sub-prefix dir-node buf
+                        (lambda (sub-tier-nodes)
+                          (setf (emeld-node-children dir-node) sub-tier-nodes)
+                          (let ((any-diff (cl-some (lambda (n) (not (eq (emeld-node-diff-status n) 'same))) sub-tier-nodes)))
+                            (setf (emeld-node-diff-status dir-node) (if any-diff 'different 'same))))
+                        (lambda ()
+                          (with-current-buffer buf (emeld--render))
+                          (process-dir-queue (cdr p-tail) s-tail))))))
+                  
+                  (s-tail
+                   (if (input-pending-p)
+                       (run-with-timer 0.04 nil (lambda () (process-dir-queue p-tail s-tail)))
+                     (let* ((next-branch (car s-tail))
+                            (sub-entries (nth 0 next-branch))
+                            (sub-prefix  (nth 1 next-branch))
+                            (dir-node    (nth 2 next-branch)))
+                       (emeld--entries-to-nodes-progressive
+                        sub-entries sub-prefix dir-node buf
+                        (lambda (sub-tier-nodes)
+                          (setf (emeld-node-children dir-node) sub-tier-nodes))
+                        (lambda ()
+                          (when (or (null (cdr s-tail)) (= (% (length s-tail) 5) 0))
+                            (with-current-buffer buf (emeld--render)))
+                          (process-dir-queue p-tail (cdr s-tail)))))))
+                  
+                  (t (funcall final-cb))))))
           
           (run-with-timer 0.002 nil (lambda () (process-dir-queue priority-queue same-queue))))))))
 
@@ -1200,7 +1200,7 @@ The side is determined by the current column."
       (let* ((path (if (< cur-col emeld--column-width)
                        (emeld-node-left-path node)
                      (emeld-node-right-path node)))
-              (text (if arg path (emeld-node-name node))))
+             (text (if arg path (emeld-node-name node))))
         (if text
             (progn
               (kill-new text)
@@ -1505,7 +1505,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
                                 "")))
           (let ((start (point))
                 (mark-char (if (and emeld--marked-paths
-                                   (gethash (emeld--node-relpath node) emeld--marked-paths))
+                                    (gethash (emeld--node-relpath node) emeld--marked-paths))
                                (propertize "*" 'face 'font-lock-keyword-face)
                              " ")))
             (insert mark-char " ")
