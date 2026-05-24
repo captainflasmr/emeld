@@ -3,11 +3,16 @@
 * [0.13.0] - 2026-05-24
 ** Added
 - Incremental same-scan: toggling ~S~ now runs ~diff -rqs~ in the background and merges identical files into the existing tree without blanking the screen or losing context (point position, expanded folders, marks preserved).
+- ~emeld--sort-tree-recursive~: single-pass recursive tree sorter, called once at scan completion instead of per-chunk.
 ** Changed
 - Keybinding reorganization: Same toggled with ~S~, Modified with ~M~, New/Added with ~N~, Strikethrough with ~s~.
 - Display state indicators updated to match new keys (header line shows ~[S]~, ~[M]~, ~[N]~, ~[s]~).
 - Transient menu labels shortened: ~Same~→~S~, ~New~→~N~, ~Modified~→~M~.
 - Wrapped ~file-name-nondirectory~ calls with ~directory-file-name~ to fix blank directory names when showing identical files.
+- Deferred tree sorting: per-chunk ~maphash~ sorting removed from ~emeld--process-same-chunk-worker~; sorting runs once via ~emeld--sort-tree-recursive~ at scan completion, eliminating CPU churn for large directories.
+- Responsiveness tuning: ~emeld-batch-size~ reduced to 50, ~emeld-tree-batch-size~ to 200, inter-chunk timer increased to 0.01s, input-pending defer to 0.1s.
+- ~emeld--render~ now binds ~inhibit-modification-hooks~ and ~inhibit-point-motion-hooks~ to suppress hook overhead during buffer redraw.
+- ~emeld--add-same-entry-to-tree~ simplified (removed ~dirty-parents~ tracking, no longer needed without per-chunk sorting).
 
 * [0.12.0] - 2026-05-23
 ** Added

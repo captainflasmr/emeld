@@ -44,8 +44,10 @@ small() {
 
 large() {
     ROOT=/tmp/emeld-bench
-    V1=v6.1
-    V2=v5.15
+    # V1=v6.1
+    # V2=v5.15
+    V1=v7.0
+    V2=v6.19
     DIR1="$ROOT/linux-$V1"
     DIR2="$ROOT/linux-$V2"
 
