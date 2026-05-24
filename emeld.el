@@ -140,6 +140,8 @@ Has no effect when `file-equal-p' is available (Emacs >= 29)."
 
 (defvar-local emeld--benchmark-data nil
   "List of (LABEL . FLOAT-TIME) timestamps for the current scan cycle.")
+(defvar-local emeld--benchmark-start-time nil
+  "Float-time captured when the background diff process starts.")
 
 (defvar-local emeld--saved-point-path nil
   "Saved point path to restore across async refresh cycle.")
@@ -157,22 +159,26 @@ Has no effect when `file-equal-p' is available (Emacs >= 29)."
   "Print a structured timing report from `emeld--benchmark-data'."
   (when emeld-benchmark
     (let* ((data (nreverse emeld--benchmark-data))
-           (phases (mapcar #'car data))
-           (times (mapcar #'cdr data))
-           (base (car times))
-           (last-time (car (last times)))
-           (pairs (cl-loop for label in phases
-                           for t0 in times
-                           for i from 0
-                           for t1 = (nth (1+ i) times)
-                           for cum = (if t1 (- t1 base) (- last-time base))
-                           collect (format "  %-30s %5.0f ms (cum %6.0f ms)"
-                                           label
-                                           (if t1 (* (- t1 t0) 1000) 0.0)
-                                           (* cum 1000.0)))))
-      (setq emeld--benchmark-data nil)
-      (message "=== Emeld Benchmark ===\n%s\n========================"
-               (string-join pairs "\n")))))
+           (base (or emeld--benchmark-start-time (cdar data)))
+           (last-time (cdr (car (last data))))
+           (total (* (- last-time base) 1000.0))
+           (pairs nil)
+           (prev-time base))
+      (dolist (item data)
+        (let* ((label (car item))
+               (timestamp (cdr item))
+               (stage-delta (* (- timestamp prev-time) 1000.0))
+               (cum-delta (* (- timestamp base) 1000.0)))
+          (push (format "  %-30s %5.0f ms (cum %6.0f ms)"
+                        label stage-delta cum-delta)
+                pairs)
+          (setq prev-time timestamp)))
+      (setq emeld--benchmark-data nil
+            emeld--benchmark-start-time nil)
+      (message "=== Emeld Benchmark ===\n%s\n  %-30s %5.0f ms (total)\n========================"
+               (string-join (nreverse pairs) "\n")
+               "elapsed total"
+               total))))
 
 ;;;; ─── Async scan via make-process ─────────────────────────────────
 
@@ -467,6 +473,8 @@ the basename component, not the full relative path."
 Active filter group patterns (without `/') are passed to `diff'
 as `--exclude' arguments so diff skips filtered files entirely."
   (setq emeld--scan-diff-lines nil)
+  (with-current-buffer buf
+    (setq emeld--benchmark-start-time (float-time)))
   (let* ((excludes (emeld--diff-exclude-args))
          (flags (if emeld-show-same "-rqs" "-rq"))
          (command `("diff" ,flags
