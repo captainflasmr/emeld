@@ -716,14 +716,15 @@ Explicitly handles and strips single quotes added to paths by the shell environm
                         (old-gc gc-cons-threshold)
                         (ctx-left (process-get p 'emeld-left))
                         (ctx-right (process-get p 'emeld-right))
-                        (ctx-root (process-get p 'emeld-root)))
-                   (when (buffer-live-p p-buf)
-                     (kill-buffer p-buf))
-                   (setq gc-cons-threshold (* 128 1024 1024))
-                   (setq emeld--status-phase 'building-tree)
-                   (emeld--update-header-line)
-                   (run-with-timer 0.001 nil #'emeld--process-same-chunk-worker
-                                   target-buf lines ctx-root ctx-left ctx-right old-gc))))))))
+                         (ctx-root (process-get p 'emeld-root))
+                         (path-hash (make-hash-table :test 'equal)))
+                    (when (buffer-live-p p-buf)
+                      (kill-buffer p-buf))
+                    (setq gc-cons-threshold (* 128 1024 1024))
+                    (setq emeld--status-phase 'building-tree)
+                    (emeld--update-header-line)
+                    (run-with-timer 0.001 nil #'emeld--process-same-chunk-worker
+                                    target-buf lines ctx-root ctx-left ctx-right old-gc path-hash))))))))
       (setq emeld--scan-process proc))))
 
 (defun emeld--glob-to-regexp (glob)
