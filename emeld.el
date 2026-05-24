@@ -427,20 +427,20 @@ then fills in directory branches asynchronously before calling FINAL-CB."
        (lambda (dir-name sub-entries)
          (let ((sub-prefix (if (string-empty-p prefix) dir-name (concat prefix "/" dir-name))))
            (unless (or (string-empty-p dir-name) (string= dir-name "'") (emeld--filtered-p dir-name sub-prefix))
-              (let* ((only-same-children (cl-every (lambda (e) (eq (cdr e) 'same)) sub-entries))
-                     (should-expand (not only-same-children))
-                     (dir-node (emeld-node-create
-                               :name dir-name
-                               :left-path (and emeld--left-root
-                                               (not (string-empty-p sub-prefix))
-                                               (expand-file-name sub-prefix emeld--left-root))
-                               :right-path (and emeld--right-root
+               (let* ((only-same (cl-every (lambda (e) (eq (cdr e) 'same)) sub-entries))
+                      (should-expand (not only-same))
+                      (dir-node (emeld-node-create
+                                :name dir-name
+                                :left-path (and emeld--left-root
                                                 (not (string-empty-p sub-prefix))
-                                                (expand-file-name sub-prefix emeld--right-root))
-                               :parent parent
-                               :is-dir t
-                               :expanded should-expand
-                               :diff-status 'same)))
+                                                (expand-file-name sub-prefix emeld--left-root))
+                                :right-path (and emeld--right-root
+                                                 (not (string-empty-p sub-prefix))
+                                                 (expand-file-name sub-prefix emeld--right-root))
+                                :parent parent
+                                :is-dir t
+                                :expanded should-expand
+                                :diff-status (if only-same 'same 'different))))
                (push dir-node dir-nodes)
                ;; Queue the sub-entries to be structuralized iteratively later
                (push (list sub-entries sub-prefix dir-node) pending-dir-branches)))))
@@ -477,14 +477,13 @@ then fills in directory branches asynchronously before calling FINAL-CB."
                       ;; Recurse next tier down
                       (emeld--entries-to-nodes-progressive
                        sub-entries sub-prefix dir-node buf
-                       (lambda (sub-tier-nodes)
-                         (setf (emeld-node-children dir-node) sub-tier-nodes)
-                         (when (cl-some (lambda (n) (not (eq (emeld-node-diff-status n) 'same))) sub-tier-nodes)
-                           (setf (emeld-node-diff-status dir-node) 'different)))
+                        (lambda (sub-tier-nodes)
+                          (setf (emeld-node-children dir-node) sub-tier-nodes)
+                          (let ((any-diff (cl-some (lambda (n) (not (eq (emeld-node-diff-status n) 'same))) sub-tier-nodes)))
+                            (setf (emeld-node-diff-status dir-node) (if any-diff 'different 'same))))
                        (lambda ()
-                         (when (or (null (cdr queue)) (= (% (length queue) 5) 0))
-                           (with-current-buffer buf (emeld--render)))
-                         (process-dir-queue (cdr queue))))))))))
+                          (with-current-buffer buf (emeld--render))
+                          (process-dir-queue (cdr queue))))))))))
           
           ;; Start unpacking subdirectory tasks on next event frame loop
           (run-with-timer 0.002 nil (lambda () (process-dir-queue pending-dir-branches))))))))
@@ -1399,8 +1398,10 @@ Returns t if successfully positioned, otherwise nil."
 
 (defun emeld--node-visible-p (node)
   "Determine if NODE should be visible based on status filters.
-The root node is always visible."
+The root node is always visible.  Directory nodes are always shown
+so collapsed folder rows remain navigable."
   (or (eq node emeld--root-node)
+      (emeld-node-is-dir node)
       (let ((status (emeld-node-diff-status node)))
         (cond ((eq status 'same) emeld-show-same)
               ((eq status 'different) emeld-show-different)
