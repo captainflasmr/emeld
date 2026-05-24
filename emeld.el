@@ -568,6 +568,136 @@ Explicitly handles and strips single quotes added to paths by the shell environm
         (cons (clean-quotes rel) side)))
      (t nil))))
 
+(defun emeld--add-same-entry-to-tree (root relpath left-root right-root dirty-parents)
+  (let* ((components (split-string relpath "/" t))
+         (current root)
+         (prefix nil)
+         (filtered nil))
+    (while (and components (not filtered))
+      (let* ((comp (car components))
+             (is-last (null (cdr components)))
+             (sub-prefix (if prefix (concat prefix "/" comp) comp)))
+        (if (emeld--filtered-p comp sub-prefix)
+            (setq filtered t)
+          (let* ((children (emeld-node-children current))
+                 (existing (cl-find-if
+                            (lambda (n)
+                              (and (string= (emeld-node-name n) comp)
+                                   (eq (emeld-node-is-dir n) (not is-last))))
+                            children)))
+            (if existing
+                (setq current existing)
+              (let ((new-node (if is-last
+                                  (emeld-node-create
+                                   :name comp
+                                   :left-path (expand-file-name sub-prefix left-root)
+                                   :right-path (expand-file-name sub-prefix right-root)
+                                   :parent current
+                                   :diff-status 'same
+                                   :is-dir nil)
+                                (emeld-node-create
+                                 :name comp
+                                 :left-path (expand-file-name sub-prefix left-root)
+                                 :right-path (expand-file-name sub-prefix right-root)
+                                 :parent current
+                                 :diff-status 'same
+                                 :is-dir t
+                                 :expanded nil))))
+                (setf (emeld-node-children current)
+                      (cons new-node (emeld-node-children current)))
+                (puthash current t dirty-parents)
+                (setq current new-node)))))
+        (setq prefix sub-prefix
+              components (cdr components))))))
+
+(defun emeld--process-same-chunk-worker (buf remaining-lines root left right old-gc)
+  (if (not (buffer-live-p buf))
+      (setq gc-cons-threshold old-gc)
+    (with-current-buffer buf
+      (if (input-pending-p)
+          (run-with-timer 0.05 nil #'emeld--process-same-chunk-worker
+                          buf remaining-lines root left right old-gc)
+        (let ((chunk-count 0)
+              (dirty-parents (make-hash-table :test 'eq)))
+          (while (and remaining-lines (< chunk-count emeld-batch-size))
+            (let ((line (car remaining-lines)))
+              (when (string-match-p "are identical$" line)
+                (let ((parsed (emeld--parse-diff-line line left right)))
+                  (when (and parsed (eq (cdr parsed) 'same))
+                    (emeld--add-same-entry-to-tree root (car parsed) left right dirty-parents)))))
+            (setq remaining-lines (cdr remaining-lines))
+            (setq chunk-count (1+ chunk-count)))
+          (maphash (lambda (parent _)
+                     (setf (emeld-node-children parent)
+                           (sort (emeld-node-children parent)
+                                 (lambda (a b)
+                                   (let ((a-dir (emeld-node-is-dir a))
+                                         (b-dir (emeld-node-is-dir b)))
+                                     (if (eq a-dir b-dir)
+                                         (string< (emeld-node-name a) (emeld-node-name b))
+                                       a-dir))))))
+                   dirty-parents)
+          (if remaining-lines
+              (progn
+                (emeld--render)
+                (run-with-timer 0.002 nil #'emeld--process-same-chunk-worker
+                                buf remaining-lines root left right old-gc))
+            (setq emeld--status-phase 'done
+                  emeld--scan-process nil
+                  emeld--scan-buf nil
+                  emeld--cached-full-lines t)
+            (emeld--render)
+            (emeld--update-header-line)
+            (message "Finished loading identical files.")
+            (setq gc-cons-threshold old-gc)))))))
+
+(defun emeld--scan-same-async (buf)
+  (with-current-buffer buf
+    (emeld--stop-scan)
+    (setq emeld--status-phase 'running-diff
+          emeld--cached-full-lines nil)
+    (emeld--update-header-line)
+    (message "Scanning for identical files in background...")
+    (let* ((excludes (emeld--diff-exclude-args))
+           (left emeld--left-root)
+           (right emeld--right-root)
+           (root emeld--root-node)
+           (command `("diff" "-rqs" ,@excludes
+                      ,(expand-file-name left)
+                      ,(expand-file-name right)))
+           (proc (make-process
+                  :name "emeld-diff-same"
+                  :buffer (generate-new-buffer " *emeld-diff-same*")
+                  :command command)))
+      (process-put proc 'emeld-buf buf)
+      (process-put proc 'emeld-left left)
+      (process-put proc 'emeld-right right)
+      (process-put proc 'emeld-root root)
+      (set-process-sentinel
+       proc
+       (lambda (p event)
+         (when (emeld--sentinel-done-p event)
+           (let ((target-buf (process-get p 'emeld-buf)))
+             (when (buffer-live-p target-buf)
+               (with-current-buffer target-buf
+                 (let* ((p-buf (process-buffer p))
+                        (raw (if (buffer-live-p p-buf)
+                                 (with-current-buffer p-buf (buffer-string))
+                               ""))
+                        (lines (split-string raw "[\n\r]+" t))
+                        (old-gc gc-cons-threshold)
+                        (ctx-left (process-get p 'emeld-left))
+                        (ctx-right (process-get p 'emeld-right))
+                        (ctx-root (process-get p 'emeld-root)))
+                   (when (buffer-live-p p-buf)
+                     (kill-buffer p-buf))
+                   (setq gc-cons-threshold (* 128 1024 1024))
+                   (setq emeld--status-phase 'building-tree)
+                   (emeld--update-header-line)
+                   (run-with-timer 0.002 nil #'emeld--process-same-chunk-worker
+                                   target-buf lines ctx-root ctx-left ctx-right old-gc))))))))
+      (setq emeld--scan-process proc))))
+
 (defun emeld--glob-to-regexp (glob)
   "Convert GLOB to a regular expression.
 If GLOB contains a slash, it matches against the relative path.
@@ -947,7 +1077,7 @@ Uses cached data when available to avoid re-scanning."
     (setq emeld-show-same new-val)
     (message "Show same: %s" (if emeld-show-same "on" "off"))
     (if (and emeld-show-same (not emeld--cached-full-lines))
-        (emeld-refresh)
+        (emeld--scan-same-async (current-buffer))
       (emeld--render))))
 
 (defun emeld-toggle-tree-lines ()

@@ -1,6 +1,8 @@
 #+TITLE: Changelog for Emeld
 
 * [0.13.0] - 2026-05-24
+** Added
+- Incremental same-scan: toggling ~S~ now runs ~diff -rqs~ in the background and merges identical files into the existing tree without blanking the screen or losing context (point position, expanded folders, marks preserved).
 ** Changed
 - Keybinding reorganization: Same toggled with ~S~, Modified with ~M~, New/Added with ~N~, Strikethrough with ~s~.
 - Display state indicators updated to match new keys (header line shows ~[S]~, ~[M]~, ~[N]~, ~[s]~).
