@@ -146,6 +146,10 @@ Has no effect when `file-equal-p' is available (Emacs >= 29)."
 (defvar-local emeld--assembly-done nil
   "Non-nil when the progressive tree assembly has fully completed.")
 
+(defvar-local emeld--status-phase 'idle
+  "Current phase of the emeld background processing cycle.
+Values can be 'idle, 'running-diff, 'building-tree, or 'done.")
+
 (defvar-local emeld--saved-point-path nil
   "Saved point path to restore across async refresh cycle.")
 (defvar-local emeld--saved-point-col nil
@@ -331,6 +335,8 @@ Lower numbers keep Emacs snappier; higher numbers process faster."
         
         (setq emeld--scan-diff-lines nil)
         (setq gc-cons-threshold (* 128 1024 1024))
+        (setq emeld--status-phase 'building-tree)
+        (emeld--update-header-line)
         (emeld--bench-push "diff done")
         
         (cl-labels
@@ -356,29 +362,26 @@ Lower numbers keep Emacs snappier; higher numbers process faster."
                         (if (cl-some (lambda (e) (memq (cdr e) '(left-only right-only))) entries)
                             (setq entries (emeld--expand-dir-entries entries)))
                         
-                        ;; Kick off progressive top-to-bottom rendering loop
                         (message "Structuring tree nodes progressively...")
                         (emeld--entries-to-nodes-progressive
                          entries "" root buf
                          (lambda (top-level-children)
-                           ;; Assign the initial top-level layer immediately
                            (setf (emeld-node-children root) top-level-children)
-                           ;; Render the outer structure to the user instantly
-                           (emeld--render)
-                           (setq emeld--scan-process nil
-                                 emeld--scan-buf nil)
-                           (when emeld-show-same
-                             (setq emeld--cached-full-lines t))
-                           (emeld--update-header-line))
+                           (emeld--render))
                          (lambda ()
-                           ;; Final complete callback when all background branches finish
                            (with-current-buffer buf
                              (setf (emeld-node-diff-status root)
                                    (if (cl-some (lambda (c) (not (eq (emeld-node-diff-status c) 'same)))
                                                 (emeld-node-children root))
                                        'different 'same))
+                             (setq emeld--status-phase 'done)
+                             (setq emeld--scan-process nil
+                                   emeld--scan-buf nil)
+                             (when emeld-show-same
+                               (setq emeld--cached-full-lines t))
                              (emeld--restore-expanded root)
                              (emeld--render)
+                             (emeld--update-header-line)
                              (emeld--bench-push "tree built")
                              (emeld--bench-report)
                              (setq gc-cons-threshold old-gc)
@@ -475,14 +478,12 @@ then fills in directory branches asynchronously before calling FINAL-CB."
                       (emeld--entries-to-nodes-progressive
                        sub-entries sub-prefix dir-node buf
                        (lambda (sub-tier-nodes)
-                         ;; Set child assignments immediately when computed
                          (setf (emeld-node-children dir-node) sub-tier-nodes)
                          (when (cl-some (lambda (n) (not (eq (emeld-node-diff-status n) 'same))) sub-tier-nodes)
-                           (setf (emeld-node-diff-status dir-node) 'different))
-                         ;; Reflush UI buffer layout live so nested updates materialize visually
-                         (with-current-buffer buf (emeld--render)))
+                           (setf (emeld-node-diff-status dir-node) 'different)))
                        (lambda ()
-                         ;; Complete individual sub-branch, advance queue tail
+                         (when (or (null (cdr queue)) (= (% (length queue) 5) 0))
+                           (with-current-buffer buf (emeld--render)))
                          (process-dir-queue (cdr queue))))))))))
           
           ;; Start unpacking subdirectory tasks on next event frame loop
@@ -1023,6 +1024,7 @@ Uses `make-process' to run `diff -rq' as an OS-level async process,
 so Emacs stays fully responsive during the scan."
   (interactive)
   (emeld--stop-scan)
+  (setq emeld--status-phase 'running-diff)
   (let* ((buf (current-buffer))
          (root emeld--root-node)
          (node (get-text-property (point) 'emeld-node)))
@@ -1316,12 +1318,14 @@ Creates missing parent directories on the destination side if needed."
   "Update the header line with legend and status."
   (setq header-line-format
         '(:eval
-          (let ((scan-msg (if (and (boundp 'emeld--scan-process)
-                                   emeld--scan-process)
-                              (propertize " [SCANNING...] " 'face 'highlight)
-                            "")))
+          (let ((phase-msg
+                 (pcase emeld--status-phase
+                   ('running-diff   (propertize " [Diff Scan...]" 'face 'font-lock-warning-face))
+                   ('building-tree  (propertize " [Building Tree...]" 'face 'font-lock-variable-name-face))
+                   ('done           (propertize " [Ready]" 'face 'font-lock-string-face))
+                   (_               (propertize " [Idle]" 'face 'font-lock-comment-face)))))
             (concat
-             scan-msg
+             phase-msg
              " [" (emeld--display-state-string) "] ")))))
 
 (defun emeld--current-node ()
