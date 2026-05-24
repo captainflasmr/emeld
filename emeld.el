@@ -309,13 +309,13 @@ Directories are grouped first, followed by files, each sorted alphabetically."
           (push entry expanded)))))
     (nreverse expanded)))
 
-(defcustom emeld-batch-size 400
+(defcustom emeld-batch-size 50
   "Number of diff lines to parse per chunk during tree assembly.
 Lower numbers keep Emacs snappier; higher numbers process faster."
   :type 'integer
   :group 'emeld)
 
-(defcustom emeld-tree-batch-size 800
+(defcustom emeld-tree-batch-size 200
   "Number of entries or nodes to process per time-slice during tree conversion."
   :type 'integer
   :group 'emeld)
@@ -346,9 +346,9 @@ Lower numbers keep Emacs snappier; higher numbers process faster."
                    (setq gc-cons-threshold old-gc)
                  (with-current-buffer buf
                    (if (input-pending-p)
-                       (run-with-timer 0.05 nil #'process-lines-chunk)
-                     (let ((chunk-count 0))
-                       (while (and remaining-lines (< chunk-count emeld-batch-size))
+                        (run-with-timer 0.1 nil #'process-lines-chunk)
+                      (let ((chunk-count 0))
+                        (while (and remaining-lines (< chunk-count emeld-batch-size))
                          (let ((parsed (emeld--parse-diff-line (car remaining-lines) left right)))
                            (when parsed
                              (push parsed entries)))
@@ -356,9 +356,9 @@ Lower numbers keep Emacs snappier; higher numbers process faster."
                          (setq chunk-count (1+ chunk-count))
                          (setq processed-count (1+ processed-count)))
                        
-                       (if remaining-lines
-                           (run-with-timer 0.002 nil #'process-lines-chunk)
-                         (emeld--bench-push "parse done")
+                        (if remaining-lines
+                            (run-with-timer 0.01 nil #'process-lines-chunk)
+                          (emeld--bench-push "parse done")
                          (if (cl-some (lambda (e) (memq (cdr e) '(left-only right-only))) entries)
                              (setq entries (emeld--expand-dir-entries entries)))
                          
@@ -385,7 +385,7 @@ Lower numbers keep Emacs snappier; higher numbers process faster."
                               (emeld--bench-push "tree built")
                               (emeld--bench-report)
                               (setq gc-cons-threshold old-gc)))))))))))
-          (run-with-timer 0.002 nil #'process-lines-chunk))))))
+          (run-with-timer 0.01 nil #'process-lines-chunk))))))
 
 (defun emeld--entries-to-nodes-progressive (entries prefix parent buf initial-render-cb final-cb)
   "Convert ENTRIES into nodes progressively.
@@ -496,7 +496,7 @@ allowing identical/same branches to populate quietly afterward."
                   
                   (t (funcall final-cb))))))
           
-          (run-with-timer 0.002 nil (lambda () (process-dir-queue priority-queue same-queue))))))))
+          (run-with-timer 0.01 nil (lambda () (process-dir-queue priority-queue same-queue))))))))
 
 (defun emeld--diff-exclude-args ()
   "Return `--exclude=PATTERN' args from active filter groups.
@@ -615,7 +615,7 @@ Explicitly handles and strips single quotes added to paths by the shell environm
       (setq gc-cons-threshold old-gc)
     (with-current-buffer buf
       (if (input-pending-p)
-          (run-with-timer 0.05 nil #'emeld--process-same-chunk-worker
+          (run-with-timer 0.1 nil #'emeld--process-same-chunk-worker
                           buf remaining-lines root left right old-gc)
         (let ((chunk-count 0)
               (dirty-parents (make-hash-table :test 'eq)))
@@ -640,7 +640,7 @@ Explicitly handles and strips single quotes added to paths by the shell environm
           (if remaining-lines
               (progn
                 (emeld--render)
-                (run-with-timer 0.002 nil #'emeld--process-same-chunk-worker
+                (run-with-timer 0.01 nil #'emeld--process-same-chunk-worker
                                 buf remaining-lines root left right old-gc))
             (setq emeld--status-phase 'done
                   emeld--scan-process nil
@@ -694,7 +694,7 @@ Explicitly handles and strips single quotes added to paths by the shell environm
                    (setq gc-cons-threshold (* 128 1024 1024))
                    (setq emeld--status-phase 'building-tree)
                    (emeld--update-header-line)
-                   (run-with-timer 0.002 nil #'emeld--process-same-chunk-worker
+                   (run-with-timer 0.01 nil #'emeld--process-same-chunk-worker
                                    target-buf lines ctx-root ctx-left ctx-right old-gc))))))))
       (setq emeld--scan-process proc))))
 
