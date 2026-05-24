@@ -390,14 +390,13 @@ Lower numbers keep Emacs snappier; higher numbers process faster."
 
 (defun emeld--entries-to-nodes-progressive (entries prefix parent buf initial-render-cb final-cb)
   "Convert ENTRIES into nodes progressively.
-Calls INITIAL-RENDER-CB as soon as immediate structural children are built,
-then fills in directory branches asynchronously before calling FINAL-CB."
+Prioritizes branches containing modifications or differences so they render first,
+allowing identical/same branches to populate quietly afterward."
   (let ((dirs (make-hash-table :test 'equal))
         (files nil)
         (dir-names (make-hash-table :test 'equal))
         (file-nodes nil))
     
-    ;; Categorize entries at current prefix layer
     (dolist (entry entries)
       (let* ((path (car entry))
              (status (cdr entry))
@@ -412,7 +411,6 @@ then fills in directory branches asynchronously before calling FINAL-CB."
     
     (maphash (lambda (k _) (puthash k t dir-names)) dirs)
     
-    ;; Build absolute leaf file nodes for this tier immediately
     (dolist (entry files)
       (let* ((path (car entry))
              (status (cdr entry)))
@@ -420,33 +418,34 @@ then fills in directory branches asynchronously before calling FINAL-CB."
           (let ((sub-rel (if (string-empty-p prefix) path (concat prefix "/" path))))
             (push (emeld--make-file-node sub-rel parent status) file-nodes)))))
     
-    ;; Create shell nodes for subdirectories so they appear instantly
     (let ((dir-nodes nil)
-          (pending-dir-branches nil))
+          (priority-queue nil)
+          (same-queue nil))
       (maphash
        (lambda (dir-name sub-entries)
          (let ((sub-prefix (if (string-empty-p prefix) dir-name (concat prefix "/" dir-name))))
            (unless (or (string-empty-p dir-name) (string= dir-name "'") (emeld--filtered-p dir-name sub-prefix))
-               (let* ((only-same (cl-every (lambda (e) (eq (cdr e) 'same)) sub-entries))
-                      (should-expand (not only-same))
-                      (dir-node (emeld-node-create
-                                :name dir-name
-                                :left-path (and emeld--left-root
+             (let* ((only-same (cl-every (lambda (e) (eq (cdr e) 'same)) sub-entries))
+                    (should-expand (not only-same))
+                    (dir-node (emeld-node-create
+                               :name dir-name
+                               :left-path (and emeld--left-root 
+                                               (not (string-empty-p sub-prefix))
+                                               (expand-file-name sub-prefix emeld--left-root))
+                               :right-path (and emeld--right-root 
                                                 (not (string-empty-p sub-prefix))
-                                                (expand-file-name sub-prefix emeld--left-root))
-                                :right-path (and emeld--right-root
-                                                 (not (string-empty-p sub-prefix))
-                                                 (expand-file-name sub-prefix emeld--right-root))
-                                :parent parent
-                                :is-dir t
-                                :expanded should-expand
-                                :diff-status (if only-same 'same 'different))))
+                                                (expand-file-name sub-prefix emeld--right-root))
+                               :parent parent
+                               :is-dir t
+                               :expanded should-expand
+                               :diff-status (if only-same 'same 'different)))
+                    (task-item (list sub-entries sub-prefix dir-node)))
                (push dir-node dir-nodes)
-               ;; Queue the sub-entries to be structuralized iteratively later
-               (push (list sub-entries sub-prefix dir-node) pending-dir-branches)))))
+               (if only-same
+                   (push task-item same-queue)
+                 (push task-item priority-queue))))))
        dirs)
       
-      ;; Combine and sort current tier nodes alphabetically (Directories first)
       (let ((current-tier-nodes
              (sort (nconc file-nodes dir-nodes)
                    (lambda (a b)
@@ -456,37 +455,49 @@ then fills in directory branches asynchronously before calling FINAL-CB."
                            (string< (emeld-node-name a) (emeld-node-name b))
                          a-dir))))))
         
-        ;; Flush initial layer up to user interface viewport immediately
         (funcall initial-render-cb current-tier-nodes)
         
-        ;; Progressively process lower branches via background queue ticks
         (cl-labels
             ((process-dir-queue
-              (queue)
+              (p-tail s-tail)
               (if (not (buffer-live-p buf)) nil
-                (if (null queue)
-                    (funcall final-cb) ;; All nested branches stabilized
+                (cond
+                 (p-tail
                   (if (input-pending-p)
-                      ;; Defer execution slice if user is actively interacting
-                      (run-with-timer 0.04 nil (lambda () (process-dir-queue queue)))
-                    (let* ((next-branch (car queue))
+                      (run-with-timer 0.04 nil (lambda () (process-dir-queue p-tail s-tail)))
+                    (let* ((next-branch (car p-tail))
                            (sub-entries (nth 0 next-branch))
                            (sub-prefix  (nth 1 next-branch))
                            (dir-node    (nth 2 next-branch)))
-                      
-                      ;; Recurse next tier down
                       (emeld--entries-to-nodes-progressive
                        sub-entries sub-prefix dir-node buf
-                        (lambda (sub-tier-nodes)
-                          (setf (emeld-node-children dir-node) sub-tier-nodes)
-                          (let ((any-diff (cl-some (lambda (n) (not (eq (emeld-node-diff-status n) 'same))) sub-tier-nodes)))
-                            (setf (emeld-node-diff-status dir-node) (if any-diff 'different 'same))))
+                       (lambda (sub-tier-nodes)
+                         (setf (emeld-node-children dir-node) sub-tier-nodes)
+                         (let ((any-diff (cl-some (lambda (n) (not (eq (emeld-node-diff-status n) 'same))) sub-tier-nodes)))
+                           (setf (emeld-node-diff-status dir-node) (if any-diff 'different 'same))))
                        (lambda ()
-                          (with-current-buffer buf (emeld--render))
-                          (process-dir-queue (cdr queue))))))))))
+                         (with-current-buffer buf (emeld--render))
+                         (process-dir-queue (cdr p-tail) s-tail))))))
+                 
+                 (s-tail
+                  (if (input-pending-p)
+                      (run-with-timer 0.04 nil (lambda () (process-dir-queue nil s-tail)))
+                    (let* ((next-branch (car s-tail))
+                           (sub-entries (nth 0 next-branch))
+                           (sub-prefix  (nth 1 next-branch))
+                           (dir-node    (nth 2 next-branch)))
+                      (emeld--entries-to-nodes-progressive
+                       sub-entries sub-prefix dir-node buf
+                       (lambda (sub-tier-nodes)
+                         (setf (emeld-node-children dir-node) sub-tier-nodes))
+                       (lambda ()
+                         (when (or (null (cdr s-tail)) (= (% (length s-tail) 5) 0))
+                           (with-current-buffer buf (emeld--render)))
+                         (process-dir-queue nil (cdr s-tail)))))))
+                 
+                 (t (funcall final-cb))))))
           
-          ;; Start unpacking subdirectory tasks on next event frame loop
-          (run-with-timer 0.002 nil (lambda () (process-dir-queue pending-dir-branches))))))))
+          (run-with-timer 0.002 nil (lambda () (process-dir-queue priority-queue same-queue))))))))
 
 (defun emeld--diff-exclude-args ()
   "Return `--exclude=PATTERN' args from active filter groups.
