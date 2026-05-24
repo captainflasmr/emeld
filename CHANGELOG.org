@@ -1,5 +1,12 @@
 #+TITLE: Changelog for Emeld
 
+* [0.13.0] - 2026-05-24
+** Changed
+- Keybinding reorganization: Same toggled with ~S~, Modified with ~M~, New/Added with ~N~, Strikethrough with ~s~.
+- Display state indicators updated to match new keys (header line shows ~[S]~, ~[M]~, ~[N]~, ~[s]~).
+- Transient menu labels shortened: ~Same~→~S~, ~New~→~N~, ~Modified~→~M~.
+- Wrapped ~file-name-nondirectory~ calls with ~directory-file-name~ to fix blank directory names when showing identical files.
+
 * [0.12.0] - 2026-05-23
 ** Added
 - Confirmation prompt when toggling show-same (~s~): warns about potential freeze and asks to proceed when no cached data.

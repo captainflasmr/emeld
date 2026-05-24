@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.12.0
+;; Version: 0.13.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -384,8 +384,7 @@ Lower numbers keep Emacs snappier; higher numbers process faster."
                               (emeld--update-header-line)
                               (emeld--bench-push "tree built")
                               (emeld--bench-report)
-                              (setq gc-cons-threshold old-gc)
-                              (message "Progressive assembly fully stabilized.")))))))))))
+                              (setq gc-cons-threshold old-gc)))))))))))
           (run-with-timer 0.002 nil #'process-lines-chunk))))))
 
 (defun emeld--entries-to-nodes-progressive (entries prefix parent buf initial-render-cb final-cb)
@@ -812,11 +811,11 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "m")   #'emeld-mark)
     (define-key map (kbd "u")   #'emeld-unmark)
     (define-key map (kbd "U")   #'emeld-unmark-all)
-    (define-key map (kbd "s")   #'emeld-toggle-show-same)
-    (define-key map (kbd "M-m") #'emeld-toggle-show-different)
-    (define-key map (kbd "a")   #'emeld-toggle-show-added)
+    (define-key map (kbd "S")   #'emeld-toggle-show-same)
+    (define-key map (kbd "M")   #'emeld-toggle-show-different)
+    (define-key map (kbd "N")   #'emeld-toggle-show-added)
     (define-key map (kbd "T")   #'emeld-toggle-tree-lines)
-    (define-key map (kbd "S")   #'emeld-toggle-show-strikethrough)
+    (define-key map (kbd "s")   #'emeld-toggle-show-strikethrough)
     (define-key map (kbd ">")   #'emeld-increase-indent)
     (define-key map (kbd "<")   #'emeld-decrease-indent)
     (define-key map (kbd "}")   #'emeld-grow-column)
@@ -1316,11 +1315,11 @@ Creates missing parent directories on the destination side if needed."
   (let ((groups (mapcar (lambda (g) (concat "[" g "]"))
                         emeld--active-filter-groups)))
     (concat
-     (emeld--toggle-indicator "s" emeld-show-same)
-     (emeld--toggle-indicator "m" emeld-show-different)
-     (emeld--toggle-indicator "a" emeld-show-added)
+     (emeld--toggle-indicator "S" emeld-show-same)
+     (emeld--toggle-indicator "M" emeld-show-different)
+     (emeld--toggle-indicator "N" emeld-show-added)
      (emeld--toggle-indicator "T" emeld-show-tree-lines)
-     (emeld--toggle-indicator "S" emeld-show-strikethrough)
+     (emeld--toggle-indicator "s" emeld-show-strikethrough)
      (when groups
        (concat " " (mapconcat #'identity groups " "))))))
 
@@ -1565,11 +1564,11 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
 (transient-define-prefix emeld-dispatch ()
   "Transient menu for emeld."
   [["File Status"
-    ("s" (lambda () (if emeld-show-same "[x] Same" "[ ] Same"))
+    ("S" (lambda () (if emeld-show-same "[x] S" "[ ] S"))
      (lambda () (interactive) (emeld-toggle-show-same)) :transient t)
-    ("a" (lambda () (if emeld-show-added "[x] New" "[ ] New"))
+    ("N" (lambda () (if emeld-show-added "[x] N" "[ ] N"))
      (lambda () (interactive) (emeld-toggle-show-added)) :transient t)
-    ("m" (lambda () (if emeld-show-different "[x] Modified" "[ ] Modified"))
+    ("M" (lambda () (if emeld-show-different "[x] M" "[ ] M"))
      (lambda () (interactive) (emeld-toggle-show-different)) :transient t)]
    ["Filename"
     :if (lambda () emeld-filter-groups)
@@ -1609,7 +1608,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
    ["View"
     ("T" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
      (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
-    ("S" (lambda () (if emeld-show-strikethrough "[x] strikethrough" "[ ] strikethrough"))
+    ("s" (lambda () (if emeld-show-strikethrough "[x] strikethrough" "[ ] strikethrough"))
      (lambda () (interactive) (emeld-toggle-show-strikethrough)) :transient t)
     (">" "indent more"  emeld-increase-indent :transient t)
     ("<" "indent less"  emeld-decrease-indent :transient t)

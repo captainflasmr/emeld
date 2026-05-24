@@ -7,8 +7,8 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 * Features
 - Side-by-side view in a single buffer.
 - Recursive glob-based filtering (like Meld) — excluded at the ~diff~ level.
-- Instant toggles for New, Modified, and Identical files.
-- Orphan files shown with strikethrough on the missing side (Meld-style, toggle ~S~).
+- Instant toggles for New, Modified, and Identical files (~S~/~M~/~N~).
+- Orphan files shown with strikethrough on the missing side (Meld-style, toggle ~s~).
 - Dired-style marking (~m~/~u~/~U~) with bulk copy (~C~).
 - Filter groups toggleable from the transient menu.
 - Tree folding (~TAB~).
@@ -33,8 +33,8 @@ Alternatively, run ~M-x emeld-diff-dwim~ to automatically use open Dired buffers
 
 The transient menu is organized into four groups:
 
-- ~File Status~ :: Toggle file visibility (~s~ same, ~M-m~ modified, ~a~ added).
-- ~View~ :: Toggle tree-lines (~T~), strikethrough (~S~), indent (~>~/~<~), pane resize (~{~/~}~).
+- ~File Status~ :: Toggle file visibility (~S~ same, ~M~ modified, ~N~ added).
+- ~View~ :: Toggle tree-lines (~T~), strikethrough (~s~), indent (~>~/~<~), pane resize (~{~/~}~).
 - ~Navigate~ :: Rescan (~g~) and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
 - ~File~ :: Operate on files (~RET~ ediff/open, ~SPC~ soft diff/fold, ~C~ copy, ~d~ delete, ~w~ copy path, ~P~ format patch).
 - ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~cl~ list all globs.
@@ -52,13 +52,13 @@ The transient menu is organized into four groups:
 | w         | Copy filename (C-u w for full path)    |
 | SPC       | Fold/Unfold (Dir) or Soft Diff (File)  |
 | o         | Jump to the other side                 |
-| s         | Toggle same (identical) files          |
-| M-m       | Toggle modified files                  |
+| S         | Toggle same (identical) files          |
+| M         | Toggle modified files                  |
+| N         | Toggle added (new) files               |
 | m         | Mark node                              |
 | u         | Unmark node                            |
 | U         | Unmark all nodes                       |
-| a         | Toggle added (new) files               |
-| S         | Toggle strikethrough display            |
+| s         | Toggle strikethrough display           |
 | T         | Toggle tree-line display               |
 | g         | Rescan (~diff -rq~)                   |
 | n/p       | Navigation (Side-aware)                |
