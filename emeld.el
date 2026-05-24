@@ -156,6 +156,8 @@ Values can be 'idle, 'running-diff, 'building-tree, or 'done.")
   "Saved point column to restore across async refresh cycle.")
 (defvar-local emeld--marked-paths nil
   "Hash table of relative paths for marked nodes (Dired-style marking).")
+(defvar-local emeld--last-render-time nil
+  "Float-time of the last `emeld--render' call, for render throttling.")
 
 (defsubst emeld--bench-push (label)
   "Record a timestamp LABEL in `emeld--benchmark-data' when benchmarking."
@@ -336,6 +338,7 @@ Lower numbers keep Emacs snappier; higher numbers process faster."
         (setq emeld--scan-diff-lines nil)
         (setq gc-cons-threshold (* 128 1024 1024))
         (setq emeld--status-phase 'building-tree)
+        (setq emeld--last-render-time (float-time))
         (emeld--update-header-line)
         (emeld--bench-push "diff done")
         
@@ -459,43 +462,45 @@ allowing identical/same branches to populate quietly afterward."
         (cl-labels
             ((process-dir-queue
                (p-tail s-tail)
-               (if (not (buffer-live-p buf)) nil
+               (if (not (buffer-live-p buf))
+                   nil
                  (cond
                   (p-tail
-                   (if (input-pending-p)
-                       (run-with-timer 0.04 nil (lambda () (process-dir-queue p-tail s-tail)))
-                     (let* ((next-branch (car p-tail))
-                            (sub-entries (nth 0 next-branch))
-                            (sub-prefix  (nth 1 next-branch))
-                            (dir-node    (nth 2 next-branch)))
-                       (emeld--entries-to-nodes-progressive
-                        sub-entries sub-prefix dir-node buf
-                        (lambda (sub-tier-nodes)
-                          (setf (emeld-node-children dir-node) sub-tier-nodes)
-                          (let ((any-diff (cl-some (lambda (n) (not (eq (emeld-node-diff-status n) 'same))) sub-tier-nodes)))
-                            (setf (emeld-node-diff-status dir-node) (if any-diff 'different 'same))))
-                        (lambda ()
-                          (with-current-buffer buf (emeld--render))
-                          (process-dir-queue (cdr p-tail) s-tail))))))
+                   (let* ((next-branch (car p-tail))
+                          (sub-entries (nth 0 next-branch))
+                          (sub-prefix  (nth 1 next-branch))
+                          (dir-node    (nth 2 next-branch)))
+                     (emeld--entries-to-nodes-progressive
+                      sub-entries sub-prefix dir-node buf
+                      (lambda (sub-tier-nodes)
+                        (setf (emeld-node-children dir-node) sub-tier-nodes)
+                        (let ((any-diff (cl-some (lambda (n) (not (eq (emeld-node-diff-status n) 'same))) sub-tier-nodes)))
+                          (setf (emeld-node-diff-status dir-node) (if any-diff 'different 'same))))
+                      (lambda ()
+                        (with-current-buffer buf (emeld--render))
+                        (process-dir-queue (cdr p-tail) s-tail)))))
                   
                   (s-tail
-                   (if (input-pending-p)
-                       (run-with-timer 0.04 nil (lambda () (process-dir-queue p-tail s-tail)))
-                     (let* ((next-branch (car s-tail))
-                            (sub-entries (nth 0 next-branch))
-                            (sub-prefix  (nth 1 next-branch))
-                            (dir-node    (nth 2 next-branch)))
-                       (emeld--entries-to-nodes-progressive
-                        sub-entries sub-prefix dir-node buf
-                        (lambda (sub-tier-nodes)
-                          (setf (emeld-node-children dir-node) sub-tier-nodes))
-                        (lambda ()
-                          (when (or (null (cdr s-tail)) (= (% (length s-tail) 5) 0))
-                            (with-current-buffer buf (emeld--render)))
-                          (process-dir-queue p-tail (cdr s-tail)))))))
+                   (let* ((next-branch (car s-tail))
+                          (sub-entries (nth 0 next-branch))
+                          (sub-prefix  (nth 1 next-branch))
+                          (dir-node    (nth 2 next-branch)))
+                     (emeld--entries-to-nodes-progressive
+                      sub-entries sub-prefix dir-node buf
+                      (lambda (sub-tier-nodes)
+                        (setf (emeld-node-children dir-node) sub-tier-nodes))
+                      (lambda ()
+                        (let ((now (float-time))
+                              (last-render emeld--last-render-time))
+                          (when (or (null (cdr s-tail))
+                                    (null last-render)
+                                    (> (- now last-render) 0.15))
+                            (setq emeld--last-render-time now)
+                            (with-current-buffer buf (emeld--render))))
+                        (process-dir-queue nil (cdr s-tail))))))
                   
                   (t (funcall final-cb))))))
-          
+        
           (run-with-timer 0.001 nil (lambda () (process-dir-queue priority-queue same-queue))))))))
 
 (defun emeld--diff-exclude-args ()
@@ -513,7 +518,8 @@ the basename component, not the full relative path."
 (defun emeld--start-diff (buf)
   "Start async `diff -rq' for content comparison.
 Active filter group patterns (without `/') are passed to `diff'
-as `--exclude' arguments so diff skips filtered files entirely."
+as `--exclude' arguments so diff skips filtered files entirely.
+Uses a process filter to stream-parse output incrementally."
   (setq emeld--scan-diff-lines nil)
   (with-current-buffer buf
     (setq emeld--benchmark-start-time (float-time)))
@@ -523,21 +529,39 @@ as `--exclude' arguments so diff skips filtered files entirely."
                     ,@excludes
                     ,(expand-file-name emeld--left-root)
                     ,(expand-file-name emeld--right-root)))
+         (accum-lines nil)
+         (accum-tail nil)
+         (partial nil)
          (proc (make-process
                 :name "emeld-diff"
                 :buffer (generate-new-buffer " *emeld-diff*")
-                :command command
-                :sentinel
-                (lambda (proc event)
-                  (when (emeld--sentinel-done-p event)
-                    (when (buffer-live-p buf)
-                      (with-current-buffer buf
-                        (let ((raw (with-current-buffer (process-buffer proc)
-                                     (buffer-string))))
-                          (setq emeld--scan-diff-lines
-                                (split-string raw "[\n\r]+" t))
-                          (kill-buffer (process-buffer proc))
-                          (emeld--build-tree-from-diff buf)))))))))
+                :command command)))
+    (set-process-filter
+     proc
+     (lambda (proc output)
+       (when (buffer-live-p buf)
+         (let* ((combined (if partial (concat partial output) output))
+                (new-lines (split-string combined "[\n\r]+")))
+           (if (string-suffix-p "\n" combined)
+               (setq partial nil)
+             (setq partial (car (last new-lines))
+                   new-lines (butlast new-lines)))
+           (when new-lines
+             (if accum-tail
+                 (setcdr accum-tail new-lines)
+               (setq accum-lines new-lines))
+             (setq accum-tail (last new-lines)))))))
+    (set-process-sentinel
+     proc
+     (lambda (p event)
+       (when (emeld--sentinel-done-p event)
+         (when (buffer-live-p buf)
+           (with-current-buffer buf
+             (let ((p-buf (process-buffer p)))
+               (when (and p-buf (buffer-live-p p-buf))
+                 (kill-buffer p-buf)))
+             (setq emeld--scan-diff-lines (or accum-lines (list)))
+              (emeld--build-tree-from-diff buf))))))
     (setq emeld--scan-process proc)))
 
 (defun emeld--parse-diff-line (line left-dir right-dir)
@@ -568,46 +592,47 @@ Explicitly handles and strips single quotes added to paths by the shell environm
         (cons (clean-quotes rel) side)))
      (t nil))))
 
-(defun emeld--add-same-entry-to-tree (root relpath left-root right-root)
-  (let* ((components (split-string relpath "/" t))
-         (current root)
-         (prefix nil)
-         (filtered nil))
-    (while (and components (not filtered))
-      (let* ((comp (car components))
-             (is-last (null (cdr components)))
-             (sub-prefix (if prefix (concat prefix "/" comp) comp)))
-        (if (emeld--filtered-p comp sub-prefix)
-            (setq filtered t)
-          (let* ((children (emeld-node-children current))
-                 (existing (cl-find-if
-                            (lambda (n)
-                              (and (string= (emeld-node-name n) comp)
-                                   (eq (emeld-node-is-dir n) (not is-last))))
-                            children)))
-            (if existing
-                (setq current existing)
-              (let ((new-node (if is-last
-                                  (emeld-node-create
-                                   :name comp
-                                   :left-path (expand-file-name sub-prefix left-root)
-                                   :right-path (expand-file-name sub-prefix right-root)
-                                   :parent current
-                                   :diff-status 'same
-                                   :is-dir nil)
-                                (emeld-node-create
-                                 :name comp
-                                 :left-path (expand-file-name sub-prefix left-root)
-                                 :right-path (expand-file-name sub-prefix right-root)
-                                 :parent current
-                                 :diff-status 'same
-                                 :is-dir t
-                                 :expanded nil))))
-                (setf (emeld-node-children current)
-                      (cons new-node (emeld-node-children current)))
-                (setq current new-node)))))
-        (setq prefix sub-prefix
-              components (cdr components))))))
+(defun emeld--get-or-create-dir-node (rel-dir-path path-hash root left-root right-root)
+  (or (gethash rel-dir-path path-hash)
+      (let* ((parent-dir (file-name-directory (directory-file-name rel-dir-path)))
+             (parent-rel-path (if (or (null parent-dir) (string= parent-dir "./")
+                                      (string= parent-dir ""))
+                                  ""
+                                (directory-file-name parent-dir)))
+             (parent-node (if (string-empty-p parent-rel-path)
+                              root
+                            (emeld--get-or-create-dir-node
+                             parent-rel-path path-hash root left-root right-root)))
+             (dir-name (file-name-nondirectory (directory-file-name rel-dir-path)))
+             (new-dir (emeld-node-create
+                       :name dir-name
+                       :left-path (expand-file-name rel-dir-path left-root)
+                       :right-path (expand-file-name rel-dir-path right-root)
+                       :parent parent-node
+                       :is-dir t
+                       :expanded nil
+                       :diff-status 'same)))
+        (push new-dir (emeld-node-children parent-node))
+        (puthash rel-dir-path new-dir path-hash)
+        new-dir)))
+
+(defun emeld--add-same-entry-to-tree (root relpath path-hash left-root right-root)
+  (let* ((rel-dir (file-name-directory relpath))
+         (parent-rel (if rel-dir (directory-file-name rel-dir) ""))
+         (parent-node (if (string-empty-p parent-rel)
+                          root
+                        (emeld--get-or-create-dir-node
+                         parent-rel path-hash root left-root right-root)))
+         (file-name (file-name-nondirectory relpath)))
+    (unless (emeld--filtered-p file-name relpath)
+      (let ((new-file (emeld-node-create
+                       :name file-name
+                       :left-path (expand-file-name relpath left-root)
+                       :right-path (expand-file-name relpath right-root)
+                       :parent parent-node
+                       :diff-status 'same
+                       :is-dir nil)))
+        (push new-file (emeld-node-children parent-node))))))
 
 (defun emeld--sort-tree-recursive (node)
   (when (emeld-node-children node)
@@ -622,28 +647,29 @@ Explicitly handles and strips single quotes added to paths by the shell environm
     (dolist (child (emeld-node-children node))
       (emeld--sort-tree-recursive child))))
 
-(defun emeld--process-same-chunk-worker (buf remaining-lines root left right old-gc)
+(defun emeld--process-same-chunk-worker (buf remaining-lines root left right old-gc path-hash)
   (if (not (buffer-live-p buf))
       (setq gc-cons-threshold old-gc)
     (with-current-buffer buf
       (if (input-pending-p)
           (run-with-timer 0.001 nil #'emeld--process-same-chunk-worker
-                          buf remaining-lines root left right old-gc)
+                          buf remaining-lines root left right old-gc path-hash)
         (let ((chunk-count 0))
           (while (and remaining-lines (< chunk-count emeld-batch-size))
             (let ((line (car remaining-lines)))
               (when (string-match-p "are identical$" line)
                 (let ((parsed (emeld--parse-diff-line line left right)))
                   (when (and parsed (eq (cdr parsed) 'same))
-                    (emeld--add-same-entry-to-tree root (car parsed) left right)))))
+                    (emeld--add-same-entry-to-tree root (car parsed) path-hash left right)))))
             (setq remaining-lines (cdr remaining-lines))
             (setq chunk-count (1+ chunk-count)))
           (if remaining-lines
               (progn
                 (emeld--render)
                 (run-with-timer 0.001 nil #'emeld--process-same-chunk-worker
-                                buf remaining-lines root left right old-gc))
+                                buf remaining-lines root left right old-gc path-hash))
             (emeld--sort-tree-recursive root)
+            (clrhash path-hash)
             (setq emeld--status-phase 'done
                   emeld--scan-process nil
                   emeld--scan-buf nil
