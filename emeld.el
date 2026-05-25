@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.13.0
+;; Version: 0.14.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -1092,7 +1092,12 @@ Mimics Meld's display of missing files."
 
 (defvar emeld-mode-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "TAB") #'emeld-toggle-expand)
+    (define-key map (kbd "TAB") #'emeld-cycle-subtree)
+    (define-key map (kbd "<backtab>") #'emeld-cycle-visibility)
+    (define-key map (kbd "S-TAB")     #'emeld-cycle-visibility)
+    (define-key map (kbd "[")   #'emeld-collapse-all)
+    (define-key map (kbd "]")   #'emeld-expand-all)
+    (define-key map (kbd "\\")  #'emeld-expand-changes)
     (define-key map (kbd "RET") #'emeld-action)
     (define-key map (kbd "e")   #'emeld-action)
     (define-key map (kbd "=")   #'emeld-action)
@@ -1319,6 +1324,138 @@ shows nothing for the orphan."
       (let ((pos (point)))
         (emeld--render)
         (goto-char pos)))))
+
+(defun emeld--walk-set-expanded (node value)
+  "Recursively set the :expanded slot on NODE and its descendant dirs to VALUE."
+  (when (and node (emeld-node-is-dir node))
+    (setf (emeld-node-expanded node) value)
+    (dolist (child (emeld-node-children node))
+      (emeld--walk-set-expanded child value))))
+
+(defun emeld--walk-set-dirs-only (node)
+  "Expand intermediate dir nodes, collapse leaf dir nodes (those with no sub-dirs).
+Shows the directory skeleton without revealing the file leaves inside."
+  (when (and node (emeld-node-is-dir node))
+    (let ((has-subdir (cl-some #'emeld-node-is-dir (emeld-node-children node))))
+      (setf (emeld-node-expanded node) has-subdir)
+      (dolist (child (emeld-node-children node))
+        (emeld--walk-set-dirs-only child)))))
+
+(defun emeld--subtree-fully-expanded-p (node)
+  "Return non-nil when every dir descendant of NODE is expanded."
+  (catch 'unexpanded
+    (dolist (child (emeld-node-children node))
+      (when (emeld-node-is-dir child)
+        (unless (emeld-node-expanded child)
+          (throw 'unexpanded nil))
+        (unless (emeld--subtree-fully-expanded-p child)
+          (throw 'unexpanded nil))))
+    t))
+
+(defun emeld-collapse-all ()
+  "Collapse every directory in the tree.  The root stays expanded."
+  (interactive)
+  (when emeld--root-node
+    (dolist (child (emeld-node-children emeld--root-node))
+      (emeld--walk-set-expanded child nil))
+    (emeld--render)))
+
+(defun emeld-expand-all ()
+  "Expand every directory in the tree."
+  (interactive)
+  (when emeld--root-node
+    (dolist (child (emeld-node-children emeld--root-node))
+      (emeld--walk-set-expanded child t))
+    (emeld--render)))
+
+(defun emeld-expand-dirs-only ()
+  "Expand intermediate directories; collapse leaf directories.
+Reveals the directory skeleton without showing the file leaves inside.
+A directory is considered a leaf when none of its children are dirs."
+  (interactive)
+  (when emeld--root-node
+    (dolist (child (emeld-node-children emeld--root-node))
+      (emeld--walk-set-dirs-only child))
+    (emeld--render)))
+
+(defun emeld-expand-changes ()
+  "Expand directories that lead to a change, collapse those that don't.
+A directory is expanded when its `diff-status' is not `same' — i.e. it
+contains a modified, added, or removed descendant.  Useful for focusing
+the view after \\[emeld-collapse-all], or after toggling same files on."
+  (interactive)
+  (when emeld--root-node
+    (cl-labels ((walk (node)
+                  (when (emeld-node-is-dir node)
+                    (setf (emeld-node-expanded node)
+                          (not (eq (emeld-node-diff-status node) 'same)))
+                    (dolist (child (emeld-node-children node))
+                      (walk child)))))
+      (dolist (child (emeld-node-children emeld--root-node))
+        (walk child))
+      (emeld--render))))
+
+(defun emeld-cycle-subtree ()
+  "Cycle the subtree at point through FOLDED → DIRS → SUBTREE, org-mode style.
+
+If point is on a directory:
+- FOLDED: just this directory collapsed.
+- DIRS: this directory expanded; intermediate sub-dirs expanded; leaf
+  sub-dirs collapsed so file leaves are hidden.
+- SUBTREE: this directory and every descendant dir expanded; files visible.
+
+Repeated invocations cycle FOLDED → DIRS → SUBTREE → FOLDED.  The current
+state is inferred from the actual expansion levels — no per-node state
+is stored, so external commands (TAB on another dir, `[`, `]`, …) compose
+naturally."
+  (interactive)
+  (let ((node (get-text-property (point) 'emeld-node)))
+    (cond
+     ((not (and node (emeld-node-is-dir node)))
+      (user-error "Not on a directory"))
+     ((not (emeld-node-expanded node))
+      ;; FOLDED → DIRS
+      (emeld--maybe-populate-lazy-dir node)
+      (setf (emeld-node-expanded node) t)
+      (dolist (child (emeld-node-children node))
+        (emeld--walk-set-dirs-only child))
+      (message "subtree: dirs"))
+     ((not (emeld--subtree-fully-expanded-p node))
+      ;; DIRS → SUBTREE
+      (emeld--walk-set-expanded node t)
+      (message "subtree: all"))
+     (t
+      ;; SUBTREE → FOLDED
+      (setf (emeld-node-expanded node) nil)
+      (message "subtree: folded")))
+    (let ((pos (point)))
+      (emeld--render)
+      (goto-char pos))))
+
+(defvar-local emeld--cycle-state nil
+  "Most recent state from `emeld-cycle-visibility': `top', `dirs', `changes', or nil.")
+
+(defun emeld-cycle-visibility ()
+  "Cycle the tree's expansion state in three steps, like org-mode's `S-TAB'.
+
+Order:
+- TOP: only the root's immediate child directories visible (rest collapsed).
+- DIRS: every intermediate directory expanded, leaf directories collapsed
+  so the directory skeleton is shown without the file leaves inside.
+- CHANGES: every directory that leads to a change expanded; identical
+  subtrees collapsed.  File leaves are visible under leaf dirs.
+
+Repeated invocations cycle TOP → DIRS → CHANGES → TOP."
+  (interactive)
+  (let ((next (pcase emeld--cycle-state
+                ('top 'dirs)
+                ('dirs 'changes)
+                (_ 'top))))
+    (setq emeld--cycle-state next)
+    (pcase next
+      ('top     (emeld-collapse-all)    (message "Visibility: TOP (top-level dirs)"))
+      ('dirs    (emeld-expand-dirs-only) (message "Visibility: DIRS (directory skeleton)"))
+      ('changes (emeld-expand-changes)   (message "Visibility: CHANGES (modified files)")))))
 
 (defun emeld--stop-scan ()
   "Cancel the active async scan and clean up processes."
@@ -1942,6 +2079,10 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
      (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
     ("s" (lambda () (if emeld-show-strikethrough "[x] strikethrough" "[ ] strikethrough"))
      (lambda () (interactive) (emeld-toggle-show-strikethrough)) :transient t)
+    ("[" "collapse all"  emeld-collapse-all :transient t)
+    ("]" "expand all"    emeld-expand-all :transient t)
+    ("\\" "expand to changes" emeld-expand-changes :transient t)
+    ("<backtab>" "cycle visibility" emeld-cycle-visibility :transient t)
     (">" "indent more"  emeld-increase-indent :transient t)
     ("<" "indent less"  emeld-decrease-indent :transient t)
     ("}" "pane wider"   emeld-grow-column :transient t)

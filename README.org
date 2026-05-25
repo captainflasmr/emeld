@@ -11,7 +11,8 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Orphan files shown with strikethrough on the missing side (Meld-style, toggle ~s~).
 - Dired-style marking (~m~/~u~/~U~) with bulk copy (~C~).
 - Filter groups toggleable from the transient menu.
-- Tree folding (~TAB~).
+- Org-mode-style visibility cycling: ~S-TAB~ cycles the whole tree (TOP → DIRS → CHANGES), ~TAB~ does the equivalent for the subtree at point.
+- Bulk expand/collapse: ~[~ collapse all, ~]~ expand all, ~\\~ expand only paths leading to changes.
 - File copying between directories (~C~).
 - Export changes as a unified-diff patch (~P~).
 - Side-aware navigation (~n~/~p~) and side-jumping (~o~).
@@ -34,37 +35,41 @@ Alternatively, run ~M-x emeld-diff-dwim~ to automatically use open Dired buffers
 The transient menu is organized into four groups:
 
 - ~File Status~ :: Toggle file visibility (~S~ same, ~M~ modified, ~N~ added).
-- ~View~ :: Toggle tree-lines (~T~), strikethrough (~s~), indent (~>~/~<~), pane resize (~{~/~}~).
+- ~View~ :: Toggle tree-lines (~T~), strikethrough (~s~), bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~\\~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), pane resize (~{~/~}~).
 - ~Navigate~ :: Rescan (~g~) and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
 - ~File~ :: Operate on files (~RET~ ediff/open, ~SPC~ soft diff/fold, ~C~ copy, ~d~ delete, ~w~ copy path, ~P~ format patch).
 - ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~cl~ list all globs.
 
 * Key Bindings
-| Key       | Action                                 |
-|-----------+----------------------------------------|
-| ?         | Transient menu                         |
-| TAB       | Toggle expansion of a directory        |
-| RET, e, = | Action (Ediff if different)            |
-| f, v      | Find File (Open current side)          |
-| d         | Delete file/dir from current side      |
-| C         | Copy marked nodes (or node at point)   |
-| P         | Format as patch (unified diff)         |
-| w         | Copy filename (C-u w for full path)    |
-| SPC       | Fold/Unfold (Dir) or Soft Diff (File)  |
-| o         | Jump to the other side                 |
-| S         | Toggle same (identical) files          |
-| M         | Toggle modified files                  |
-| N         | Toggle added (new) files               |
-| m         | Mark node                              |
-| u         | Unmark node                            |
-| U         | Unmark all nodes                       |
-| s         | Toggle strikethrough display           |
-| T         | Toggle tree-line display               |
-| g         | Rescan (~diff -rq~)                   |
-| n/p       | Navigation (Side-aware)                |
-| M-n/M-p   | Jump to next/previous file change      |
-| { / }     | Shrink/grow left pane width            |
-| C-c f     | Toggle a named filter group on/off     |
+| Key       | Action                                            |
+|-----------+---------------------------------------------------|
+| ?         | Transient menu                                    |
+| TAB       | Cycle subtree at point: FOLDED → DIRS → SUBTREE   |
+| S-TAB     | Cycle whole tree: TOP → DIRS → CHANGES            |
+| [         | Collapse all                                      |
+| ]         | Expand all                                        |
+| \\        | Expand only paths to changes                      |
+| RET, e, = | Action (Ediff if different)                       |
+| f, v      | Find File (Open current side)                     |
+| d         | Delete file/dir from current side                 |
+| C         | Copy marked nodes (or node at point)              |
+| P         | Format as patch (unified diff)                    |
+| w         | Copy filename (C-u w for full path)               |
+| SPC       | Fold/Unfold (Dir) or Soft Diff (File)             |
+| o         | Jump to the other side                            |
+| S         | Toggle same (identical) files                     |
+| M         | Toggle modified files                             |
+| N         | Toggle added (new) files                          |
+| m         | Mark node                                         |
+| u         | Unmark node                                       |
+| U         | Unmark all nodes                                  |
+| s         | Toggle strikethrough display                      |
+| T         | Toggle tree-line display                          |
+| g         | Rescan (~diff -rq~)                              |
+| n/p       | Navigation (Side-aware)                           |
+| M-n/M-p   | Jump to next/previous file change                 |
+| { / }     | Shrink/grow left pane width                       |
+| C-c f     | Toggle a named filter group on/off                |
 
 * Customization
 

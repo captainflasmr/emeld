@@ -1,5 +1,20 @@
 #+TITLE: Changelog for Emeld
 
+* [0.14.0] - 2026-05-25
+** Added
+- Org-mode-style visibility cycling.  ~S-TAB~ / ~<backtab>~ cycles the whole tree through three states: TOP (only root's direct child dirs visible), DIRS (intermediate dirs expanded, leaf dirs collapsed so the directory skeleton is shown without file leaves), CHANGES (every dir leading to a change expanded, identical subtrees collapsed, files visible).
+- ~TAB~ now does the equivalent cycle for the subtree at point: FOLDED → DIRS → SUBTREE → FOLDED.  Current state is inferred from actual expansion levels, so it composes naturally with the other expand/collapse commands.
+- ~emeld-collapse-all~ (~[~) and ~emeld-expand-all~ (~]~): bulk expand/collapse like VSCode's "Collapse All" / "Expand All" buttons.
+- ~emeld-expand-changes~ (~\\~): expand only directories that lead to a modified, added, or removed file; collapse purely-identical subtrees.  Useful after ~[~, or when ~emeld-show-same~ is on.
+- ~emeld-expand-dirs-only~: expand intermediate dirs, collapse leaf dirs — the engine for the new DIRS state.
+- All five new commands appear in the transient menu (~?~) under ~View~.
+** Changed
+- Single-sided (~left-only~/~right-only~) directories are now populated and expanded eagerly on initial scan instead of lazily on first TAB press, so all changed files are visible immediately.  Manual collapse still works.
+- ~TAB~ rebound from the simple two-state ~emeld-toggle-expand~ to the new ~emeld-cycle-subtree~.  The old command is still defined for users with custom keybindings.
+** Fixed
+- Deeply nested subtrees were missing from the rendered view after the initial async scan.  ~emeld--entries-to-nodes-progressive~ was firing each level's ~final-cb~ when its own queues drained — i.e. when its immediate sub-dirs had been *dispatched*, not when their sub-trees had actually been *built*.  The top-level unconditional render at ~emeld--build-tree-from-diff~'s completion ran a few milliseconds in, and every deeper level's completion render was throttled away by the 150ms guard.  Each level now tracks outstanding sub-chains via a counter; ~final-cb~ only fires when own queues are drained *and* outstanding is zero, so the top-level render correctly waits for the whole tree.
+- ~emeld--maybe-populate-lazy-dir~ was computing entry paths relative to the comparison root instead of relative to the node's own absolute path, so expanding a single-sided directory built a duplicated path chain underneath itself (e.g. ~routing/java/cuis-server/.../routing/RoutingEngine.java~).  Paths are now stripped against the node's path and the node's relpath is passed as ~prefix~ to ~emeld--entries-to-nodes~.
+
 * [0.13.0] - 2026-05-24
 ** Added
 - Incremental same-scan: toggling ~S~ now runs ~diff -rqs~ in the background and merges identical files into the existing tree without blanking the screen or losing context (point position, expanded folders, marks preserved).
