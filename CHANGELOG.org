@@ -1,5 +1,15 @@
 #+TITLE: Changelog for Emeld
 
+* [0.15.0] - 2026-05-25
+** Added
+- ~.gitignore~ support, on by default (~emeld-respect-gitignore~, default ~t~).  Ignored files are hidden from the comparison on both sides.  Simple root patterns are pushed down to ~diff --exclude~; everything else (anchored, nested, or otherwise complex rules) is caught during tree assembly.  Honors nested ~.gitignore~ files, ~.git/info/exclude~, and the global excludes file.
+- ~emeld-toggle-gitignore~, bound to ~G~, with a live ~[x]~/~[ ]~ entry in the transient ~View~ group.  Toggling rescans (it changes which files are scanned, not just what is rendered).
+** Changed
+- ~emeld-respect-gitignore~ is now buffer-local, so toggling it in one comparison buffer no longer affects the global default or other emeld buffers.
+** Fixed
+- Gitignore lookups now run a single cached ~git ls-files -o -i --exclude-standard --directory~ query per root instead of spawning ~git check-ignore~ (plus a ~rev-parse~ probe) per file.  The old path spawned up to four git processes for every node in the tree, which made enabling the feature on a large tree pathologically slow; it is now one process per root per scan, with O(depth) hash lookups.  Files nested inside a wholly-ignored directory are matched by walking ancestor paths, since ~--directory~ collapses such directories.
+- The cached ignore set is dropped on each rescan, so edits to a ~.gitignore~ are picked up on ~g~.
+
 * [0.14.0] - 2026-05-25
 ** Added
 - Org-mode-style visibility cycling.  ~S-TAB~ / ~<backtab>~ cycles the whole tree through three states: TOP (only root's direct child dirs visible), DIRS (intermediate dirs expanded, leaf dirs collapsed so the directory skeleton is shown without file leaves), CHANGES (every dir leading to a change expanded, identical subtrees collapsed, files visible).

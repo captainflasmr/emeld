@@ -9,8 +9,6 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
-** DOING better async
-
 ** TODO consider gitignore filtering
 
 ** TODO add directory tree display for dired?

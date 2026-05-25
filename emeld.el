@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.14.0
+;; Version: 0.15.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -96,6 +96,17 @@ Has no effect when `file-equal-p' is available (Emacs >= 29)."
   :type 'integer
   :group 'emeld)
 
+(defcustom emeld-respect-gitignore t
+  "When non-nil, respect `.gitignore` rules during directory comparison.
+Simple patterns from each root `.gitignore' are passed to `diff
+--exclude' to skip ignored files at the OS level.  Anything that slips
+past that (anchored, nested or otherwise complex rules) is caught during
+tree assembly by a single cached `git ls-files' query per root, which
+also honors `.git/info/exclude' and the global excludes file.
+Requires the `git' executable; has no effect outside a work tree."
+  :type 'boolean
+  :group 'emeld)
+
 (defvar emeld-simple-comparison nil
   "Obsolete.  Removed in 0.9.4.  Kept for dir-locals compatibility.")
 (make-obsolete-variable 'emeld-simple-comparison nil "0.9.4")
@@ -160,6 +171,12 @@ Values can be 'idle, 'running-diff, 'building-tree, or 'done.")
   "Hash table of relative paths for marked nodes (Dired-style marking).")
 (defvar-local emeld--last-render-time nil
   "Float-time of the last `emeld--render' call, for render throttling.")
+(defvar-local emeld--gitignore-cache nil
+  "Memoized git-ignored path sets, keyed by absolute root directory.
+Each value is a hash set of ignored relative paths (directories stored
+without their trailing slash) or the symbol `none' when the root is not
+a git work tree.  Reset on each scan by `emeld-refresh' so edits to
+`.gitignore' are picked up.")
 
 (defsubst emeld--bench-push (label)
   "Record a timestamp LABEL in `emeld--benchmark-data' when benchmarking."
@@ -631,16 +648,50 @@ allowing identical/same branches to populate quietly afterward."
 
           (run-with-timer 0.001 nil (lambda () (with-current-buffer buf (funcall process-dir-queue priority-queue same-queue))))))))))
 
+(defun emeld--read-gitignore-simple-patterns (dir)
+  "Read .gitignore in DIR and return simple glob patterns for --exclude.
+Strips leading and trailing slashes so patterns like `/.idea' or
+`build/' yield basename patterns usable by `diff --exclude'.
+Patterns with internal slashes after stripping are skipped."
+  (let ((gitignore (expand-file-name ".gitignore" dir))
+        (patterns nil))
+    (when (file-exists-p gitignore)
+      (with-temp-buffer
+        (insert-file-contents gitignore)
+        (goto-char (point-min))
+        (while (not (eobp))
+          (let* ((raw (buffer-substring-no-properties
+                       (line-beginning-position) (line-end-position)))
+                 (line (string-trim raw)))
+            (unless (or (string-empty-p line)
+                        (string-prefix-p "#" line)
+                        (string-prefix-p "!" line))
+              (let ((clean line))
+                (when (string-prefix-p "/" clean)
+                  (setq clean (substring clean 1)))
+                (when (string-suffix-p "/" clean)
+                  (setq clean (substring clean 0 -1)))
+                (unless (string-match-p "/" clean)
+                  (push clean patterns)))))
+          (forward-line 1))))
+    (nreverse patterns)))
+
 (defun emeld--diff-exclude-args ()
   "Return `--exclude=PATTERN' args from active filter groups.
 Only includes patterns without `/', since `diff --exclude' matches
-the basename component, not the full relative path."
+the basename component, not the full relative path.
+When `emeld-respect-gitignore' is non-nil, also includes simple
+patterns from root .gitignore files."
   (let ((args '("--exclude=node_modules")))
     (dolist (group emeld-filter-groups)
       (when (member (car group) emeld--active-filter-groups)
         (dolist (glob (emeld--group-globs group))
           (unless (string-match-p "/" glob)
             (push (concat "--exclude=" glob) args)))))
+    (when emeld-respect-gitignore
+      (dolist (root (list emeld--left-root emeld--right-root))
+        (dolist (pattern (emeld--read-gitignore-simple-patterns root))
+          (push (concat "--exclude=" pattern) args))))
     args))
 
 (defun emeld--start-diff (buf)
@@ -888,9 +939,69 @@ Otherwise, it matches against the filename."
   (let ((rest (cdr group)))
     (and (booleanp (car rest)) (car rest))))
 
+(defun emeld--compute-git-ignored-set (dir)
+  "Run git once in DIR and return a hash set of ignored relative paths.
+Uses a single `git ls-files -o -i --exclude-standard --directory' call,
+which honors nested `.gitignore' files, `.git/info/exclude' and the
+global excludes file.  Fully-ignored directories are collapsed by git
+and stored without a trailing slash; files nested inside them are
+matched via the ancestor walk in `emeld--git-ignored-p'.  Returns the
+symbol `none' when DIR is not a git work tree or git is unavailable."
+  (if (not (and (file-directory-p dir) (executable-find "git")))
+      'none
+    (let ((default-directory (file-name-as-directory dir)))
+      (if (not (eq 0 (call-process "git" nil nil nil
+                                   "rev-parse" "--is-inside-work-tree")))
+          'none
+        (with-temp-buffer
+          (if (not (eq 0 (call-process "git" nil t nil "ls-files" "-z"
+                                       "-o" "-i" "--exclude-standard"
+                                       "--directory")))
+              'none
+            (let ((set (make-hash-table :test #'equal)))
+              ;; `-z' is NUL-separated and unquoted, so paths with spaces
+              ;; or newlines survive intact.
+              (dolist (entry (split-string (buffer-string) "\0" t))
+                (puthash (directory-file-name entry) t set))
+              set)))))))
+
+(defun emeld--git-ignored-set (root-dir)
+  "Return the memoized git-ignored path set for ROOT-DIR, or nil.
+Computes it once per ROOT-DIR via `emeld--compute-git-ignored-set' and
+caches the result in `emeld--gitignore-cache'.  Returns nil when ROOT-DIR
+is missing or is not a git work tree."
+  (when root-dir
+    (unless emeld--gitignore-cache
+      (setq emeld--gitignore-cache (make-hash-table :test #'equal)))
+    (let* ((key (file-name-as-directory (expand-file-name root-dir)))
+           (cached (gethash key emeld--gitignore-cache 'unset)))
+      (when (eq cached 'unset)
+        (setq cached (emeld--compute-git-ignored-set key))
+        (puthash key cached emeld--gitignore-cache))
+      (and (hash-table-p cached) cached))))
+
+(defun emeld--git-ignored-p (rel-path root-dir)
+  "Check if REL-PATH under ROOT-DIR is ignored by Git.
+Honors `emeld-respect-gitignore'.  Looks REL-PATH up in the cached
+`git ls-files' result for ROOT-DIR (see `emeld--git-ignored-set') rather
+than spawning `git check-ignore' per file, and matches files nested
+inside an ignored directory by walking ancestor paths."
+  (when (and emeld-respect-gitignore rel-path (not (string-empty-p rel-path)))
+    (let ((set (emeld--git-ignored-set root-dir)))
+      (when set
+        (let ((path (directory-file-name rel-path)))
+          (catch 'ignored
+            (while path
+              (when (gethash path set)
+                (throw 'ignored t))
+              (let ((parent (file-name-directory path)))
+                (setq path (and parent (directory-file-name parent)))))
+            nil))))))
+
 (defun emeld--filtered-p (name rel-path)
   "Check if NAME or REL-PATH is filtered.
-Check active filter groups."
+Check active filter groups and, when `emeld-respect-gitignore' is non-nil,
+query git for .gitignore rules on both sides."
   (or (cl-some (lambda (group)
                  (when (member (car group) emeld--active-filter-groups)
                    (cl-some (lambda (glob)
@@ -899,7 +1010,9 @@ Check active filter groups."
                                     (string-match-p rx rel-path)
                                   (string-match-p rx name))))
                             (emeld--group-globs group))))
-               emeld-filter-groups)))
+               emeld-filter-groups)
+      (emeld--git-ignored-p rel-path emeld--left-root)
+      (emeld--git-ignored-p rel-path emeld--right-root)))
 
 (defun emeld-toggle-filter-group (group)
   "Toggle a named filter GROUP on or off.
@@ -1122,6 +1235,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "N")   #'emeld-toggle-show-added)
     (define-key map (kbd "T")   #'emeld-toggle-tree-lines)
     (define-key map (kbd "s")   #'emeld-toggle-show-strikethrough)
+    (define-key map (kbd "G")   #'emeld-toggle-gitignore)
     (define-key map (kbd ">")   #'emeld-increase-indent)
     (define-key map (kbd "<")   #'emeld-decrease-indent)
     (define-key map (kbd "}")   #'emeld-grow-column)
@@ -1139,6 +1253,7 @@ Mimics Meld's display of missing files."
   (make-local-variable 'emeld-show-different)
   (make-local-variable 'emeld-show-added)
   (make-local-variable 'emeld-show-strikethrough)
+  (make-local-variable 'emeld-respect-gitignore)
   (setq-local revert-buffer-function #'emeld-refresh)
   (add-hook 'kill-buffer-hook #'emeld--stop-scan nil t)
   (emeld--update-header-line))
@@ -1314,6 +1429,15 @@ shows nothing for the orphan."
   (message "Show new: %s" (if emeld-show-added "on" "off"))
   (emeld--render))
 
+(defun emeld-toggle-gitignore ()
+  "Toggle whether `.gitignore' rules are respected, then rescan.
+Unlike the view toggles this changes which files are scanned, so it
+re-runs the comparison rather than just re-rendering."
+  (interactive)
+  (setq emeld-respect-gitignore (not emeld-respect-gitignore))
+  (message "Respect .gitignore: %s" (if emeld-respect-gitignore "on" "off"))
+  (emeld-refresh))
+
 (defun emeld-toggle-expand ()
   "Toggle expansion of the node at point."
   (interactive)
@@ -1483,7 +1607,9 @@ so Emacs stays fully responsive during the scan."
                                     (or (emeld-node-left-path node)
                                         (emeld-node-right-path node)))
           emeld--saved-point-col (current-column)
-          emeld--cached-full-lines nil)
+          emeld--cached-full-lines nil
+          ;; Drop memoized gitignore sets so .gitignore edits are honored.
+          emeld--gitignore-cache nil)
     (setf (emeld-node-children root) nil)
     (emeld--update-header-line)
     (emeld--render)
@@ -2079,6 +2205,8 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
      (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
     ("s" (lambda () (if emeld-show-strikethrough "[x] strikethrough" "[ ] strikethrough"))
      (lambda () (interactive) (emeld-toggle-show-strikethrough)) :transient t)
+    ("G" (lambda () (if emeld-respect-gitignore "[x] gitignore" "[ ] gitignore"))
+     (lambda () (interactive) (emeld-toggle-gitignore)))
     ("[" "collapse all"  emeld-collapse-all :transient t)
     ("]" "expand all"    emeld-expand-all :transient t)
     ("\\" "expand to changes" emeld-expand-changes :transient t)
