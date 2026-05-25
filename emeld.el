@@ -163,6 +163,15 @@ Requires the `git' executable; has no effect outside a work tree."
   "Current phase of the emeld background processing cycle.
 Values can be 'idle, 'running-diff, 'building-tree, or 'done.")
 
+(defvar-local emeld--scan-diff-count 0
+  "Count of `diff' output lines received so far during the running scan.
+Surfaced as a live entry tally in the header line.")
+(defvar-local emeld--scan-processed 0
+  "Number of diff lines parsed so far while building the tree.")
+(defvar-local emeld--scan-total 0
+  "Total diff lines to parse while building the tree, or 0 until known.
+With `emeld--scan-processed' this drives the header-line progress bar.")
+
 (defvar-local emeld--saved-point-path nil
   "Saved point path to restore across async refresh cycle.")
 (defvar-local emeld--saved-point-col nil
@@ -174,9 +183,12 @@ Values can be 'idle, 'running-diff, 'building-tree, or 'done.")
 (defvar-local emeld--gitignore-cache nil
   "Memoized git-ignored path sets, keyed by absolute root directory.
 Each value is a hash set of ignored relative paths (directories stored
-without their trailing slash) or the symbol `none' when the root is not
-a git work tree.  Reset on each scan by `emeld-refresh' so edits to
-`.gitignore' are picked up.")
+without their trailing slash), or the symbol `none' (not a git work
+tree) or `pending' (async `git ls-files' still running).  Reset on each
+scan by `emeld-refresh' so edits to `.gitignore' are picked up.")
+(defvar-local emeld--gitignore-procs nil
+  "Live async `git ls-files' processes pre-warming `emeld--gitignore-cache'.
+Killed by `emeld--stop-scan' so a rescan cannot leave stale workers.")
 
 (defsubst emeld--bench-push (label)
   "Record a timestamp LABEL in `emeld--benchmark-data' when benchmarking."
@@ -389,6 +401,8 @@ Lower numbers keep Emacs snappier; higher numbers process faster."
         (setq emeld--scan-diff-lines nil)
         (setq gc-cons-threshold (* 128 1024 1024))
         (setq emeld--status-phase 'building-tree)
+        (setq emeld--scan-total total-lines
+              emeld--scan-processed 0)
         (setq emeld--last-render-time (float-time))
         (emeld--update-header-line)
         (emeld--bench-push "diff done")
@@ -409,7 +423,8 @@ Lower numbers keep Emacs snappier; higher numbers process faster."
                           (setq remaining-lines (cdr remaining-lines))
                           (setq chunk-count (1+ chunk-count))
                           (setq processed-count (1+ processed-count)))
-                        
+                        (setq emeld--scan-processed processed-count)
+
                         (if remaining-lines
                             (run-with-timer 0.001 nil #'process-lines-chunk)
                            (emeld--bench-push "parse done")
@@ -702,6 +717,10 @@ Uses a process filter to stream-parse output incrementally."
   (setq emeld--scan-diff-lines nil)
   (with-current-buffer buf
     (setq emeld--benchmark-start-time (float-time)))
+  ;; Compute the gitignore sets asynchronously, in parallel with diff, so
+  ;; large repos do not block the UI when the tree is assembled.
+  (emeld--prewarm-gitignore emeld--left-root buf)
+  (emeld--prewarm-gitignore emeld--right-root buf)
   (let* ((excludes (emeld--diff-exclude-args))
          (flags (if emeld-show-same "-rqs" "-rq"))
          (command `("diff" ,flags
@@ -726,6 +745,8 @@ Uses a process filter to stream-parse output incrementally."
              (setq partial (car (last new-lines))
                    new-lines (butlast new-lines)))
            (when new-lines
+             (with-current-buffer buf
+               (cl-incf emeld--scan-diff-count (length new-lines)))
              (if accum-tail
                  (setcdr accum-tail new-lines)
                (setq accum-lines new-lines))
@@ -856,6 +877,7 @@ Explicitly handles and strips single quotes added to paths by the shell environm
                     (emeld--add-same-entry-to-tree root (car parsed) path-hash left right)))))
             (setq remaining-lines (cdr remaining-lines))
             (setq chunk-count (1+ chunk-count)))
+          (setq emeld--scan-processed (- emeld--scan-total (length remaining-lines)))
           (if remaining-lines
               (progn
                 (emeld--render)
@@ -876,9 +898,14 @@ Explicitly handles and strips single quotes added to paths by the shell environm
   (with-current-buffer buf
     (emeld--stop-scan)
     (setq emeld--status-phase 'running-diff
-          emeld--cached-full-lines nil)
+          emeld--cached-full-lines nil
+          emeld--scan-diff-count 0
+          emeld--scan-processed 0
+          emeld--scan-total 0)
+    ;; Idempotent: a no-op if the initial scan already cached these roots.
+    (emeld--prewarm-gitignore emeld--left-root buf)
+    (emeld--prewarm-gitignore emeld--right-root buf)
     (emeld--update-header-line)
-    (message "Scanning for identical files in background...")
     (let* ((excludes (emeld--diff-exclude-args))
            (left emeld--left-root)
            (right emeld--right-root)
@@ -914,7 +941,9 @@ Explicitly handles and strips single quotes added to paths by the shell environm
                     (when (buffer-live-p p-buf)
                       (kill-buffer p-buf))
                     (setq gc-cons-threshold (* 128 1024 1024))
-                    (setq emeld--status-phase 'building-tree)
+                    (setq emeld--status-phase 'building-tree
+                          emeld--scan-total (length lines)
+                          emeld--scan-processed 0)
                     (emeld--update-header-line)
                     (run-with-timer 0.001 nil #'emeld--process-same-chunk-worker
                                     target-buf lines ctx-root ctx-left ctx-right old-gc path-hash))))))))
@@ -939,53 +968,115 @@ Otherwise, it matches against the filename."
   (let ((rest (cdr group)))
     (and (booleanp (car rest)) (car rest))))
 
+(defun emeld--git-ignored-key (root-dir)
+  "Return the canonical `emeld--gitignore-cache' key for ROOT-DIR, or nil."
+  (and root-dir (file-name-as-directory (expand-file-name root-dir))))
+
+(defun emeld--parse-git-ignored-output (output)
+  "Parse NUL-separated `git ls-files' OUTPUT into a hash set of paths.
+`-z' output is unquoted, so paths with spaces or newlines survive intact.
+Fully-ignored directories arrive with a trailing slash, stored here
+without it; files inside them are matched via the ancestor walk in
+`emeld--git-ignored-p'."
+  (let ((set (make-hash-table :test #'equal)))
+    (dolist (entry (split-string output "\0" t))
+      (puthash (directory-file-name entry) t set))
+    set))
+
+(defun emeld--git-work-tree-p (dir)
+  "Return non-nil if DIR exists and is inside a git work tree.
+This runs a cheap (sub-millisecond) `git rev-parse'; the expensive
+`ls-files' enumeration is left to the async path."
+  (and (file-directory-p dir)
+       (executable-find "git")
+       (let ((default-directory (file-name-as-directory dir)))
+         (eq 0 (call-process "git" nil nil nil
+                             "rev-parse" "--is-inside-work-tree")))))
+
 (defun emeld--compute-git-ignored-set (dir)
-  "Run git once in DIR and return a hash set of ignored relative paths.
-Uses a single `git ls-files -o -i --exclude-standard --directory' call,
-which honors nested `.gitignore' files, `.git/info/exclude' and the
-global excludes file.  Fully-ignored directories are collapsed by git
-and stored without a trailing slash; files nested inside them are
-matched via the ancestor walk in `emeld--git-ignored-p'.  Returns the
-symbol `none' when DIR is not a git work tree or git is unavailable."
-  (if (not (and (file-directory-p dir) (executable-find "git")))
+  "Synchronously compute the git-ignored set for DIR, or the symbol `none'.
+This blocks on `git ls-files' and is only used as a fallback for direct
+callers (e.g. tests); the scan pre-warms the cache asynchronously via
+`emeld--prewarm-gitignore' so this is not hit on the hot path."
+  (if (not (emeld--git-work-tree-p dir))
       'none
     (let ((default-directory (file-name-as-directory dir)))
-      (if (not (eq 0 (call-process "git" nil nil nil
-                                   "rev-parse" "--is-inside-work-tree")))
-          'none
-        (with-temp-buffer
-          (if (not (eq 0 (call-process "git" nil t nil "ls-files" "-z"
-                                       "-o" "-i" "--exclude-standard"
-                                       "--directory")))
-              'none
-            (let ((set (make-hash-table :test #'equal)))
-              ;; `-z' is NUL-separated and unquoted, so paths with spaces
-              ;; or newlines survive intact.
-              (dolist (entry (split-string (buffer-string) "\0" t))
-                (puthash (directory-file-name entry) t set))
-              set)))))))
+      (with-temp-buffer
+        (if (eq 0 (call-process "git" nil t nil "ls-files" "-z"
+                                "-o" "-i" "--exclude-standard" "--directory"))
+            (emeld--parse-git-ignored-output (buffer-string))
+          'none)))))
+
+(defun emeld--prewarm-gitignore (root-dir buf)
+  "Start an async `git ls-files' for ROOT-DIR, caching the result in BUF.
+Runs in parallel with the `diff' scan so the ignored set is ready by the
+time the tree is assembled, keeping the UI responsive on large repos.
+A no-op when `emeld-respect-gitignore' is nil or ROOT-DIR is already
+cached/pending for this scan."
+  (when (and emeld-respect-gitignore root-dir)
+    (with-current-buffer buf
+      (unless emeld--gitignore-cache
+        (setq emeld--gitignore-cache (make-hash-table :test #'equal)))
+      (let ((key (emeld--git-ignored-key root-dir)))
+        (when (and key (null (gethash key emeld--gitignore-cache)))
+          (if (not (emeld--git-work-tree-p key))
+              (puthash key 'none emeld--gitignore-cache)
+            ;; Mark pending so lookups don't fall back to a blocking compute
+            ;; while the async process is in flight.
+            (puthash key 'pending emeld--gitignore-cache)
+            (let* ((default-directory key)
+                   (pbuf (generate-new-buffer " *emeld-gitignore*"))
+                   (proc (make-process
+                          :name "emeld-gitignore"
+                          :buffer pbuf
+                          :command '("git" "ls-files" "-z" "-o" "-i"
+                                     "--exclude-standard" "--directory")
+                          :connection-type 'pipe
+                          :noquery t)))
+              (push proc emeld--gitignore-procs)
+              (set-process-sentinel
+               proc
+               (lambda (p event)
+                 (when (emeld--sentinel-done-p event)
+                   (when (buffer-live-p buf)
+                     (with-current-buffer buf
+                       (setq emeld--gitignore-procs (delq p emeld--gitignore-procs))
+                       (puthash key
+                                (if (and (buffer-live-p pbuf)
+                                         (eq 0 (process-exit-status p)))
+                                    (emeld--parse-git-ignored-output
+                                     (with-current-buffer pbuf (buffer-string)))
+                                  'none)
+                                emeld--gitignore-cache)))
+                   (when (buffer-live-p pbuf) (kill-buffer pbuf))))))))))))
 
 (defun emeld--git-ignored-set (root-dir)
-  "Return the memoized git-ignored path set for ROOT-DIR, or nil.
-Computes it once per ROOT-DIR via `emeld--compute-git-ignored-set' and
-caches the result in `emeld--gitignore-cache'.  Returns nil when ROOT-DIR
-is missing or is not a git work tree."
+  "Return the git-ignored path set for ROOT-DIR, or nil.
+Reads the per-scan cache populated asynchronously by
+`emeld--prewarm-gitignore'.  Returns nil while the async query is still
+`pending (best effort: a file is simply not hidden until the set lands),
+when ROOT-DIR is not a git work tree, or when ROOT-DIR is missing.  Falls
+back to a synchronous compute only for direct callers outside a scan."
   (when root-dir
     (unless emeld--gitignore-cache
       (setq emeld--gitignore-cache (make-hash-table :test #'equal)))
-    (let* ((key (file-name-as-directory (expand-file-name root-dir)))
+    (let* ((key (emeld--git-ignored-key root-dir))
            (cached (gethash key emeld--gitignore-cache 'unset)))
-      (when (eq cached 'unset)
-        (setq cached (emeld--compute-git-ignored-set key))
-        (puthash key cached emeld--gitignore-cache))
-      (and (hash-table-p cached) cached))))
+      (cond
+       ((hash-table-p cached) cached)
+       ((memq cached '(none pending)) nil)
+       (t                               ; unset: not pre-warmed, compute now
+        (let ((set (emeld--compute-git-ignored-set key)))
+          (puthash key set emeld--gitignore-cache)
+          (and (hash-table-p set) set)))))))
 
 (defun emeld--git-ignored-p (rel-path root-dir)
   "Check if REL-PATH under ROOT-DIR is ignored by Git.
 Honors `emeld-respect-gitignore'.  Looks REL-PATH up in the cached
-`git ls-files' result for ROOT-DIR (see `emeld--git-ignored-set') rather
-than spawning `git check-ignore' per file, and matches files nested
-inside an ignored directory by walking ancestor paths."
+`git ls-files' result for ROOT-DIR (see `emeld--git-ignored-set'), and
+matches files nested inside an ignored directory by walking ancestor
+paths.  The walk stops as soon as it can no longer ascend, so an absolute
+or root path can never spin forever."
   (when (and emeld-respect-gitignore rel-path (not (string-empty-p rel-path)))
     (let ((set (emeld--git-ignored-set root-dir)))
       (when set
@@ -994,8 +1085,11 @@ inside an ignored directory by walking ancestor paths."
             (while path
               (when (gethash path set)
                 (throw 'ignored t))
-              (let ((parent (file-name-directory path)))
-                (setq path (and parent (directory-file-name parent)))))
+              (let* ((dir (file-name-directory path))
+                     (next (and dir (directory-file-name dir))))
+                ;; Stop at the fixpoint (e.g. "/") or when there is no
+                ;; parent separator left, otherwise the walk never ends.
+                (setq path (and next (not (string= next path)) next))))
             nil))))))
 
 (defun emeld--filtered-p (name rel-path)
@@ -1586,7 +1680,10 @@ Repeated invocations cycle TOP → DIRS → CHANGES → TOP."
   (when (and emeld--scan-process
              (process-live-p emeld--scan-process))
     (delete-process emeld--scan-process))
-  (setq emeld--scan-process nil
+  (dolist (p emeld--gitignore-procs)
+    (when (process-live-p p) (delete-process p)))
+  (setq emeld--gitignore-procs nil
+        emeld--scan-process nil
         emeld--scan-diff-lines nil
         emeld--scan-buf nil))
 
@@ -1608,13 +1705,16 @@ so Emacs stays fully responsive during the scan."
                                         (emeld-node-right-path node)))
           emeld--saved-point-col (current-column)
           emeld--cached-full-lines nil
+          ;; Reset progress counters so the header line starts from zero.
+          emeld--scan-diff-count 0
+          emeld--scan-processed 0
+          emeld--scan-total 0
           ;; Drop memoized gitignore sets so .gitignore edits are honored.
           emeld--gitignore-cache nil)
     (setf (emeld-node-children root) nil)
     (emeld--update-header-line)
     (emeld--render)
-    (emeld--start-diff buf)
-    (message "Scanning in background...")))
+    (emeld--start-diff buf)))
 
 (defun emeld--collect-expanded (node)
   "Return a list of relative paths for expanded directories under NODE."
@@ -1900,8 +2000,11 @@ Creates missing parent directories on the destination side if needed."
           (error (message "Delete failed: %s" (error-message-string err))))))))
 
 (defun emeld--toggle-indicator (label enabled)
-  "Return a propertized string for toggle LABEL showing ENABLED state."
-  (propertize label 'face (if enabled 'bold 'shadow)))
+  "Return a string for toggle LABEL showing ENABLED state.
+Enabled toggles are bold; disabled toggles use the plain header-line
+face.  No colour is applied, only weight, so the status display stays on
+the standard foreground and background."
+  (if enabled (propertize label 'face 'bold) label))
 
 (defun emeld--display-state-string ()
   "Return a compact string showing current display toggle states."
@@ -1916,19 +2019,46 @@ Creates missing parent directories on the destination side if needed."
      (when groups
        (concat " " (mapconcat #'identity groups " "))))))
 
+(defun emeld--progress-bar (fraction &optional width)
+  "Return a WIDTH-character text bar visualizing FRACTION (0.0-1.0).
+WIDTH defaults to 10.  Uses block characters so the fill is obvious at a
+glance in the header line."
+  (let* ((width (or width 10))
+         (fraction (max 0.0 (min 1.0 (or fraction 0.0))))
+         (filled (round (* fraction width))))
+    (concat "[" (make-string filled ?█)
+            (make-string (- width filled) ?░) "]")))
+
+(defun emeld--scan-progress-string ()
+  "Return the live scan-progress segment for the header line, or nil.
+Shows a growing entry tally while `diff' runs and a determinate progress
+bar while the tree is parsed; falls back to an indeterminate label during
+node assembly (when the parse total has been consumed).  Rendered with no
+face so it uses the standard header-line foreground and background."
+  (pcase emeld--status-phase
+    ('running-diff
+     (if (> emeld--scan-diff-count 0)
+         (format " [Scanning… %d entries]" emeld--scan-diff-count)
+       " [Scanning…]"))
+    ('building-tree
+     (cond
+      ((zerop emeld--scan-total) " [Building tree…]")
+      ((< emeld--scan-processed emeld--scan-total)
+       (let ((frac (/ (float emeld--scan-processed) emeld--scan-total)))
+         (format " [Building tree %s %d%%]"
+                 (emeld--progress-bar frac) (round (* 100 frac)))))
+      (t " [Assembling nodes…]")))
+    ('done " [Ready]")
+    (_     " [Idle]")))
+
 (defun emeld--update-header-line ()
-  "Update the header line with legend and status."
+  "Install the header-line format showing scan progress, status and legend.
+The format is an `:eval' form, so it re-evaluates on each redisplay and
+reflects the live scan counters without needing to be re-installed."
   (setq header-line-format
         '(:eval
-          (let ((phase-msg
-                 (pcase emeld--status-phase
-                   ('running-diff   (propertize " [Diff Scan...]" 'face 'font-lock-warning-face))
-                   ('building-tree  (propertize " [Building Tree...]" 'face 'font-lock-variable-name-face))
-                   ('done           (propertize " [Ready]" 'face 'font-lock-string-face))
-                   (_               (propertize " [Idle]" 'face 'font-lock-comment-face)))))
-            (concat
-             phase-msg
-             " [" (emeld--display-state-string) "] ")))))
+          (concat (emeld--scan-progress-string)
+                  " [" (emeld--display-state-string) "] "))))
 
 (defun emeld--current-node ()
   "Return the emeld-node text-property at point."

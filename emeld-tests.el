@@ -109,6 +109,36 @@ to climb parents rather than match the leaf path directly."
           (should-not (emeld--git-ignored-p "src/app.el" dir)))
       (delete-directory dir t))))
 
+(ert-deftest emeld-git-ignored-p-absolute-terminates ()
+  "An absolute REL-PATH must not spin forever in the ancestor walk.
+Regression for a freeze where the walk fixpointed at \"/\".  The test
+runs under a timeout so an infinite loop fails rather than hangs."
+  (let* ((emeld-respect-gitignore t)
+         (emeld--gitignore-cache (make-hash-table :test #'equal))
+         (set (make-hash-table :test #'equal)))
+    (puthash "drivers" t set)
+    (puthash (file-name-as-directory (expand-file-name "/abs/root")) set
+             emeld--gitignore-cache)
+    (with-timeout (5 (ert-fail "emeld--git-ignored-p did not terminate"))
+      ;; Absolute paths cannot match the relative-keyed set, but they must
+      ;; return (nil) rather than loop.
+      (should-not (emeld--git-ignored-p "/home/x/foo" "/abs/root"))
+      (should-not (emeld--git-ignored-p "/abs/root/drivers/gpu/x.c" "/abs/root"))
+      (should-not (emeld--git-ignored-p "/" "/abs/root"))
+      ;; Relative lookups against the same set still resolve correctly.
+      (should (emeld--git-ignored-p "drivers/gpu/x.c" "/abs/root"))
+      (should-not (emeld--git-ignored-p "kernel/sched.c" "/abs/root")))))
+
+(ert-deftest emeld-git-ignored-set-pending-does-not-block ()
+  "A `pending' cache entry returns nil without a synchronous compute.
+This is what keeps the async pre-warm from ever blocking the UI."
+  (let ((emeld--gitignore-cache (make-hash-table :test #'equal))
+        (key (file-name-as-directory (expand-file-name "/some/root"))))
+    (puthash key 'pending emeld--gitignore-cache)
+    (should-not (emeld--git-ignored-set "/some/root"))
+    ;; The entry stays `pending (no compute was attempted/cached over it).
+    (should (eq 'pending (gethash key emeld--gitignore-cache)))))
+
 (ert-deftest emeld-filtered-p-with-gitignore ()
   "Test that emeld--filtered-p checks .gitignore when enabled."
   (skip-unless (executable-find "git"))

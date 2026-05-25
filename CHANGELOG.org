@@ -4,11 +4,13 @@
 ** Added
 - ~.gitignore~ support, on by default (~emeld-respect-gitignore~, default ~t~).  Ignored files are hidden from the comparison on both sides.  Simple root patterns are pushed down to ~diff --exclude~; everything else (anchored, nested, or otherwise complex rules) is caught during tree assembly.  Honors nested ~.gitignore~ files, ~.git/info/exclude~, and the global excludes file.
 - ~emeld-toggle-gitignore~, bound to ~G~, with a live ~[x]~/~[ ]~ entry in the transient ~View~ group.  Toggling rescans (it changes which files are scanned, not just what is rendered).
+- Live scan progress in the header line, replacing the static ~[Diff Scan...]~/~[Building Tree...]~ labels (and the "Scanning in background..." echo-area message): a growing entry tally while ~diff~ runs (~[Scanning… N entries]~), a determinate block progress bar with percentage while the tree is parsed (~[Building tree [████░░░░░░] 45%]~), and an ~[Assembling nodes…]~ label during the final node-assembly pass.  Driven by an ~:eval~ header-line form reading live buffer-local counters, so it animates as the async scan proceeds.
 ** Changed
 - ~emeld-respect-gitignore~ is now buffer-local, so toggling it in one comparison buffer no longer affects the global default or other emeld buffers.
 ** Fixed
 - Gitignore lookups now run a single cached ~git ls-files -o -i --exclude-standard --directory~ query per root instead of spawning ~git check-ignore~ (plus a ~rev-parse~ probe) per file.  The old path spawned up to four git processes for every node in the tree, which made enabling the feature on a large tree pathologically slow; it is now one process per root per scan, with O(depth) hash lookups.  Files nested inside a wholly-ignored directory are matched by walking ancestor paths, since ~--directory~ collapses such directories.
 - The cached ignore set is dropped on each rescan, so edits to a ~.gitignore~ are picked up on ~g~.
+- Two freeze bugs surfaced when comparing large git repos (e.g. two Linux kernel checkouts) with ~.gitignore~ respect on: (1) the synchronous ~git ls-files~ enumeration ran on the first node during tree assembly and blocked the UI while git walked the whole working tree — it is now pre-warmed asynchronously at scan start (in parallel with ~diff~), with lookups returning "not ignored" while the query is still in flight, so the UI never blocks; (2) the ancestor-path walk in ~emeld--git-ignored-p~ could spin forever on an absolute path because ~file-name-directory~/~directory-file-name~ fixpoint at ~/~ — the walk now stops as soon as it can no longer ascend.
 
 * [0.14.0] - 2026-05-25
 ** Added
