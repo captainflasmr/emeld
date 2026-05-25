@@ -959,6 +959,21 @@ new and no per-parent scan is needed."
       (process-put proc 'emeld-left left)
       (process-put proc 'emeld-right right)
       (process-put proc 'emeld-root root)
+      ;; Count entries as they stream in so the header shows live progress
+      ;; (`[Scanning… N entries]') during this phase, while still letting the
+      ;; output accumulate in the process buffer for the sentinel to read.
+      (set-process-filter
+       proc
+       (lambda (p output)
+         (when (buffer-live-p buf)
+           (with-current-buffer buf
+             (cl-incf emeld--scan-diff-count (cl-count ?\n output))
+             (force-mode-line-update)))
+         (let ((pbuf (process-buffer p)))
+           (when (buffer-live-p pbuf)
+             (with-current-buffer pbuf
+               (goto-char (point-max))
+               (insert output))))))
       (set-process-sentinel
        proc
        (lambda (p event)
