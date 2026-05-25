@@ -1,5 +1,14 @@
 #+TITLE: Changelog for Emeld
 
+* [0.16.0] - 2026-05-25
+** Added
+- Benchmark coverage for the identical-files (~S~) merge stack.  When ~emeld-benchmark~ is non-nil, toggling ~S~ now emits its own phased timing report — ~same diff done~, ~same seeded~, ~same merged~, ~same sorted~, ~same rendered~ — independent of the initial scan's report, so the merge phase can be measured in isolation.
+** Changed
+- Header-line scan counters now update regularly during a scan.  Each counter bump (entries seen while ~diff~ runs, lines parsed while the tree builds) marks the header line for redisplay via ~force-mode-line-update~, so progress animates on its own instead of only refreshing when point moves or input arrives.
+- The benchmark report spells out ~cumulative~ in full rather than ~cum~.
+** Removed
+- The "Finished loading identical files." echo-area message on ~S~ completion; the header line's ~[Ready]~ state already signals that the merge has finished.
+
 * [0.15.0] - 2026-05-25
 ** Added
 - ~.gitignore~ support, on by default (~emeld-respect-gitignore~, default ~t~).  Ignored files are hidden from the comparison on both sides.  Simple root patterns are pushed down to ~diff --exclude~; everything else (anchored, nested, or otherwise complex rules) is caught during tree assembly.  Honors nested ~.gitignore~ files, ~.git/info/exclude~, and the global excludes file.
@@ -7,6 +16,8 @@
 - Live scan progress in the header line, replacing the static ~[Diff Scan...]~/~[Building Tree...]~ labels (and the "Scanning in background..." echo-area message): a growing entry tally while ~diff~ runs (~[Scanning… N entries]~), a determinate block progress bar with percentage while the tree is parsed (~[Building tree [████░░░░░░] 45%]~), and an ~[Assembling nodes…]~ label during the final node-assembly pass.  Driven by an ~:eval~ header-line form reading live buffer-local counters, so it animates as the async scan proceeds.
 ** Changed
 - ~emeld-respect-gitignore~ is now buffer-local, so toggling it in one comparison buffer no longer affects the global default or other emeld buffers.
+- Performance of the identical-files (~S~) merge on large/build trees: per-file insertion and per-directory creation were both O(n) scans of a parent's children, i.e. quadratic for directories holding many identical files.  The merge now uses an O(1) hash index — files are deduped by relative path, and directories are pre-seeded from the existing tree (~emeld--seed-dir-path-hash~) and resolved by lookup instead of scanning siblings.
+- The identical-files scan now throttles its intermediate redraws like the main scan (previously it re-rendered the whole buffer on every chunk).  New ~emeld-render-throttle~ defcustom (default 0.15s) centralises the redraw interval for both scans; the final result is always rendered on completion.
 ** Fixed
 - Gitignore lookups now run a single cached ~git ls-files -o -i --exclude-standard --directory~ query per root instead of spawning ~git check-ignore~ (plus a ~rev-parse~ probe) per file.  The old path spawned up to four git processes for every node in the tree, which made enabling the feature on a large tree pathologically slow; it is now one process per root per scan, with O(depth) hash lookups.  Files nested inside a wholly-ignored directory are matched by walking ancestor paths, since ~--directory~ collapses such directories.
 - The cached ignore set is dropped on each rescan, so edits to a ~.gitignore~ are picked up on ~g~.

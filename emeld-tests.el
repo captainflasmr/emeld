@@ -139,6 +139,49 @@ This is what keeps the async pre-warm from ever blocking the UI."
     ;; The entry stays `pending (no compute was attempted/cached over it).
     (should (eq 'pending (gethash key emeld--gitignore-cache)))))
 
+(ert-deftest emeld-same-merge-no-duplicate-dirs ()
+  "Adding identical files merges into existing dirs without duplication.
+Guards the O(1) dir-merge optimisation: directories created by the
+initial scan are pre-seeded into the path hash, so the same-file pass
+must reuse them rather than create siblings with the same name."
+  (let* ((emeld-respect-gitignore nil)
+         (emeld-filter-groups nil)
+         (emeld--active-filter-groups nil)
+         (emeld--left-root "/l/")
+         (emeld--right-root "/r/")
+         (root (emeld-node-create :name "root" :is-dir t :expanded t))
+         ;; Pre-existing dir "src" with one changed file, as the initial scan
+         ;; would leave it.
+         (src (emeld-node-create :name "src" :is-dir t :parent root
+                                 :diff-status 'different))
+         (path-hash (make-hash-table :test #'equal)))
+    (setf (emeld-node-children src)
+          (list (emeld-node-create :name "changed.c" :parent src
+                                   :diff-status 'different)))
+    (setf (emeld-node-children root) (list src))
+    (emeld--seed-dir-path-hash root "" path-hash)
+    ;; Two identical files in the existing dir, plus a new nested dir.
+    (emeld--add-same-entry-to-tree root "src/a.c" path-hash "/l" "/r")
+    (emeld--add-same-entry-to-tree root "src/b.c" path-hash "/l" "/r")
+    (emeld--add-same-entry-to-tree root "src/gen/x.c" path-hash "/l" "/r")
+    ;; Re-adding an identical file is deduped.
+    (emeld--add-same-entry-to-tree root "src/a.c" path-hash "/l" "/r")
+    (let* ((src-children (emeld-node-children src))
+           (src-dirs (cl-remove-if-not #'emeld-node-is-dir src-children)))
+      ;; Exactly one "src" under root (no duplicate dir node).
+      (should (= 1 (length (cl-remove-if-not
+                            (lambda (n) (string= (emeld-node-name n) "src"))
+                            (emeld-node-children root)))))
+      ;; changed.c + a.c + b.c + the gen/ dir = 4 children, a.c not doubled.
+      (should (= 4 (length src-children)))
+      (should (= 1 (length (cl-remove-if-not
+                            (lambda (n) (string= (emeld-node-name n) "a.c"))
+                            src-children))))
+      ;; The nested dir was created once and holds x.c.
+      (should (= 1 (length src-dirs)))
+      (should (string= "gen" (emeld-node-name (car src-dirs))))
+      (should (= 1 (length (emeld-node-children (car src-dirs))))))))
+
 (ert-deftest emeld-filtered-p-with-gitignore ()
   "Test that emeld--filtered-p checks .gitignore when enabled."
   (skip-unless (executable-find "git"))

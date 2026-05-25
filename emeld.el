@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.15.0
+;; Version: 0.16.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -209,7 +209,7 @@ Killed by `emeld--stop-scan' so a rescan cannot leave stale workers.")
                (timestamp (cdr item))
                (stage-delta (* (- timestamp prev-time) 1000.0))
                (cum-delta (* (- timestamp base) 1000.0)))
-          (push (format "  %-30s %5.0f ms (cum %6.0f ms)"
+          (push (format "  %-30s %5.0f ms (cumulative %6.0f ms)"
                         label stage-delta cum-delta)
                 pairs)
           (setq prev-time timestamp)))
@@ -385,6 +385,14 @@ Lower numbers keep Emacs snappier; higher numbers process faster."
   :type 'integer
   :group 'emeld)
 
+(defcustom emeld-render-throttle 0.15
+  "Minimum seconds between intermediate buffer redraws during a scan.
+Each redraw rebuilds the whole visible tree, so throttling keeps Emacs
+responsive while a large comparison streams in.  The final result is
+always rendered once the scan completes regardless of this value."
+  :type 'number
+  :group 'emeld)
+
 (defun emeld--build-tree-from-diff (buf)
   "Build tree from `diff -rq' output asynchronously using chunked iterations."
   (when (buffer-live-p buf)
@@ -424,6 +432,7 @@ Lower numbers keep Emacs snappier; higher numbers process faster."
                           (setq chunk-count (1+ chunk-count))
                           (setq processed-count (1+ processed-count)))
                         (setq emeld--scan-processed processed-count)
+                        (force-mode-line-update)
 
                         (if remaining-lines
                             (run-with-timer 0.001 nil #'process-lines-chunk)
@@ -611,7 +620,7 @@ allowing identical/same branches to populate quietly afterward."
                                (lambda ()
                                  (let ((now (float-time))
                                        (last-render (with-current-buffer buf emeld--last-render-time)))
-                                   (when (or (null last-render) (> (- now last-render) 0.15))
+                                   (when (or (null last-render) (> (- now last-render) emeld-render-throttle))
                                      (with-current-buffer buf
                                        (setq emeld--last-render-time now)
                                        (emeld--render))))
@@ -643,7 +652,7 @@ allowing identical/same branches to populate quietly afterward."
                                  (lambda ()
                                    (let ((now (float-time))
                                          (last-render (with-current-buffer buf emeld--last-render-time)))
-                                     (when (or is-last (null last-render) (> (- now last-render) 0.15))
+                                     (when (or is-last (null last-render) (> (- now last-render) emeld-render-throttle))
                                        (with-current-buffer buf
                                          (setq emeld--last-render-time now)
                                          (emeld--render))))
@@ -746,7 +755,10 @@ Uses a process filter to stream-parse output incrementally."
                    new-lines (butlast new-lines)))
            (when new-lines
              (with-current-buffer buf
-               (cl-incf emeld--scan-diff-count (length new-lines)))
+               (cl-incf emeld--scan-diff-count (length new-lines))
+               ;; Mark the header line dirty so the live count redisplays
+               ;; during the scan, not just when point moves.
+               (force-mode-line-update))
              (if accum-tail
                  (setcdr accum-tail new-lines)
                (setq accum-lines new-lines))
@@ -792,7 +804,26 @@ Explicitly handles and strips single quotes added to paths by the shell environm
         (cons (clean-quotes rel) side)))
      (t nil))))
 
+(defun emeld--seed-dir-path-hash (node prefix path-hash)
+  "Record every directory descendant of NODE in PATH-HASH by relative path.
+PREFIX is NODE's own relative path (\"\" for the root).  Pre-seeding lets
+`emeld--get-or-create-dir-node' resolve directories that already exist in
+the tree (e.g. from the initial diff scan) with an O(1) lookup instead of
+scanning each parent's children."
+  (dolist (child (emeld-node-children node))
+    (when (emeld-node-is-dir child)
+      (let ((rel (if (string-empty-p prefix)
+                     (emeld-node-name child)
+                   (concat prefix "/" (emeld-node-name child)))))
+        (puthash rel child path-hash)
+        (emeld--seed-dir-path-hash child rel path-hash)))))
+
 (defun emeld--get-or-create-dir-node (rel-dir-path path-hash root left-root right-root)
+  "Return the directory node for REL-DIR-PATH, creating it (and any missing
+ancestors) when absent.  PATH-HASH is the authoritative dir index for the
+scan: it is pre-seeded with existing tree dirs by `emeld--seed-dir-path-hash'
+and updated as new dirs are created, so a miss means the dir is genuinely
+new and no per-parent scan is needed."
   (or (gethash rel-dir-path path-hash)
       (let* ((parent-dir (file-name-directory (directory-file-name rel-dir-path)))
              (parent-rel-path (if (or (null parent-dir) (string= parent-dir "./")
@@ -804,26 +835,17 @@ Explicitly handles and strips single quotes added to paths by the shell environm
                             (emeld--get-or-create-dir-node
                              parent-rel-path path-hash root left-root right-root)))
              (dir-name (file-name-nondirectory (directory-file-name rel-dir-path)))
-             ;; Check if parent already has a directory node with this name (e.g. from initial diff scan)
-             (existing (cl-find-if (lambda (c)
-                                    (and (emeld-node-is-dir c)
-                                         (string= (emeld-node-name c) dir-name)))
-                                  (emeld-node-children parent-node))))
-        (if existing
-            (progn
-              (puthash rel-dir-path existing path-hash)
-              existing)
-          (let ((new-dir (emeld-node-create
-                          :name dir-name
-                          :left-path (concat (file-name-as-directory left-root) rel-dir-path)
-                          :right-path (concat (file-name-as-directory right-root) rel-dir-path)
-                          :parent parent-node
-                          :is-dir t
-                          :expanded nil
-                          :diff-status 'same)))
-            (push new-dir (emeld-node-children parent-node))
-            (puthash rel-dir-path new-dir path-hash)
-            new-dir)))))
+             (new-dir (emeld-node-create
+                       :name dir-name
+                       :left-path (concat (file-name-as-directory left-root) rel-dir-path)
+                       :right-path (concat (file-name-as-directory right-root) rel-dir-path)
+                       :parent parent-node
+                       :is-dir t
+                       :expanded nil
+                       :diff-status 'same)))
+        (push new-dir (emeld-node-children parent-node))
+        (puthash rel-dir-path new-dir path-hash)
+        new-dir)))
 
 (defun emeld--add-same-entry-to-tree (root relpath path-hash left-root right-root)
   (let* ((rel-dir (file-name-directory relpath))
@@ -832,21 +854,22 @@ Explicitly handles and strips single quotes added to paths by the shell environm
                           root
                         (emeld--get-or-create-dir-node
                          parent-rel path-hash root left-root right-root)))
-         (file-name (file-name-nondirectory relpath)))
-    (unless (emeld--filtered-p file-name relpath)
-      ;; Avoid duplicating file nodes if they already exist
-      (unless (cl-find-if (lambda (c)
-                            (and (not (emeld-node-is-dir c))
-                                 (string= (emeld-node-name c) file-name)))
-                          (emeld-node-children parent-node))
-        (let ((new-file (emeld-node-create
-                         :name file-name
-                         :left-path (concat (file-name-as-directory left-root) relpath)
-                         :right-path (concat (file-name-as-directory right-root) relpath)
-                         :parent parent-node
-                         :diff-status 'same
-                         :is-dir nil)))
-          (push new-file (emeld-node-children parent-node)))))))
+         (file-name (file-name-nondirectory relpath))
+         ;; File keys are namespaced so they never collide with the
+         ;; string dir-path keys used for directory nodes.
+         (file-key (cons 'file relpath)))
+    (unless (or (emeld--filtered-p file-name relpath)
+                ;; O(1) dedup instead of scanning the parent's children.
+                (gethash file-key path-hash))
+      (let ((new-file (emeld-node-create
+                       :name file-name
+                       :left-path (concat (file-name-as-directory left-root) relpath)
+                       :right-path (concat (file-name-as-directory right-root) relpath)
+                       :parent parent-node
+                       :diff-status 'same
+                       :is-dir nil)))
+        (push new-file (emeld-node-children parent-node))
+        (puthash file-key new-file path-hash)))))
 
 (defun emeld--sort-tree-recursive (node)
   (when (emeld-node-children node)
@@ -878,12 +901,21 @@ Explicitly handles and strips single quotes added to paths by the shell environm
             (setq remaining-lines (cdr remaining-lines))
             (setq chunk-count (1+ chunk-count)))
           (setq emeld--scan-processed (- emeld--scan-total (length remaining-lines)))
+          (force-mode-line-update)
           (if remaining-lines
               (progn
-                (emeld--render)
+                ;; Throttle intermediate redraws; the final state is always
+                ;; rendered once the scan completes (the else branch below).
+                (let ((now (float-time)))
+                  (when (or (null emeld--last-render-time)
+                            (> (- now emeld--last-render-time) emeld-render-throttle))
+                    (setq emeld--last-render-time now)
+                    (emeld--render)))
                 (run-with-timer 0.001 nil #'emeld--process-same-chunk-worker
                                 buf remaining-lines root left right old-gc path-hash))
+            (emeld--bench-push "same merged")
             (emeld--sort-tree-recursive root)
+            (emeld--bench-push "same sorted")
             (clrhash path-hash)
             (setq emeld--status-phase 'done
                   emeld--scan-process nil
@@ -891,7 +923,8 @@ Explicitly handles and strips single quotes added to paths by the shell environm
                   emeld--cached-full-lines t)
             (emeld--render)
             (emeld--update-header-line)
-            (message "Finished loading identical files.")
+            (emeld--bench-push "same rendered")
+            (emeld--bench-report)
             (setq gc-cons-threshold old-gc)))))))
 
 (defun emeld--scan-same-async (buf)
@@ -902,6 +935,11 @@ Explicitly handles and strips single quotes added to paths by the shell environm
           emeld--scan-diff-count 0
           emeld--scan-processed 0
           emeld--scan-total 0)
+    ;; Start a fresh benchmark run for the identical-files stack, independent
+    ;; of the initial scan's report (which already reset these).
+    (when emeld-benchmark
+      (setq emeld--benchmark-data nil
+            emeld--benchmark-start-time (float-time)))
     ;; Idempotent: a no-op if the initial scan already cached these roots.
     (emeld--prewarm-gitignore emeld--left-root buf)
     (emeld--prewarm-gitignore emeld--right-root buf)
@@ -940,10 +978,16 @@ Explicitly handles and strips single quotes added to paths by the shell environm
                          (path-hash (make-hash-table :test 'equal)))
                     (when (buffer-live-p p-buf)
                       (kill-buffer p-buf))
+                    (emeld--bench-push "same diff done")
+                    ;; Seed the dir index with the tree built by the initial
+                    ;; scan so identical files merge into existing dirs in O(1).
+                    (emeld--seed-dir-path-hash ctx-root "" path-hash)
+                    (emeld--bench-push "same seeded")
                     (setq gc-cons-threshold (* 128 1024 1024))
                     (setq emeld--status-phase 'building-tree
                           emeld--scan-total (length lines)
-                          emeld--scan-processed 0)
+                          emeld--scan-processed 0
+                          emeld--last-render-time nil)
                     (emeld--update-header-line)
                     (run-with-timer 0.001 nil #'emeld--process-same-chunk-worker
                                     target-buf lines ctx-root ctx-left ctx-right old-gc path-hash))))))))
