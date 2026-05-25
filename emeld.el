@@ -123,8 +123,10 @@ Has no effect when `file-equal-p' is available (Emacs >= 29)."
   "Diff status lines from `diff -rq' output.")
 (defvar-local emeld--scan-buf nil
   "Buffer being scanned (for sentinel callbacks).")
-(defvar-local emeld--cached-full-lines nil
-  "Non-nil when a `-s' scan has completed (identical files available in tree).")
+(defvar-local emeld--chunk-worker-timer nil
+  "Holds the active chunking timer to prevent overlapping timer execution.")
+(defvar-local emeld--scan-generation 0
+  "Incremented on each new scan start. Workers check this to abort stale operations.")
 (defvar-local emeld--active-filter-groups nil
   "List of currently active filter group names.")
 (defvar-local emeld--left-root nil)
@@ -206,21 +208,24 @@ Values can be 'idle, 'running-diff, 'building-tree, or 'done.")
 (defun emeld--make-file-node (relpath parent status)
   "Create emeld-node for a file at RELPATH (relative from root).
 Only sets the path for the side(s) where the file exists.
-Detects single-sided directories and creates unexpanded dir nodes lazily."
+Single-sided directories are populated and expanded eagerly so that
+all changed files are visible on initial scan."
   (let ((name (file-name-nondirectory (directory-file-name relpath))))
     (if (memq status '(left-only right-only))
         (let* ((side-root (if (eq status 'left-only) emeld--left-root emeld--right-root))
                (side-path (and side-root (concat (file-name-as-directory side-root) relpath))))
           (if (and side-path (file-directory-p side-path))
-              (emeld-node-create
-               :name name
-               :left-path (and (eq status 'left-only) side-path)
-               :right-path (and (eq status 'right-only) side-path)
-               :parent parent
-               :is-dir t
-               :expanded nil
-               :children nil
-               :diff-status status)
+              (let ((dir-node (emeld-node-create
+                               :name name
+                               :left-path (and (eq status 'left-only) side-path)
+                               :right-path (and (eq status 'right-only) side-path)
+                               :parent parent
+                               :is-dir t
+                               :expanded t
+                               :children nil
+                               :diff-status status)))
+                (emeld--maybe-populate-lazy-dir dir-node)
+                dir-node)
             (emeld-node-create
              :name name
              :left-path (and (eq status 'left-only) side-path)
@@ -417,42 +422,88 @@ Lower numbers keep Emacs snappier; higher numbers process faster."
                               (setq gc-cons-threshold old-gc)))))))))))
           (run-with-timer 0.001 nil #'process-lines-chunk))))))
 
-(defun emeld--entries-to-nodes-progressive (entries prefix parent buf initial-render-cb final-cb)
+(defun emeld--entries-to-nodes-progressive (entries prefix parent buf initial-render-cb final-cb &optional gen)
   "Convert ENTRIES into nodes progressively.
 Prioritizes branches containing modifications or differences so they render first,
 allowing identical/same branches to populate quietly afterward."
   (let ((dirs (make-hash-table :test 'equal))
         (files nil)
         (dir-names (make-hash-table :test 'equal))
-        (file-nodes nil))
+        (file-nodes nil)
+        (current-gen (or gen (with-current-buffer buf emeld--scan-generation))))
     
-    (dolist (entry entries)
-      (let* ((raw-path (car entry))
-             (status (cdr entry))
-             (path (cond
-                    ((string-prefix-p "./" raw-path) (substring raw-path 2))
-                    ((string-prefix-p "/" raw-path) (substring raw-path 1))
-                    (t raw-path)))
-             (name (file-name-nondirectory (directory-file-name path))))
-        (unless (or (string-empty-p path) (emeld--filtered-p name path))
-          (if (string-match "/" path)
-              (let* ((slash-pos (match-beginning 0))
-                     (dir-name (substring path 0 slash-pos))
-                     (rest (substring path (1+ slash-pos))))
-                (if (string-empty-p dir-name)
-                    (push (cons rest status) files)
-                  (push (cons rest status) (gethash dir-name dirs))))
-            (push (cons path status) files)))))
-    
+    ;; 1. Parse flat entries into immediate files and directory buckets
+    (let ((tail entries))
+      (while tail
+        (let ((entry (car tail)))
+          (let* ((raw-path (car entry))
+                 (status (cdr entry))
+                 (path (cond ((string-prefix-p "./" raw-path) (substring raw-path 2))
+                             ((string-prefix-p "/" raw-path) (substring raw-path 1))
+                             (t raw-path)))
+                 (name (file-name-nondirectory (directory-file-name path))))
+            (unless (or (string-empty-p path) (emeld--filtered-p name path))
+              (if (string-match "/" path)
+                  (let* ((slash-pos (match-beginning 0))
+                         (dir-name (substring path 0 slash-pos))
+                         (rest (substring path (1+ slash-pos))))
+                    (if (string-empty-p dir-name)
+                        (push (cons rest status) files)
+                      (puthash dir-name
+                               (cons (cons rest status) (gethash dir-name dirs))
+                               dirs)))
+                (push (cons path status) files)))))
+        (setq tail (cdr tail))))
+
+    ;; Record immediate subdirectory keys to isolate floating files
+    (maphash (lambda (k _) (puthash k t dir-names)) dirs)
+
+    ;; 2. Instantiate file node items for the current tier
+    (let ((tail files))
+      (while tail
+        (let ((entry (car tail)))
+          (let* ((path (car entry))
+                 (status (cdr entry)))
+            (unless (or (string-empty-p path) (gethash path dir-names))
+              (let ((sub-rel (if (string-empty-p prefix) path (concat prefix "/" path))))
+                (push (emeld--make-file-node sub-rel parent status) file-nodes)))))
+        (setq tail (cdr tail))))
+
+    ;; 3. Check if this is an implicit matching node branch that needs physical unrolling
+    (when (and (null files) (hash-table-empty-p dirs) (not (string-empty-p prefix)))
+      (with-current-buffer buf
+        (let* ((left-root emeld--left-root)
+               (right-root emeld--right-root)
+               (abs-left (concat (file-name-as-directory left-root) prefix))
+               (abs-right (concat (file-name-as-directory right-root) prefix))
+               (target-dir (cond ((file-directory-p abs-left) abs-left)
+                                 ((file-directory-p abs-right) abs-right))))
+          (when (and target-dir (file-directory-p target-dir))
+            (let ((items (directory-files target-dir nil "^\\([^.]\\|\\.\\([^.]\\|\\..\\)\\)")))
+              (dolist (item items)
+                (let* ((item-rel (concat prefix "/" item))
+                       (item-abs-left (concat (file-name-as-directory left-root) item-rel))
+                       (item-abs-right (concat (file-name-as-directory right-root) item-rel))
+                       (is-dir (or (file-directory-p item-abs-left) (file-directory-p item-abs-right))))
+                  (if is-dir
+                      (puthash item (list (cons "" 'same)) dirs)
+                    (push (cons item 'same) files)))))))))
+
+    ;; Re-sync hash indicators if physical backfill triggered
     (maphash (lambda (k _) (puthash k t dir-names)) dirs)
     
-    (dolist (entry files)
-      (let* ((path (car entry))
-             (status (cdr entry)))
-        (unless (or (string-empty-p path) (gethash path dir-names))
-          (let ((sub-rel (if (string-empty-p prefix) path (concat prefix "/" path))))
-            (push (emeld--make-file-node sub-rel parent status) file-nodes)))))
-    
+    (let ((tail files))
+      (while tail
+        (let ((entry (car tail)))
+          (let* ((path (car entry))
+                 (status (cdr entry)))
+            (unless (or (string-empty-p path) (gethash path dir-names)
+                        (cl-find-if (lambda (n) (string= (emeld-node-name n) path)) file-nodes))
+              (let ((sub-rel (if (string-empty-p prefix) path (concat prefix "/" path))))
+                (push (emeld--make-file-node sub-rel parent status) file-nodes)))))
+        (setq tail (cdr tail))))
+
+    ;; 4. Build immediate subdirectory structures
     (let ((dir-nodes nil)
           (priority-queue nil)
           (same-queue nil))
@@ -461,7 +512,7 @@ allowing identical/same branches to populate quietly afterward."
          (let ((sub-prefix (if (string-empty-p prefix) dir-name (concat prefix "/" dir-name))))
            (unless (or (string-empty-p dir-name) (string= dir-name "'") (emeld--filtered-p dir-name sub-prefix))
              (let* ((only-same (cl-every (lambda (e) (eq (cdr e) 'same)) sub-entries))
-                    (should-expand (not only-same))
+                    (should-expand t)
                     (dir-node (emeld-node-create
                                :name dir-name
                                :left-path (and emeld--left-root 
@@ -480,81 +531,105 @@ allowing identical/same branches to populate quietly afterward."
                    (push task-item same-queue)
                  (push task-item priority-queue))))))
        dirs)
-      
-      (let ((current-tier-nodes
-             (sort (nconc file-nodes dir-nodes)
-                   (lambda (a b)
-                     (let ((a-dir (emeld-node-is-dir a))
-                           (b-dir (emeld-node-is-dir b)))
-                       (if (eq a-dir b-dir)
-                           (string< (emeld-node-name a) (emeld-node-name b))
-                         a-dir))))))
-        
-        (funcall initial-render-cb current-tier-nodes)
-        
-        (cl-labels
-            ((process-dir-queue
-               (p-tail s-tail)
-               (if (not (buffer-live-p buf))
-                   nil
-                 (cond
+
+    (let ((current-tier-nodes (sort (nconc file-nodes dir-nodes)
+                                    (lambda (a b)
+                                      (let ((a-dir (emeld-node-is-dir a))
+                                            (b-dir (emeld-node-is-dir b)))
+                                        (if (eq a-dir b-dir)
+                                            (string< (emeld-node-name a) (emeld-node-name b))
+                                          a-dir))))))
+      (funcall initial-render-cb current-tier-nodes)
+
+      ;; 5. Time-sliced background processing loop.
+      ;; final-cb must wait for sub-chains: a level's own queues drain as soon
+      ;; as sub-dirs are *dispatched*, but their sub-trees are still being
+      ;; built on later timer ticks.  Track outstanding sub-chains so the
+      ;; final-cb only fires when this whole subtree is done.
+      (let ((outstanding 0)
+            (own-queues-done nil))
+        (letrec
+            ((finish-check
+              (lambda ()
+                (when (and own-queues-done (zerop outstanding))
+                  (funcall final-cb))))
+             (process-dir-queue
+              (lambda (p-tail s-tail)
+                (setq emeld--chunk-worker-timer nil)
+                (when (and (buffer-live-p buf)
+                           (eq (with-current-buffer buf emeld--scan-generation) current-gen))
+                  (cond
                    (p-tail
                     (let ((time-limit (+ (float-time) 0.015)))
                       (catch 'emeld--budget-yield
-                        (while (and p-tail (< (float-time) time-limit))
-                          (let* ((next-branch (car p-tail))
-                                 (sub-entries (nth 0 next-branch))
-                                 (sub-prefix  (nth 1 next-branch))
-                                 (dir-node    (nth 2 next-branch)))
-                            (emeld--entries-to-nodes-progressive
-                             sub-entries sub-prefix dir-node buf
-                             (lambda (sub-tier-nodes)
-                               (setf (emeld-node-children dir-node) sub-tier-nodes)
-                               (let ((any-diff (cl-some (lambda (n) (not (eq (emeld-node-diff-status n) 'same))) sub-tier-nodes)))
-                                 (setf (emeld-node-diff-status dir-node) (if any-diff 'different 'same))))
-                             (lambda ()
-                               (let ((now (float-time))
-                                     (last-render emeld--last-render-time))
-                                 (when (or (null last-render)
-                                           (> (- now last-render) 0.15))
-                                   (setq emeld--last-render-time now)
-                                   (with-current-buffer buf (emeld--render))))))
-                            (setq p-tail (cdr p-tail))))))
-                    (if p-tail
-                        (run-with-timer 0.001 nil
-                          (lambda () (with-current-buffer buf (process-dir-queue p-tail s-tail))))
-                      (with-current-buffer buf (process-dir-queue nil s-tail))))
-                   
-                   (s-tail
-                    (let ((time-limit (+ (float-time) 0.015)))
-                      (catch 'emeld--budget-yield
-                        (while (and s-tail (< (float-time) time-limit))
-                          (let* ((next-branch (car s-tail))
-                                 (sub-entries (nth 0 next-branch))
-                                 (sub-prefix  (nth 1 next-branch))
-                                 (dir-node    (nth 2 next-branch)))
-                            (let ((is-last (null (cdr s-tail))))
+                        (while p-tail
+                          (if (> (float-time) time-limit)
+                              (throw 'emeld--budget-yield t)
+                            (let* ((next-branch (car p-tail))
+                                   (sub-entries (nth 0 next-branch))
+                                   (sub-prefix (nth 1 next-branch))
+                                   (dir-node (nth 2 next-branch)))
+                              (cl-incf outstanding)
                               (emeld--entries-to-nodes-progressive
                                sub-entries sub-prefix dir-node buf
                                (lambda (sub-tier-nodes)
-                                 (setf (emeld-node-children dir-node) sub-tier-nodes))
+                                 (setf (emeld-node-children dir-node) sub-tier-nodes)
+                                 (let ((any-diff (cl-some (lambda (n) (not (eq (emeld-node-diff-status n) 'same))) sub-tier-nodes)))
+                                   (setf (emeld-node-diff-status dir-node) (if any-diff 'different 'same))))
                                (lambda ()
                                  (let ((now (float-time))
-                                       (last-render emeld--last-render-time))
-                                   (when (or is-last
-                                             (null last-render)
-                                             (> (- now last-render) 0.15))
-                                     (setq emeld--last-render-time now)
-                                     (with-current-buffer buf (emeld--render))))))
-                              (setq s-tail (cdr s-tail)))))))
+                                       (last-render (with-current-buffer buf emeld--last-render-time)))
+                                   (when (or (null last-render) (> (- now last-render) 0.15))
+                                     (with-current-buffer buf
+                                       (setq emeld--last-render-time now)
+                                       (emeld--render))))
+                                 (cl-decf outstanding)
+                                 (funcall finish-check))
+                               current-gen))
+                            (setq p-tail (cdr p-tail))))))
+                    (if p-tail
+                        (setq emeld--chunk-worker-timer
+                              (run-with-timer 0.001 nil (lambda () (with-current-buffer buf (funcall process-dir-queue p-tail s-tail)))))
+                      (with-current-buffer buf (funcall process-dir-queue nil s-tail))))
+
+                   (s-tail
+                    (let ((time-limit (+ (float-time) 0.015)))
+                      (catch 'emeld--budget-yield
+                        (while s-tail
+                          (if (> (float-time) time-limit)
+                              (throw 'emeld--budget-yield t)
+                            (let* ((next-branch (car s-tail))
+                                   (sub-entries (nth 0 next-branch))
+                                   (sub-prefix (nth 1 next-branch))
+                                   (dir-node (nth 2 next-branch)))
+                              (let ((is-last (null (cdr s-tail))))
+                                (cl-incf outstanding)
+                                (emeld--entries-to-nodes-progressive
+                                 sub-entries sub-prefix dir-node buf
+                                 (lambda (sub-tier-nodes)
+                                   (setf (emeld-node-children dir-node) sub-tier-nodes))
+                                 (lambda ()
+                                   (let ((now (float-time))
+                                         (last-render (with-current-buffer buf emeld--last-render-time)))
+                                     (when (or is-last (null last-render) (> (- now last-render) 0.15))
+                                       (with-current-buffer buf
+                                         (setq emeld--last-render-time now)
+                                         (emeld--render))))
+                                   (cl-decf outstanding)
+                                   (funcall finish-check))
+                                 current-gen)))
+                            (setq s-tail (cdr s-tail))))))
                     (if s-tail
-                        (run-with-timer 0.001 nil
-                          (lambda () (with-current-buffer buf (process-dir-queue nil s-tail))))
-                      (funcall final-cb)))
-                  
-                  (t (funcall final-cb))))))
-        
-          (run-with-timer 0.001 nil (lambda () (with-current-buffer buf (process-dir-queue priority-queue same-queue)))))))))
+                        (setq emeld--chunk-worker-timer
+                              (run-with-timer 0.001 nil (lambda () (with-current-buffer buf (funcall process-dir-queue nil s-tail)))))
+                      (setq own-queues-done t)
+                      (funcall finish-check)))
+
+                   (t
+                    (setq own-queues-done t)
+                    (funcall finish-check)))))))
+
+          (run-with-timer 0.001 nil (lambda () (with-current-buffer buf (funcall process-dir-queue priority-queue same-queue))))))))))
 
 (defun emeld--diff-exclude-args ()
   "Return `--exclude=PATTERN' args from active filter groups.
@@ -1309,21 +1384,24 @@ so Emacs stays fully responsive during the scan."
            (side-path (if (eq status 'left-only)
                           (emeld-node-left-path node)
                         (emeld-node-right-path node)))
-           (side-root (if (eq status 'left-only) emeld--left-root emeld--right-root))
+           ;; Strip side-path itself, not the comparison root: entries must be
+           ;; relative to NODE, otherwise the full path-from-root gets nested
+           ;; under NODE producing a duplicated subtree.
+           (base-dir (file-name-as-directory (expand-file-name side-path)))
+           (node-rel (emeld--node-relpath node))
            (sub-files (directory-files-recursively side-path "" t))
            (entries nil))
       (dolist (f sub-files)
         (let* ((abs-f (expand-file-name f))
-               (root-base (expand-file-name side-root))
-               (rel (if (string-prefix-p root-base abs-f)
-                        (substring abs-f (length root-base))
+               (rel (if (string-prefix-p base-dir abs-f)
+                        (substring abs-f (length base-dir))
                       abs-f)))
           (when (string-prefix-p "/" rel)
             (setq rel (substring rel 1)))
           (unless (string-empty-p rel)
             (push (cons rel status) entries))))
       (setf (emeld-node-children node)
-            (emeld--entries-to-nodes entries "" node)))))
+            (emeld--entries-to-nodes entries node-rel node)))))
 
 (defun emeld--read-new-root (on-left)
   "Prompt for a new root directory for side ON-LEFT and update the buffer."
