@@ -657,17 +657,26 @@ Explicitly handles and strips single quotes added to paths by the shell environm
                             (emeld--get-or-create-dir-node
                              parent-rel-path path-hash root left-root right-root)))
              (dir-name (file-name-nondirectory (directory-file-name rel-dir-path)))
-             (new-dir (emeld-node-create
-                       :name dir-name
-                       :left-path (concat (file-name-as-directory left-root) rel-dir-path)
-                       :right-path (concat (file-name-as-directory right-root) rel-dir-path)
-                       :parent parent-node
-                       :is-dir t
-                       :expanded nil
-                       :diff-status 'same)))
-        (push new-dir (emeld-node-children parent-node))
-        (puthash rel-dir-path new-dir path-hash)
-        new-dir)))
+             ;; Check if parent already has a directory node with this name (e.g. from initial diff scan)
+             (existing (cl-find-if (lambda (c)
+                                    (and (emeld-node-is-dir c)
+                                         (string= (emeld-node-name c) dir-name)))
+                                  (emeld-node-children parent-node))))
+        (if existing
+            (progn
+              (puthash rel-dir-path existing path-hash)
+              existing)
+          (let ((new-dir (emeld-node-create
+                          :name dir-name
+                          :left-path (concat (file-name-as-directory left-root) rel-dir-path)
+                          :right-path (concat (file-name-as-directory right-root) rel-dir-path)
+                          :parent parent-node
+                          :is-dir t
+                          :expanded nil
+                          :diff-status 'same)))
+            (push new-dir (emeld-node-children parent-node))
+            (puthash rel-dir-path new-dir path-hash)
+            new-dir)))))
 
 (defun emeld--add-same-entry-to-tree (root relpath path-hash left-root right-root)
   (let* ((rel-dir (file-name-directory relpath))
@@ -678,14 +687,19 @@ Explicitly handles and strips single quotes added to paths by the shell environm
                          parent-rel path-hash root left-root right-root)))
          (file-name (file-name-nondirectory relpath)))
     (unless (emeld--filtered-p file-name relpath)
-      (let ((new-file (emeld-node-create
-                       :name file-name
-                       :left-path (concat (file-name-as-directory left-root) relpath)
-                       :right-path (concat (file-name-as-directory right-root) relpath)
-                       :parent parent-node
-                       :diff-status 'same
-                       :is-dir nil)))
-        (push new-file (emeld-node-children parent-node))))))
+      ;; Avoid duplicating file nodes if they already exist
+      (unless (cl-find-if (lambda (c)
+                            (and (not (emeld-node-is-dir c))
+                                 (string= (emeld-node-name c) file-name)))
+                          (emeld-node-children parent-node))
+        (let ((new-file (emeld-node-create
+                         :name file-name
+                         :left-path (concat (file-name-as-directory left-root) relpath)
+                         :right-path (concat (file-name-as-directory right-root) relpath)
+                         :parent parent-node
+                         :diff-status 'same
+                         :is-dir nil)))
+          (push new-file (emeld-node-children parent-node)))))))
 
 (defun emeld--sort-tree-recursive (node)
   (when (emeld-node-children node)
