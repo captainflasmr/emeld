@@ -205,16 +205,38 @@ Values can be 'idle, 'running-diff, 'building-tree, or 'done.")
 
 (defun emeld--make-file-node (relpath parent status)
   "Create emeld-node for a file at RELPATH (relative from root).
-Only sets the path for the side(s) where the file exists."
+Only sets the path for the side(s) where the file exists.
+Detects single-sided directories and creates unexpanded dir nodes lazily."
   (let ((name (file-name-nondirectory (directory-file-name relpath))))
-    (emeld-node-create
-     :name name
-     :left-path (and (memq status '(same different left-only))
-                     (expand-file-name relpath emeld--left-root))
-     :right-path (and (memq status '(same different right-only))
-                      (expand-file-name relpath emeld--right-root))
-     :parent parent
-     :diff-status status)))
+    (if (memq status '(left-only right-only))
+        (let* ((side-root (if (eq status 'left-only) emeld--left-root emeld--right-root))
+               (side-path (and side-root (concat (file-name-as-directory side-root) relpath))))
+          (if (and side-path (file-directory-p side-path))
+              (emeld-node-create
+               :name name
+               :left-path (and (eq status 'left-only) side-path)
+               :right-path (and (eq status 'right-only) side-path)
+               :parent parent
+               :is-dir t
+               :expanded nil
+               :children nil
+               :diff-status status)
+            (emeld-node-create
+             :name name
+             :left-path (and (eq status 'left-only) side-path)
+             :right-path (and (eq status 'right-only) side-path)
+             :parent parent
+             :diff-status status)))
+      (emeld-node-create
+       :name name
+       :left-path (and (memq status '(same different left-only))
+                       emeld--left-root
+                       (concat (file-name-as-directory emeld--left-root) relpath))
+       :right-path (and (memq status '(same different right-only))
+                        emeld--right-root
+                        (concat (file-name-as-directory emeld--right-root) relpath))
+       :parent parent
+       :diff-status status))))
 
 (defun emeld--entries-to-nodes (entries prefix parent)
   "Convert ENTRIES (alist of (REL-PATH . STATUS)) into emeld-node tree.
@@ -260,8 +282,10 @@ Directories are grouped first, followed by files, each sorted alphabetically."
              (unless (emeld--filtered-p dir-name sub-prefix)
                (let* ((dir-node (emeld-node-create
                                  :name dir-name
-                                 :left-path (expand-file-name sub-prefix emeld--left-root)
-                                 :right-path (expand-file-name sub-prefix emeld--right-root)
+                                 :left-path (and emeld--left-root
+                                                 (concat (file-name-as-directory emeld--left-root) sub-prefix))
+                                 :right-path (and emeld--right-root
+                                                  (concat (file-name-as-directory emeld--right-root) sub-prefix))
                                  :parent parent
                                  :is-dir t
                                  :diff-status 'same))
@@ -366,11 +390,9 @@ Lower numbers keep Emacs snappier; higher numbers process faster."
                         
                         (if remaining-lines
                             (run-with-timer 0.001 nil #'process-lines-chunk)
-                          (emeld--bench-push "parse done")
-                          (if (cl-some (lambda (e) (memq (cdr e) '(left-only right-only))) entries)
-                              (setq entries (emeld--expand-dir-entries entries)))
+                           (emeld--bench-push "parse done")
                           
-                          (message "Structuring tree nodes progressively...")
+                           (message "Structuring tree nodes progressively...")
                           (emeld--entries-to-nodes-progressive
                           entries "" root buf
                           (lambda (top-level-children)
@@ -444,10 +466,10 @@ allowing identical/same branches to populate quietly afterward."
                                :name dir-name
                                :left-path (and emeld--left-root 
                                                (not (string-empty-p sub-prefix))
-                                               (expand-file-name sub-prefix emeld--left-root))
+                                               (concat (file-name-as-directory emeld--left-root) sub-prefix))
                                :right-path (and emeld--right-root 
                                                 (not (string-empty-p sub-prefix))
-                                                (expand-file-name sub-prefix emeld--right-root))
+                                                (concat (file-name-as-directory emeld--right-root) sub-prefix))
                                :parent parent
                                :is-dir t
                                :expanded should-expand
@@ -476,43 +498,63 @@ allowing identical/same branches to populate quietly afterward."
                (if (not (buffer-live-p buf))
                    nil
                  (cond
-                  (p-tail
-                   (let* ((next-branch (car p-tail))
-                          (sub-entries (nth 0 next-branch))
-                          (sub-prefix  (nth 1 next-branch))
-                          (dir-node    (nth 2 next-branch)))
-                     (emeld--entries-to-nodes-progressive
-                      sub-entries sub-prefix dir-node buf
-                      (lambda (sub-tier-nodes)
-                        (setf (emeld-node-children dir-node) sub-tier-nodes)
-                        (let ((any-diff (cl-some (lambda (n) (not (eq (emeld-node-diff-status n) 'same))) sub-tier-nodes)))
-                          (setf (emeld-node-diff-status dir-node) (if any-diff 'different 'same))))
-                      (lambda ()
-                        (with-current-buffer buf (emeld--render))
-                        (process-dir-queue (cdr p-tail) s-tail)))))
-                  
-                  (s-tail
-                   (let* ((next-branch (car s-tail))
-                          (sub-entries (nth 0 next-branch))
-                          (sub-prefix  (nth 1 next-branch))
-                          (dir-node    (nth 2 next-branch)))
-                     (emeld--entries-to-nodes-progressive
-                      sub-entries sub-prefix dir-node buf
-                      (lambda (sub-tier-nodes)
-                        (setf (emeld-node-children dir-node) sub-tier-nodes))
-                      (lambda ()
-                        (let ((now (float-time))
-                              (last-render emeld--last-render-time))
-                          (when (or (null (cdr s-tail))
-                                    (null last-render)
-                                    (> (- now last-render) 0.15))
-                            (setq emeld--last-render-time now)
-                            (with-current-buffer buf (emeld--render))))
-                        (process-dir-queue nil (cdr s-tail))))))
+                   (p-tail
+                    (let ((time-limit (+ (float-time) 0.015)))
+                      (catch 'emeld--budget-yield
+                        (while (and p-tail (< (float-time) time-limit))
+                          (let* ((next-branch (car p-tail))
+                                 (sub-entries (nth 0 next-branch))
+                                 (sub-prefix  (nth 1 next-branch))
+                                 (dir-node    (nth 2 next-branch)))
+                            (emeld--entries-to-nodes-progressive
+                             sub-entries sub-prefix dir-node buf
+                             (lambda (sub-tier-nodes)
+                               (setf (emeld-node-children dir-node) sub-tier-nodes)
+                               (let ((any-diff (cl-some (lambda (n) (not (eq (emeld-node-diff-status n) 'same))) sub-tier-nodes)))
+                                 (setf (emeld-node-diff-status dir-node) (if any-diff 'different 'same))))
+                             (lambda ()
+                               (let ((now (float-time))
+                                     (last-render emeld--last-render-time))
+                                 (when (or (null last-render)
+                                           (> (- now last-render) 0.15))
+                                   (setq emeld--last-render-time now)
+                                   (with-current-buffer buf (emeld--render))))))
+                            (setq p-tail (cdr p-tail))))))
+                    (if p-tail
+                        (run-with-timer 0.001 nil
+                          (lambda () (with-current-buffer buf (process-dir-queue p-tail s-tail))))
+                      (with-current-buffer buf (process-dir-queue nil s-tail))))
+                   
+                   (s-tail
+                    (let ((time-limit (+ (float-time) 0.015)))
+                      (catch 'emeld--budget-yield
+                        (while (and s-tail (< (float-time) time-limit))
+                          (let* ((next-branch (car s-tail))
+                                 (sub-entries (nth 0 next-branch))
+                                 (sub-prefix  (nth 1 next-branch))
+                                 (dir-node    (nth 2 next-branch)))
+                            (let ((is-last (null (cdr s-tail))))
+                              (emeld--entries-to-nodes-progressive
+                               sub-entries sub-prefix dir-node buf
+                               (lambda (sub-tier-nodes)
+                                 (setf (emeld-node-children dir-node) sub-tier-nodes))
+                               (lambda ()
+                                 (let ((now (float-time))
+                                       (last-render emeld--last-render-time))
+                                   (when (or is-last
+                                             (null last-render)
+                                             (> (- now last-render) 0.15))
+                                     (setq emeld--last-render-time now)
+                                     (with-current-buffer buf (emeld--render))))))
+                              (setq s-tail (cdr s-tail)))))))
+                    (if s-tail
+                        (run-with-timer 0.001 nil
+                          (lambda () (with-current-buffer buf (process-dir-queue nil s-tail))))
+                      (funcall final-cb)))
                   
                   (t (funcall final-cb))))))
         
-          (run-with-timer 0.001 nil (lambda () (process-dir-queue priority-queue same-queue))))))))
+          (run-with-timer 0.001 nil (lambda () (with-current-buffer buf (process-dir-queue priority-queue same-queue)))))))))
 
 (defun emeld--diff-exclude-args ()
   "Return `--exclude=PATTERN' args from active filter groups.
@@ -617,8 +659,8 @@ Explicitly handles and strips single quotes added to paths by the shell environm
              (dir-name (file-name-nondirectory (directory-file-name rel-dir-path)))
              (new-dir (emeld-node-create
                        :name dir-name
-                       :left-path (expand-file-name rel-dir-path left-root)
-                       :right-path (expand-file-name rel-dir-path right-root)
+                       :left-path (concat (file-name-as-directory left-root) rel-dir-path)
+                       :right-path (concat (file-name-as-directory right-root) rel-dir-path)
                        :parent parent-node
                        :is-dir t
                        :expanded nil
@@ -638,8 +680,8 @@ Explicitly handles and strips single quotes added to paths by the shell environm
     (unless (emeld--filtered-p file-name relpath)
       (let ((new-file (emeld-node-create
                        :name file-name
-                       :left-path (expand-file-name relpath left-root)
-                       :right-path (expand-file-name relpath right-root)
+                       :left-path (concat (file-name-as-directory left-root) relpath)
+                       :right-path (concat (file-name-as-directory right-root) relpath)
                        :parent parent-node
                        :diff-status 'same
                        :is-dir nil)))
@@ -1183,6 +1225,7 @@ shows nothing for the orphan."
   (interactive)
   (let ((node (get-text-property (point) 'emeld-node)))
     (when (and node (emeld-node-is-dir node))
+      (emeld--maybe-populate-lazy-dir node)
       (setf (emeld-node-expanded node) (not (emeld-node-expanded node)))
       (let ((pos (point)))
         (emeld--render)
@@ -1242,6 +1285,31 @@ so Emacs stays fully responsive during the scan."
           (unless (member rel emeld--saved-expanded)
             (setf (emeld-node-expanded child) nil))
           (emeld--restore-expanded child))))))
+
+(defun emeld--maybe-populate-lazy-dir (node)
+  "Populate NODE's children if it is a lazy (unexpanded) single-sided directory."
+  (when (and (emeld-node-is-dir node)
+             (null (emeld-node-children node))
+             (memq (emeld-node-diff-status node) '(left-only right-only)))
+    (let* ((status (emeld-node-diff-status node))
+           (side-path (if (eq status 'left-only)
+                          (emeld-node-left-path node)
+                        (emeld-node-right-path node)))
+           (side-root (if (eq status 'left-only) emeld--left-root emeld--right-root))
+           (sub-files (directory-files-recursively side-path "" t))
+           (entries nil))
+      (dolist (f sub-files)
+        (let* ((abs-f (expand-file-name f))
+               (root-base (expand-file-name side-root))
+               (rel (if (string-prefix-p root-base abs-f)
+                        (substring abs-f (length root-base))
+                      abs-f)))
+          (when (string-prefix-p "/" rel)
+            (setq rel (substring rel 1)))
+          (unless (string-empty-p rel)
+            (push (cons rel status) entries))))
+      (setf (emeld-node-children node)
+            (emeld--entries-to-nodes entries "" node)))))
 
 (defun emeld--read-new-root (on-left)
   "Prompt for a new root directory for side ON-LEFT and update the buffer."
