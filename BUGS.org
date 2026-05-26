@@ -13,8 +13,6 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 ** TODO better responsiveness duing tree build
 
-** DOING multiple select for delete
-
 ** TODO add directory tree display for dired?
 
 ** TODO sub directory refresh
@@ -24,8 +22,6 @@ This document contains the current bugs/improvements, this is just for me mainly
 ** TODO Scanning got stuck after copying files and then auto rescan
 
 ** TODO rethink .dir-locals, top level not loading when local doesn't exist
-
-** DOING diffs wrong way round on soft diff
 
 ** TODO compare git version with folder
 
