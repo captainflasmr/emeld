@@ -2,6 +2,7 @@
 #+AUTHOR: Antigravity
 
 * Introduction
+
 Emeld is a simple, side-by-side directory comparison tool for Emacs. It is designed to be a lightweight and maintainable alternative to other directory diff tools, with a focus on ease of use and a clean hierarchy.
 
 * Features
@@ -16,7 +17,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Bulk expand/collapse: ~[~ collapse all, ~]~ expand all, ~\\~ expand only paths leading to changes.
 - File copying between directories (~C~).
 - Export changes as a unified-diff patch (~P~).
-- Presets: save a directory pair (~C-c s~) and recall it later (~C-c l~) for fast repeated comparisons.
+- Presets: save a directory pair and recall it later for fast repeated comparisons.
 - Side-aware navigation (~n~/~p~) and side-jumping (~o~).
 - Integration with ~ediff~.
 - Fully themeable (uses standard Emacs faces).
@@ -73,9 +74,15 @@ The transient menu is organized into four groups:
 | n/p       | Navigation (Side-aware)                           |
 | M-n/M-p   | Jump to next/previous file change                 |
 | { / }     | Shrink/grow left pane width                       |
-| C-c f     | Toggle a named filter group on/off                |
-| C-c s     | Save current directories as a preset              |
-| C-c l     | Load a saved preset (completion)                  |
+
+Filter-group toggling (~emeld-toggle-filter-group~) and the preset commands (~emeld-save-preset~, ~emeld-load-preset~, ~emeld-delete-preset~) are not bound to keys by default — invoke them from the transient menu (~?~) or ~M-x~, or bind them yourself, e.g.:
+
+#+begin_src elisp
+(with-eval-after-load 'emeld
+  (define-key emeld-mode-map (kbd "C-c f") #'emeld-toggle-filter-group)
+  (define-key emeld-mode-map (kbd "C-c s") #'emeld-save-preset)
+  (define-key emeld-mode-map (kbd "C-c l") #'emeld-load-preset))
+#+end_src
 
 * Customization
 
@@ -103,36 +110,21 @@ The transient menu is organized into four groups:
 
 Frequently-compared directory pairs can be saved and recalled:
 
-- ~M-x emeld-save-preset~ (~C-c s~, or ~ps~ in the transient) — name and save
-  the current comparison's left/right directories.
-- ~M-x emeld-load-preset~ (~C-c l~, or ~pl~) — pick a saved pair via
-  completion (annotated with its directories) and start the comparison.
-  This is autoloaded, so it works as an entry point even before any
-  comparison is open.
+- ~M-x emeld-save-preset~ (or ~ps~ in the transient) — name and save the current comparison's left/right directories.
+- ~M-x emeld-load-preset~ (or ~pl~) — pick a saved pair via completion (annotated with its directories) and start the comparison.  This is autoloaded, so it works as an entry point even before any comparison is open.
 - ~M-x emeld-delete-preset~ (~pd~) — remove a saved pair.
 
-Presets are stored in ~emeld-presets~, which emeld registers with
-~savehist-additional-variables~.  With ~savehist-mode~ enabled they persist
-across sessions automatically; without it they last only for the current
-session.
+Presets are stored in ~emeld-presets~, which emeld registers with ~savehist-additional-variables~.  With ~savehist-mode~ enabled they persist across sessions automatically; without it they last only for the current session.
 
 * Benchmarking and Regression Tracking
 
 To keep a record of large-repo comparison timings across builds:
 
 1. Enable timing collection: ~(setq emeld-benchmark t)~.
-2. Run one or more comparisons (the initial scan, and toggle ~S~ for the
-   identical-files pass).  Each completed scan prints a report and is
-   queued in memory.
-3. ~M-x emeld-benchmark-record~ writes all queued runs to
-   ~emeld-benchmark-file~ under a single dated heading, stamped with the
-   machine specs and emeld git revision, then clears the queue.
+2. Run one or more comparisons (the initial scan, and toggle ~S~ for the identical-files pass).  Each completed scan prints a report and is queued in memory.
+3. ~M-x emeld-benchmark-record~ writes all queued runs to ~emeld-benchmark-file~ under a single dated heading, stamped with the machine specs and emeld git revision, then clears the queue.
 
-Because every entry records the host, CPU, RAM, Emacs version and emeld
-build, the resulting ~BENCHMARKS.org~ lets you compare runs across commits
-and machines to spot performance regressions.  ~M-x
-emeld-benchmark-system-info~ inserts the current machine's specs at point
-if you want to annotate an entry by hand.
+Because every entry records the host, CPU, RAM, Emacs version and emeld build, the resulting ~BENCHMARKS.org~ lets you compare runs across commits and machines to spot performance regressions.  ~M-x emeld-benchmark-system-info~ inserts the current machine's specs at point if you want to annotate an entry by hand.
 
 The ~test/bench.sh~ script feeds the same log non-interactively:
 
@@ -141,14 +133,11 @@ test/bench.sh small [N]   # synthetic tree (default 10000 files)
 test/bench.sh large       # Linux kernel v7.0 vs v6.19 (git clone on first run)
 #+end_src
 
-It records to ~BENCHMARKS.org~ by default.  Set ~EMELD_BENCH_SAME=1~ to also
-run and record the identical-files pass, ~EMELD_BENCH_RECORD=0~ to print
-without recording, or ~EMELD_BENCH_FILE=PATH~ to redirect the log.
+It records to ~BENCHMARKS.org~ by default.  Set ~EMELD_BENCH_SAME=1~ to also run and record the identical-files pass, ~EMELD_BENCH_RECORD=0~ to print without recording, or ~EMELD_BENCH_FILE=PATH~ to redirect the log.
 
 * Per-Project Configuration with ~.dir-locals.el~
 
-Emeld ships with Meld-style default filter groups (see above).  To override them per
-project, place a ~.dir-locals.el~ file above the left directory:
+Emeld ships with Meld-style default filter groups (see above).  To override them per project, place a ~.dir-locals.el~ file above the left directory:
 
 #+begin_src elisp
 ;;; .dir-locals.el
@@ -159,5 +148,4 @@ project, place a ~.dir-locals.el~ file above the left directory:
                             ("Config" nil "*.cfg" "config/*"))))))
 #+end_src
 
-Toggle named groups on/off from the transient menu (~?~) or directly with ~C-c f~.
-The header line shows the current display state and active groups in brackets.
+Toggle named groups on/off from the transient menu (~?~) or with ~M-x emeld-toggle-filter-group~.  The header line shows the current display state and active groups in brackets.

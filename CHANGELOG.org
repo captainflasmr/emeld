@@ -2,193 +2,121 @@
 
 * [0.16.0] - 2026-05-25
 ** Added
-- Presets: save the current comparison's directory pair under a name and recall it later, for fast repeated runs.  ~emeld-save-preset~ (~C-c s~ / transient ~ps~) saves the current left/right (pre-filling a suggested name); ~emeld-load-preset~ (~C-c l~ / transient ~pl~, also autoloaded for use outside a comparison) picks a saved pair via ~completing-read~ (annotated with the directories) and starts the diff; ~emeld-delete-preset~ (transient ~pd~) removes one.  Stored in ~emeld-presets~, which is registered with ~savehist-additional-variables~ so presets persist across sessions when ~savehist-mode~ is enabled.
-- Benchmark coverage for the identical-files (~S~) merge stack.  When ~emeld-benchmark~ is non-nil, toggling ~S~ now emits its own phased timing report — ~same diff done~, ~same seeded~, ~same merged~, ~same sorted~, ~same rendered~ — independent of the initial scan's report, so the merge phase can be measured in isolation.
-- ~emeld-benchmark-record~: append the benchmark runs collected this session to an Org log (~emeld-benchmark-file~, default ~BENCHMARKS.org~ beside ~emeld.el~).  Each entry stamps machine specs and the emeld build — host, OS/kernel (~uname~), CPU + thread count and RAM (from ~/proc~ on Linux), Emacs version, emeld version and git revision (~emeld--system-info~) — followed by an aligned timing table per run, so readings can be diffed across commits/machines to catch regressions.  Runs accumulate automatically (one per completed scan) while benchmarking is on; recording flushes and clears them.
-- ~emeld-benchmark-system-info~: insert the current machine/build facts at point as an Org list.
-- ~test/bench.sh~ now appends its runs to the benchmark log too (default on; ~EMELD_BENCH_RECORD=0~ to disable, ~EMELD_BENCH_SAME=1~ to also run and record the identical-files pass, ~EMELD_BENCH_FILE=PATH~ to redirect), so synthetic and large-repo runs land in the same ~BENCHMARKS.org~.
-- The same-files (~S~) scan now shows a live entry count (~[Scanning… N entries]~) during its scan phase, matching the initial scan (a process filter counts entries as ~diff -rqs~ streams).
+- Presets: ~emeld-save-preset~ / ~emeld-load-preset~ / ~emeld-delete-preset~ (transient ~ps~/~pl~/~pd~) save and recall a directory pair via completion.  Stored in ~emeld-presets~ and persisted across sessions through ~savehist~.
+- Per-stage benchmark report for the identical-files (~S~) merge, separate from the initial scan.
+- ~emeld-benchmark-record~ appends timing runs — stamped with machine specs and the emeld git revision — to an Org log (~emeld-benchmark-file~, default ~BENCHMARKS.org~); ~emeld-benchmark-system-info~ inserts the specs at point.  ~test/bench.sh~ feeds the same log (~EMELD_BENCH_RECORD~/~SAME~/~FILE~ env vars).
+- Identical-files scan shows a live entry count while scanning, like the initial scan.
 ** Changed
-- Header-line scan counters now update regularly during a scan.  Each counter bump (entries seen while ~diff~ runs, lines parsed while the tree builds) marks the header line for redisplay via ~force-mode-line-update~, so progress animates on its own instead of only refreshing when point moves or input arrives.
-- The benchmark report spells out ~cumulative~ in full rather than ~cum~.
+- Header-line scan counters update continuously during a scan, not only on point movement.
+- Benchmark report writes ~cumulative~ instead of ~cum~.
 ** Removed
-- The "Finished loading identical files." echo-area message on ~S~ completion; the header line's ~[Ready]~ state already signals that the merge has finished.
+- Default ~C-c~ keybindings (~C-c f~, ~C-c s~, ~C-c l~) — use the transient or bind them yourself.
+- The "Finished loading identical files." message (the ~[Ready]~ header state suffices).
 
 * [0.15.0] - 2026-05-25
 ** Added
-- ~.gitignore~ support, on by default (~emeld-respect-gitignore~, default ~t~).  Ignored files are hidden from the comparison on both sides.  Simple root patterns are pushed down to ~diff --exclude~; everything else (anchored, nested, or otherwise complex rules) is caught during tree assembly.  Honors nested ~.gitignore~ files, ~.git/info/exclude~, and the global excludes file.
-- ~emeld-toggle-gitignore~, bound to ~G~, with a live ~[x]~/~[ ]~ entry in the transient ~View~ group.  Toggling rescans (it changes which files are scanned, not just what is rendered).
-- Live scan progress in the header line, replacing the static ~[Diff Scan...]~/~[Building Tree...]~ labels (and the "Scanning in background..." echo-area message): a growing entry tally while ~diff~ runs (~[Scanning… N entries]~), a determinate block progress bar with percentage while the tree is parsed (~[Building tree [████░░░░░░] 45%]~), and an ~[Assembling nodes…]~ label during the final node-assembly pass.  Driven by an ~:eval~ header-line form reading live buffer-local counters, so it animates as the async scan proceeds.
+- ~.gitignore~ support, on by default (~emeld-respect-gitignore~), toggled with ~G~.  Honors nested ~.gitignore~, ~.git/info/exclude~ and the global excludes file.
+- Live header-line scan progress: an entry tally while ~diff~ runs and a progress bar while the tree builds.
 ** Changed
-- ~emeld-respect-gitignore~ is now buffer-local, so toggling it in one comparison buffer no longer affects the global default or other emeld buffers.
-- Performance of the identical-files (~S~) merge on large/build trees: per-file insertion and per-directory creation were both O(n) scans of a parent's children, i.e. quadratic for directories holding many identical files.  The merge now uses an O(1) hash index — files are deduped by relative path, and directories are pre-seeded from the existing tree (~emeld--seed-dir-path-hash~) and resolved by lookup instead of scanning siblings.
-- The identical-files scan now throttles its intermediate redraws like the main scan (previously it re-rendered the whole buffer on every chunk).  New ~emeld-render-throttle~ defcustom (default 0.15s) centralises the redraw interval for both scans; the final result is always rendered on completion.
+- ~emeld-respect-gitignore~ is buffer-local.
+- Identical-files merge is near-linear on large trees (O(1) hash index instead of quadratic sibling scans).
+- Intermediate redraws throttled via ~emeld-render-throttle~ (default 0.15s).
 ** Fixed
-- Gitignore lookups now run a single cached ~git ls-files -o -i --exclude-standard --directory~ query per root instead of spawning ~git check-ignore~ (plus a ~rev-parse~ probe) per file.  The old path spawned up to four git processes for every node in the tree, which made enabling the feature on a large tree pathologically slow; it is now one process per root per scan, with O(depth) hash lookups.  Files nested inside a wholly-ignored directory are matched by walking ancestor paths, since ~--directory~ collapses such directories.
-- The cached ignore set is dropped on each rescan, so edits to a ~.gitignore~ are picked up on ~g~.
-- Two freeze bugs surfaced when comparing large git repos (e.g. two Linux kernel checkouts) with ~.gitignore~ respect on: (1) the synchronous ~git ls-files~ enumeration ran on the first node during tree assembly and blocked the UI while git walked the whole working tree — it is now pre-warmed asynchronously at scan start (in parallel with ~diff~), with lookups returning "not ignored" while the query is still in flight, so the UI never blocks; (2) the ancestor-path walk in ~emeld--git-ignored-p~ could spin forever on an absolute path because ~file-name-directory~/~directory-file-name~ fixpoint at ~/~ — the walk now stops as soon as it can no longer ascend.
+- Gitignore uses one cached, async-prewarmed ~git ls-files~ query per root instead of per-file ~git check-ignore~ — fixes UI freezes/hangs on large repos.
+- Cached ignore set dropped on rescan, so ~.gitignore~ edits take effect on ~g~.
 
 * [0.14.0] - 2026-05-25
 ** Added
-- Org-mode-style visibility cycling.  ~S-TAB~ / ~<backtab>~ cycles the whole tree through three states: TOP (only root's direct child dirs visible), DIRS (intermediate dirs expanded, leaf dirs collapsed so the directory skeleton is shown without file leaves), CHANGES (every dir leading to a change expanded, identical subtrees collapsed, files visible).
-- ~TAB~ now does the equivalent cycle for the subtree at point: FOLDED → DIRS → SUBTREE → FOLDED.  Current state is inferred from actual expansion levels, so it composes naturally with the other expand/collapse commands.
-- ~emeld-collapse-all~ (~[~) and ~emeld-expand-all~ (~]~): bulk expand/collapse like VSCode's "Collapse All" / "Expand All" buttons.
-- ~emeld-expand-changes~ (~\\~): expand only directories that lead to a modified, added, or removed file; collapse purely-identical subtrees.  Useful after ~[~, or when ~emeld-show-same~ is on.
-- ~emeld-expand-dirs-only~: expand intermediate dirs, collapse leaf dirs — the engine for the new DIRS state.
-- All five new commands appear in the transient menu (~?~) under ~View~.
+- Org-style visibility cycling: ~S-TAB~ cycles the whole tree (TOP → DIRS → CHANGES), ~TAB~ the subtree at point.
+- ~[~ collapse all, ~]~ expand all, ~\\~ expand only paths to changes (transient ~View~ group).
 ** Changed
-- Single-sided (~left-only~/~right-only~) directories are now populated and expanded eagerly on initial scan instead of lazily on first TAB press, so all changed files are visible immediately.  Manual collapse still works.
-- ~TAB~ rebound from the simple two-state ~emeld-toggle-expand~ to the new ~emeld-cycle-subtree~.  The old command is still defined for users with custom keybindings.
+- Single-sided directories populated and expanded eagerly on the initial scan.
+- ~TAB~ rebound to ~emeld-cycle-subtree~ (old ~emeld-toggle-expand~ still defined).
 ** Fixed
-- Deeply nested subtrees were missing from the rendered view after the initial async scan.  ~emeld--entries-to-nodes-progressive~ was firing each level's ~final-cb~ when its own queues drained — i.e. when its immediate sub-dirs had been *dispatched*, not when their sub-trees had actually been *built*.  The top-level unconditional render at ~emeld--build-tree-from-diff~'s completion ran a few milliseconds in, and every deeper level's completion render was throttled away by the 150ms guard.  Each level now tracks outstanding sub-chains via a counter; ~final-cb~ only fires when own queues are drained *and* outstanding is zero, so the top-level render correctly waits for the whole tree.
-- ~emeld--maybe-populate-lazy-dir~ was computing entry paths relative to the comparison root instead of relative to the node's own absolute path, so expanding a single-sided directory built a duplicated path chain underneath itself (e.g. ~routing/java/cuis-server/.../routing/RoutingEngine.java~).  Paths are now stripped against the node's path and the node's relpath is passed as ~prefix~ to ~emeld--entries-to-nodes~.
+- Deeply nested subtrees no longer go missing after the initial scan.
+- Expanding a single-sided directory no longer duplicates its path chain.
 
 * [0.13.0] - 2026-05-24
 ** Added
-- Incremental same-scan: toggling ~S~ now runs ~diff -rqs~ in the background and merges identical files into the existing tree without blanking the screen or losing context (point position, expanded folders, marks preserved).
-- ~emeld--sort-tree-recursive~: single-pass recursive tree sorter, called once at scan completion instead of per-chunk.
+- Incremental same-scan: toggling ~S~ merges identical files into the existing tree without losing point, expansion, or marks.
 ** Changed
-- Keybinding reorganization: Same toggled with ~S~, Modified with ~M~, New/Added with ~N~, Strikethrough with ~s~.
-- Display state indicators updated to match new keys (header line shows ~[S]~, ~[M]~, ~[N]~, ~[s]~).
-- Transient menu labels shortened: ~Same~→~S~, ~New~→~N~, ~Modified~→~M~.
-- Wrapped ~file-name-nondirectory~ calls with ~directory-file-name~ to fix blank directory names when showing identical files.
-- Deferred tree sorting: per-chunk ~maphash~ sorting removed from ~emeld--process-same-chunk-worker~; sorting runs once via ~emeld--sort-tree-recursive~ at scan completion, eliminating CPU churn for large directories.
-- Responsiveness tuning: ~emeld-batch-size~ reduced to 50, ~emeld-tree-batch-size~ to 200, inter-chunk timer increased to 0.01s, input-pending defer to 0.1s.
-- ~emeld--render~ now binds ~inhibit-modification-hooks~ and ~inhibit-point-motion-hooks~ to suppress hook overhead during buffer redraw.
-- ~emeld--add-same-entry-to-tree~ simplified (removed ~dirty-parents~ tracking, no longer needed without per-chunk sorting).
+- Keys: Same ~S~, Modified ~M~, New ~N~, Strikethrough ~s~ (header indicators and transient labels updated to match).
+- Tree sorted once at completion instead of per-chunk; responsiveness tuning for large directories.
 
 * [0.12.0] - 2026-05-23
 ** Added
-- Confirmation prompt when toggling show-same (~s~): warns about potential freeze and asks to proceed when no cached data.
-- Point position preserved across async refresh cycle (point returns to the same file after copy, rescan, etc.).
+- Confirmation prompt before showing identical files when uncached.
+- Point preserved across async refreshes.
 ** Changed
-- Marks now cleared after bulk copy completes.
+- Marks cleared after bulk copy.
 ** Fixed
-- ~emeld--move-to-node-name~ regex fixed to include ~*~ in the skip character class (nav was stuck on mark column).
+- Navigation no longer sticks on the mark column.
 
 * [0.11.0] - 2026-05-23
 ** Added
-- Strikethrough display for orphan files on the missing side (Meld-style).  When a file exists only on one side, the other side shows the tree path and filename with ~:strike-through~.  Toggle with ~S~.
-- ~emeld-show-strikethrough~ defcustom for controlling strikethrough display (default ~t~).
-- Dired-style marking system: ~m~ to mark, ~u~ to unmark, ~U~ to unmark all.  When marks exist, ~C~ copies all marked nodes to the other side.
+- Strikethrough display for orphan files on the missing side (~emeld-show-strikethrough~, default ~t~).
+- Dired-style marking (~m~/~u~/~U~); ~C~ copies all marked nodes.
 ** Changed
-- Keybinding reorganization: ~m~ and ~u~/~U~ now handle marking (was ~emeld-toggle-show-different~); ~emeld-toggle-show-different~ moved to ~M-m~.
+- ~m~/~u~/~U~ now mark; ~emeld-toggle-show-different~ moved to ~M-m~.
 
 * [0.10.0] - 2026-05-23
 ** Added
-- ~diff -rqs~ mode for showing identical files (toggle ~s~).  First scan fetches and caches; subsequent toggles are instant re-renders.
-- ~emeld-dynamic-suffix~ transient suffix class for live ~[x]~/~[ ]~ updates on filter group toggles.
-- Tree expansion state preserved across rescans (collapsed directories stay collapsed).
-- GC and performance optimizations in diff sentinel for large trees (10,000+ files).
-- ~emeld-simple-comparison~ kept as obsolete alias for ~.dir-locals.el~ compatibility.
-** Removed
-- ~fd~ dependency entirely (was causing performance and compatibility issues).  All scanning is now ~diff -rq~ only.
-- ~emeld-simple-comparison~ defcustom (no more size-only vs content mode).
-- ~emeld-refresh-full~ and ~G~ keybinding (no separate full-scan mode).
-- ~emeld-show-filtered~ toggle, ~F~ keybinding, and ~emeld-filtered-face~ (filter groups controlled entirely via ~ca~–~cz~ in the transient).
+- ~diff -rqs~ mode for showing identical files (~s~), cached after first scan.
+- Tree expansion state preserved across rescans.
 ** Changed
-- Filter groups now passed as ~--exclude~ patterns to ~diff~, so filtering happens at the scan level (like Meld).
-- ~diff -rq~ no longer has hard-coded ~--exclude=.git~; the Version Control filter group (which includes ~.git~) controls it.
-- Transient menu reorganized into ~File Status~ (~s~ same, ~m~ modified, ~a~ added) and ~View~ (~T~ tree-lines, indent, pane resize) groups.
-- ~emeld--entries-to-nodes~ simplified (removed filtered-file status override).
-- ~g~ now always does a single scan (no simple/full distinction).
+- Filter groups passed as ~--exclude~ to ~diff~ (filtering at the scan level); ~.git~ controlled by the Version Control group.
+** Removed
+- The ~fd~ dependency; all scanning is ~diff -rq~.
+- ~emeld-simple-comparison~, ~emeld-refresh-full~/~G~, and the ~emeld-show-filtered~/~F~ toggle.
 
 * [0.9.2] - 2026-05-21
 ** Added
-- ~emeld-column-ratio~ customizable left-pane width percentage (default 50).
-- ~{~/~}~ bindings and transient entries to shrink/grow the left column by 5%.
+- ~emeld-column-ratio~ (default 50) and ~{~/~}~ to shrink/grow the left column.
 
 * [0.9.1] - 2026-05-21
 ** Changed
-- Transient menu restructured into ~View~, ~Navigate~, ~File~, and ~Filename~ groups.
-- Toggle indicators use ~[x]~/~[ ]~ instead of ~✓~ for consistent alignment.
+- Transient restructured into ~View~/~Navigate~/~File~/~Filename~ groups; toggle indicators use ~[x]~/~[ ]~.
 
 * [0.9.0] - 2026-05-21
 ** Added
-- ~emeld-format-patch~ (~P~): export all changed files as a unified-diff patch (left→right direction).
+- ~emeld-format-patch~ (~P~): export changed files as a unified-diff patch (left→right).
 
 * [0.8.0] - 2026-05-20
 ** Added
-- ~emeld-list-filter-groups~ (~l~ in the transient Filename column): opens a buffer listing every filter group with all its globs and active state.
-- Transient Filename column shows glob count per group (e.g. ~✓ Backups (7)~).
-** Changed
-- Header line ~f~ indicator renamed to ~F~ to match the keybinding.
-- Inline glob display removed from transient (moved to dedicated buffer).
+- ~emeld-list-filter-groups~ (transient ~l~): a buffer listing every filter group, its globs and active state.
 
 * [0.7.0] - 2026-05-20
 ** Added
-- ~emeld-filter-groups~ entries now support an optional boolean (~t~/~nil~) after the name to set the default active state.  All five default groups active by default.
-- Transient menu reorganized: "File status" column (Same/Modified/Added) as first, "Filename" with per-group suffix entries, "Toggles" (filtered/tree-lines).
+- ~emeld-filter-groups~ entries accept an optional ~t~/~nil~ default-active flag.
 ** Changed
-- ~emeld-filter-globs~ removed; all filtering now exclusively through ~emeld-filter-groups~.
-- ~emeld-show-hidden~ and hidden-files toggle removed; dotfiles now filtered via filter groups only.
-- Header line simplified: no legend swatches, scan mode shown as bold/shadow ~FAST~/~NORMAL~ toggles.
-- Navigation column (~n~/~p~) removed from transient; ~M-n~/~M-p~ kept in Actions.
-- Scan mode labels renamed from ~SIMPLE~/~FULL~ to ~FAST~/~NORMAL~.
+- Removed ~emeld-filter-globs~ and ~emeld-show-hidden~; all filtering is via ~emeld-filter-groups~.
 
 * [0.6.0] - 2026-05-20
 ** Added
-- Transient menu (~?~ key) with Toggles, Actions, Navigation, Indent, and Filter Groups columns in a single row.
-** Changed
-- Filter groups in transient via completion prompt with active-count header (avoids ~:setup-children~ compatibility issues).
-- ~emeld--apply-dir-locals~ reads ~.dir-locals.el~ directly via ~locate-dominating-file~.
-** Fixed
-- ~emeld--move-to-node-name~: ~let~→~let*~ for dependent bindings.
+- Transient menu (~?~) with toggle, action, navigation and filter-group columns.
 
 * [0.5.0] - 2026-05-20
 ** Added
-- Transient menu (~?~) with Toggles, Actions, Navigation, and Indent sections in a single row.
-- `emeld-dispatch` transient prefix with `:transient t` on navigation and toggle commands.
+- ~emeld-dispatch~ transient prefix, with ~:transient t~ on navigation/toggle commands.
 ** Changed
-- `emeld--apply-dir-locals` now reads `.dir-locals.el` directly using `locate-dominating-file`.
+- ~emeld--apply-dir-locals~ reads ~.dir-locals.el~ via ~locate-dominating-file~.
 
 * [0.4.0] - 2026-05-20
 ** Added
-- ~emeld-filter-groups~: named groups of globs toggleable with ~C-c f~. Active groups shown in brackets in the header line.
-- ~.dir-locals.el~ documentation for per-project filter configuration.
-** Changed
-- ~emeld--filtered-p~ now also checks active filter groups.
-- Header line shows active group names (e.g. ~[build] [logs]~).
-** Added
-- ~emeld-dir-face~ for directory names (font-lock-type-face + bold), distinct from file diff-status faces.
+- ~emeld-filter-groups~: named glob groups, active groups shown in the header line; ~.dir-locals.el~ support for per-project config.
+- ~emeld-dir-face~ for directory names.
 
 * [0.3.0] - 2026-05-20
-** Changed
-- ~emeld-action~ is now side-aware: ~RET~ on the right column opens the right-side path.
-- ~emeld-show-tree-lines~ now defaults to ~t~.
-- Header line shows ~[SIMPLE]~ or ~[FULL]~ scan mode indicator.
 ** Added
-- ~G~ to force a full content-based scan (ignores ~emeld-simple-comparison~).
-- ~emeld-dir-prefix~ (default ~"📁 "~) for a configurable directory icon; directory names rendered in bold.
-- ~emeld-refresh-full~ bound to ~G~.
-** Fixed
-- Bug in ~emeld--move-to-node-name~: used ~let~ instead of ~let*~ for dependent bindings, causing void-variable errors (~has-left~, ~has-right~).
+- ~emeld-dir-prefix~ (default ~"📁 "~) for a configurable directory icon.
+** Changed
+- ~emeld-action~ is side-aware (~RET~ on the right column opens the right path); ~emeld-show-tree-lines~ defaults to ~t~.
 
 * [0.2.1] - 2026-05-20
 ** Added
-- Root directories now rendered as collapsible tree nodes at the top (different names on left/right columns via new ~name-right~ slot).  ~RET~ on the root prompts to change the directory for the current side.
-- ~M-n~/~M-p~ for next/previous change navigation (file-only), ~emeld-next-change~ / ~emeld-previous-change~.
-- ~d~ to delete the file/directory at point from the current side, ~emeld-delete~.
+- Collapsible root nodes (per-side names); ~RET~ on the root changes that side's directory.
+- ~M-n~/~M-p~ next/previous change; ~d~ deletes the entry at point from the current side.
 
 * [0.2.0] - 2026-05-20
 ** Added
-- Initial implementation of `emeld.el` side-by-side comparison.
-- Content-based comparison using ~diff -q~ for high accuracy.
-- Performance option ~emeld-simple-comparison~ for size-only matching.
-- Recursive glob matching for filtering (matches filenames or relative paths).
-- Toggles for hidden and filtered files.
-- New visibility toggles for **Same** (~s~), **Modified** (~m~), and **Added/New** (~a~) files.
-- Directory folding and unfolding (~TAB~).
-- Added asynchronous directory scanning (~make-thread~) to prevent UI hangs.
-- Added contextual ~SPC~ behavior: Toggle expansion for directories or show Soft Diff for files.
-- Added ~emeld-indent-offset~ to customize tree indentation depth.
-- Added ~emeld-diff-dwim~ with robust directory detection and collision safety.
-- Added ~emeld-simple-comparison~ option for fast, size-only matching.
-- Added side-aware navigation (~n~/~p~) that remembers left/right column focus.
-- Added side-jumping navigation (~o~) to switch between columns.
-- Added ~w~ to copy filename at point (~C-u w~ for full path).
-- REALIGNMENT: Glob filter toggle moved to ~F~.
-- Standard file actions: ~RET~, ~e~, ~=~ for Ediff; ~f~, ~v~ for Find File.
-- Full theming support (inherits from standard Emacs ~diff-*~ faces).
-- Confirmation messages in the echo area for all UI toggles.
-- Compatibility fixes for older Emacs versions (27.1+).
+- Initial implementation: side-by-side comparison via ~diff -q~, recursive glob filtering, visibility toggles for Same/Modified/Added, directory folding (~TAB~), contextual ~SPC~, Ediff integration (~RET~/~e~/~=~), find-file (~f~/~v~), side-aware navigation (~n~/~p~/~o~), ~w~ to copy paths, and full ~diff-*~ face theming.  Requires Emacs 27.1+.

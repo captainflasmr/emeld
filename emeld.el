@@ -1387,7 +1387,7 @@ GROUP is the name of a group defined in `emeld-filter-groups'."
         (setq-local buffer-read-only t)
         (insert "#+TITLE: Emeld Filter Groups\n\n"
                 "* Overview\n"
-                "Filter groups are toggled from the transient menu (~ca~, ~cb~, ...) or with ~C-c f~.\n\n")
+                "Filter groups are toggled from the transient menu (~ca~, ~cb~, ...) or with ~M-x emeld-toggle-filter-group~.\n\n")
         (dolist (g emeld-filter-groups)
           (let ((name (car g))
                 (active (member (car g) active-groups))
@@ -1645,9 +1645,6 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "<")   #'emeld-decrease-indent)
     (define-key map (kbd "}")   #'emeld-grow-column)
     (define-key map (kbd "{")   #'emeld-shrink-column)
-    (define-key map (kbd "C-c f") #'emeld-toggle-filter-group)
-    (define-key map (kbd "C-c s") #'emeld-save-preset)
-    (define-key map (kbd "C-c l") #'emeld-load-preset)
     map)
   "Keymap for `emeld-mode'.")
 
