@@ -2374,7 +2374,7 @@ If on a file, show a quick diff of the current node."
         (let ((left (emeld-node-left-path node))
               (right (emeld-node-right-path node)))
           (if (and left right (not (file-directory-p left)) (not (file-directory-p right)))
-              (diff left right)
+              (diff right left)
             (message "Soft diff only works for comparing two files")))))))
 
 (defun emeld-mark ()
