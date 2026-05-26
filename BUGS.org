@@ -9,6 +9,8 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
+** DOING sub directory refresh
+
 ** TODO when same toggled on then OFF, the top level directories exist
 
 ** TODO refined transient
@@ -16,8 +18,6 @@ This document contains the current bugs/improvements, this is just for me mainly
 ** TODO better responsiveness duing tree build
 
 ** TODO add directory tree display for dired?
-
-** TODO sub directory refresh
 
 ** TODO turn to sidebar as treemacs
 
