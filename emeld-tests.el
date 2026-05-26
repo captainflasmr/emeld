@@ -270,6 +270,39 @@ must reuse them rather than create siblings with the same name."
     (emeld-delete-preset "p1")
     (should (null emeld-presets))))
 
+(ert-deftest emeld-mark-by-status ()
+  "Marking by status targets the right leaves for modified / left-only / sync."
+  (let* ((root (emeld-node-create :name "root" :is-dir t))
+         (dirA (emeld-node-create :name "dirA" :is-dir t :parent root
+                                  :diff-status 'different))
+         (f1 (emeld-node-create :name "f1" :parent dirA :diff-status 'different))
+         (f2 (emeld-node-create :name "f2" :parent dirA :diff-status 'same))
+         (f3 (emeld-node-create :name "f3" :parent root :diff-status 'left-only))
+         (f4 (emeld-node-create :name "f4" :parent root :diff-status 'different))
+         (f5 (emeld-node-create :name "f5" :parent root :diff-status 'right-only))
+         (emeld--root-node root))
+    (setf (emeld-node-children dirA) (list f1 f2))
+    (setf (emeld-node-children root) (list dirA f3 f4 f5))
+    ;; modified only
+    (let ((emeld--marked-paths (make-hash-table :test #'equal)))
+      (should (= 2 (emeld--mark-nodes-by-status '(different))))
+      (should (gethash "dirA/f1" emeld--marked-paths))
+      (should (gethash "f4" emeld--marked-paths))
+      (should-not (gethash "dirA/f2" emeld--marked-paths))
+      (should-not (gethash "f3" emeld--marked-paths))
+      (should-not (gethash "dirA" emeld--marked-paths)))
+    ;; left-only only
+    (let ((emeld--marked-paths (make-hash-table :test #'equal)))
+      (should (= 1 (emeld--mark-nodes-by-status '(left-only))))
+      (should (gethash "f3" emeld--marked-paths)))
+    ;; sync set (to copy left→right): modified + left-only, never right-only
+    (let ((emeld--marked-paths (make-hash-table :test #'equal)))
+      (should (= 3 (emeld--mark-nodes-by-status '(different left-only))))
+      (should (gethash "dirA/f1" emeld--marked-paths))
+      (should (gethash "f4" emeld--marked-paths))
+      (should (gethash "f3" emeld--marked-paths))
+      (should-not (gethash "f5" emeld--marked-paths)))))
+
 (ert-deftest emeld-preset-savehist-registered ()
   "Loading savehist registers `emeld-presets' for cross-session persistence."
   (require 'savehist)

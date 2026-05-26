@@ -1,16 +1,22 @@
 #+TITLE: Changelog for Emeld
 
-* [0.16.0] - 2026-05-25
+* [0.17.0] - 2026-05-26
 ** Added
 - Presets: ~emeld-save-preset~ / ~emeld-load-preset~ / ~emeld-delete-preset~ (transient ~ps~/~pl~/~pd~) save and recall a directory pair via completion.  Stored in ~emeld-presets~ and persisted across sessions through ~savehist~.
+- Benchmark log: ~emeld-benchmark-record~ appends timing runs — stamped with machine specs and the emeld git revision — to an Org log (~emeld-benchmark-file~, default ~BENCHMARKS.org~); ~emeld-benchmark-system-info~ inserts the specs at point; ~test/bench.sh~ feeds the same log (~EMELD_BENCH_RECORD~/~SAME~/~FILE~ env vars).
+- ~emeld-redraw~ (~r~): re-render the current tree without rescanning — recomputes column width from the window, e.g. after a resize.
+- Bulk-mark by status for the marked-copy workflow: ~emeld-mark-modified~ (~* m~), ~emeld-mark-left-only~ (~* l~, created-on-left files), and ~emeld-mark-to-copy~ (~* c~) which marks the whole left→right sync set (modified + left-only) so ~C~ copies everything needed to make the right match the left.  New transient ~Mark~ column (also surfacing ~m~/~u~/~U~).
+** Removed
+- Default ~C-c~ keybindings (~C-c f~, ~C-c s~, ~C-c l~) — use the transient or bind them yourself.
+
+* [0.16.0] - 2026-05-25
+** Added
 - Per-stage benchmark report for the identical-files (~S~) merge, separate from the initial scan.
-- ~emeld-benchmark-record~ appends timing runs — stamped with machine specs and the emeld git revision — to an Org log (~emeld-benchmark-file~, default ~BENCHMARKS.org~); ~emeld-benchmark-system-info~ inserts the specs at point.  ~test/bench.sh~ feeds the same log (~EMELD_BENCH_RECORD~/~SAME~/~FILE~ env vars).
 - Identical-files scan shows a live entry count while scanning, like the initial scan.
 ** Changed
 - Header-line scan counters update continuously during a scan, not only on point movement.
 - Benchmark report writes ~cumulative~ instead of ~cum~.
 ** Removed
-- Default ~C-c~ keybindings (~C-c f~, ~C-c s~, ~C-c l~) — use the transient or bind them yourself.
 - The "Finished loading identical files." message (the ~[Ready]~ header state suffices).
 
 * [0.15.0] - 2026-05-25

@@ -11,7 +11,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - ~.gitignore~ support, on by default — ignored files hidden on both sides, toggle with ~G~.
 - Instant toggles for New, Modified, and Identical files (~S~/~M~/~N~).
 - Orphan files shown with strikethrough on the missing side (Meld-style, toggle ~s~).
-- Dired-style marking (~m~/~u~/~U~) with bulk copy (~C~).
+- Dired-style marking (~m~/~u~/~U~) with bulk copy (~C~); bulk-mark by status (~* m~ modified, ~* l~ left-only, ~* c~ the left→right sync set).
 - Filter groups toggleable from the transient menu.
 - Org-mode-style visibility cycling: ~S-TAB~ cycles the whole tree (TOP → DIRS → CHANGES), ~TAB~ does the equivalent for the subtree at point.
 - Bulk expand/collapse: ~[~ collapse all, ~]~ expand all, ~\\~ expand only paths leading to changes.
@@ -35,12 +35,13 @@ Alternatively, run ~M-x emeld-diff-dwim~ to automatically use open Dired buffers
 
 * Transient Menu (~?~)
 
-The transient menu is organized into four groups:
+The transient menu is organized into groups:
 
 - ~File Status~ :: Toggle file visibility (~S~ same, ~M~ modified, ~N~ added).
 - ~View~ :: Toggle tree-lines (~T~), strikethrough (~s~), ~.gitignore~ respect (~G~), bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~\\~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), pane resize (~{~/~}~).
-- ~Navigate~ :: Rescan (~g~) and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
+- ~Navigate~ :: Rescan (~g~), redraw after a resize (~r~), and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
 - ~File~ :: Operate on files (~RET~ ediff/open, ~SPC~ soft diff/fold, ~C~ copy, ~d~ delete, ~w~ copy path, ~P~ format patch).
+- ~Mark~ :: Mark/unmark at point (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), or the whole left→right sync set (~* c~); ~U~ unmark all.
 - ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~cl~ list all globs.
 - ~Preset~ :: Save the current directory pair (~ps~), load a saved pair (~pl~), delete one (~pd~).
 
@@ -67,10 +68,14 @@ The transient menu is organized into four groups:
 | m         | Mark node                                         |
 | u         | Unmark node                                       |
 | U         | Unmark all nodes                                  |
+| * m       | Mark all modified files                           |
+| * l       | Mark all left-only (created) files                |
+| * c       | Mark all to copy left→right (modified + left-only)|
 | s         | Toggle strikethrough display                      |
 | T         | Toggle tree-line display                          |
 | G         | Toggle ~.gitignore~ respect (rescans)             |
 | g         | Rescan (~diff -rq~)                              |
+| r         | Redraw current tree (e.g. after window resize)    |
 | n/p       | Navigation (Side-aware)                           |
 | M-n/M-p   | Jump to next/previous file change                 |
 | { / }     | Shrink/grow left pane width                       |

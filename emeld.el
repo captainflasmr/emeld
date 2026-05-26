@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.16.0
+;; Version: 0.17.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -1622,6 +1622,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "f")   #'emeld-find-file)
     (define-key map (kbd "v")   #'emeld-find-file)
     (define-key map (kbd "g")   #'emeld-refresh)
+    (define-key map (kbd "r")   #'emeld-redraw)
     (define-key map (kbd "n")   #'emeld-next-line)
     (define-key map (kbd "p")   #'emeld-previous-line)
     (define-key map (kbd "M-n") #'emeld-next-change)
@@ -1635,6 +1636,9 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "m")   #'emeld-mark)
     (define-key map (kbd "u")   #'emeld-unmark)
     (define-key map (kbd "U")   #'emeld-unmark-all)
+    (define-key map (kbd "* m") #'emeld-mark-modified)
+    (define-key map (kbd "* l") #'emeld-mark-left-only)
+    (define-key map (kbd "* c") #'emeld-mark-to-copy)
     (define-key map (kbd "S")   #'emeld-toggle-show-same)
     (define-key map (kbd "M")   #'emeld-toggle-show-different)
     (define-key map (kbd "N")   #'emeld-toggle-show-added)
@@ -1997,6 +2001,16 @@ Repeated invocations cycle TOP → DIRS → CHANGES → TOP."
         emeld--scan-diff-lines nil
         emeld--scan-buf nil))
 
+(defun emeld-redraw ()
+  "Re-render the current tree without rescanning.
+Recomputes the column width from the current window width and redraws,
+preserving point and expansion state.  Use this after resizing the
+window or frame; for a fresh comparison use `emeld-refresh' (\\[emeld-refresh])."
+  (interactive)
+  (unless emeld--root-node
+    (user-error "No comparison loaded"))
+  (emeld--render))
+
 (defun emeld-refresh ()
   "Refresh the comparison asynchronously.
 Uses `make-process' to run `diff -rq' as an OS-level async process,
@@ -2189,6 +2203,48 @@ If on a file, show a quick diff of the current node."
   (clrhash emeld--marked-paths)
   (emeld--render)
   (message "Marks cleared"))
+
+(defun emeld--mark-nodes-by-status (statuses)
+  "Mark every file node whose `diff-status' is in STATUSES.
+Adds to any existing marks and returns the number newly marked."
+  (let ((count 0))
+    (cl-labels ((walk (nodes)
+                  (dolist (node nodes)
+                    (if (emeld-node-is-dir node)
+                        (walk (emeld-node-children node))
+                      (when (memq (emeld-node-diff-status node) statuses)
+                        (puthash (emeld--node-relpath node) t emeld--marked-paths)
+                        (cl-incf count))))))
+      (when emeld--root-node
+        (walk (emeld-node-children emeld--root-node))))
+    count))
+
+(defun emeld--mark-and-report (statuses what)
+  "Mark file nodes whose status is in STATUSES; report as WHAT.  Re-renders."
+  (unless emeld--root-node
+    (user-error "No comparison loaded"))
+  (let ((n (emeld--mark-nodes-by-status statuses)))
+    (emeld--render)
+    (message "Marked %d %s%s" n what (if (= n 1) "" "s"))))
+
+(defun emeld-mark-modified ()
+  "Mark all modified (differing) files, Dired-style.
+Adds to any existing marks; the marked set can then be acted on, e.g.
+copied with `emeld-copy'."
+  (interactive)
+  (emeld--mark-and-report '(different) "modified file"))
+
+(defun emeld-mark-left-only ()
+  "Mark all files that exist only on the left (i.e. created on the left)."
+  (interactive)
+  (emeld--mark-and-report '(left-only) "left-only file"))
+
+(defun emeld-mark-to-copy ()
+  "Mark everything to copy left→right for syncing: modified + left-only files.
+With these marked, `emeld-copy' (\\[emeld-copy]) copies each to the right,
+making the right directory match the left for those files."
+  (interactive)
+  (emeld--mark-and-report '(different left-only) "file to copy"))
 
 (defun emeld-copy-path-at-point (arg)
   "Copy the filename at point to the kill ring.
@@ -2657,6 +2713,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
     ("{" "pane narrow"  emeld-shrink-column :transient t)]
    ["Navigate"
     ("g"   "rescan"             emeld-refresh)
+    ("r"   "redraw (resize)"    emeld-redraw)
     ("o"   "jump other side"    emeld-jump-other-side :transient t)
     ("M-n" "next change"        emeld-next-change :transient t)
     ("M-p" "previous change"    emeld-previous-change :transient t)]
@@ -2667,6 +2724,13 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
     ("d"   "delete from side"   emeld-delete)
     ("w"   "copy path"          emeld-copy-path-at-point)
     ("P"   "format as patch"    emeld-format-patch)]
+   ["Mark"
+    ("m"   "mark"            emeld-mark :transient t)
+    ("u"   "unmark"          emeld-unmark :transient t)
+    ("* m" "modified"        emeld-mark-modified :transient t)
+    ("* l" "left-only (new)" emeld-mark-left-only :transient t)
+    ("* c" "→ copy right"    emeld-mark-to-copy :transient t)
+    ("U"   "unmark all"      emeld-unmark-all :transient t)]
    ["Preset"
     ("ps" "save current" emeld-save-preset)
     ("pl" "load…"        emeld-load-preset)
