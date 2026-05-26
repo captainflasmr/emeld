@@ -49,3 +49,49 @@ Large-repo comparison timings, recorded to catch performance regressions across 
 | same rendered  |   1720 |        120474 |
 | *total*        | 120474 |               |
 
+* [2026-05-26 Tue 07:52] — emeld 0.17.0 (983eb46+dirty)
+** System
+- Host :: james-730qed
+- OS :: Linux 7.0.9-zen1-1-zen x86_64
+- CPU :: 12th Gen Intel(R) Core(TM) i5-1235U (12 threads)
+- Memory :: 7.4 GiB
+- Emacs :: 30.2
+- Emeld :: 0.17.0
+- Emeld rev :: 983eb46+dirty
+** Runs
+*** initial (diff -rq) :: ~/source/FedProClient-main_008d/ vs ~/source/FedProClient-main_003/ — 10 entries
+| stage      |  ms | cumulative ms |
+|------------+-----+---------------|
+| diff done  | 444 |           444 |
+| parse done |   2 |           446 |
+| tree built |  24 |           470 |
+| *total*    | 470 |               |
+
+*** identical-files (S) :: ~/source/FedProClient-main_008d/ vs ~/source/FedProClient-main_003/ — 9204 entries
+| stage          |   ms | cumulative ms |
+|----------------+------+---------------|
+| same list done |  108 |           108 |
+| same seeded    |    0 |           108 |
+| same merged    | 2549 |          2658 |
+| same sorted    |   69 |          2727 |
+| same rendered  |    4 |          2731 |
+| *total*        | 2731 |               |
+
+*** initial (diff -rq) :: ~/source/repos/linux-v7.0-rc5/ vs ~/source/repos/linux-v7.0-rc1/ — 2048 entries
+| stage      |    ms | cumulative ms |
+|------------+-------+---------------|
+| diff done  |  9930 |          9930 |
+| parse done |    29 |          9958 |
+| tree built |  1287 |         11246 |
+| *total*    | 11246 |               |
+
+*** identical-files (S) :: ~/source/repos/linux-v7.0-rc5/ vs ~/source/repos/linux-v7.0-rc1/ — 92956 entries
+| stage          |    ms | cumulative ms |
+|----------------+-------+---------------|
+| same list done |   613 |           613 |
+| same seeded    |     2 |           615 |
+| same merged    | 39998 |         40614 |
+| same sorted    |   502 |         41116 |
+| same rendered  |   697 |         41813 |
+| *total*        | 41813 |               |
+

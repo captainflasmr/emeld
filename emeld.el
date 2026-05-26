@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.17.0
+;; Version: 0.18.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -215,6 +215,13 @@ With `emeld--scan-processed' this drives the header-line progress bar.")
   "Hash table of relative paths for marked nodes (Dired-style marking).")
 (defvar-local emeld--last-render-time nil
   "Float-time of the last `emeld--render' call, for render throttling.")
+(defvar-local emeld--same-skip-files nil
+  "Hash set of relpaths already in the tree, for the `list' same-file merge.
+Files here (differing, left-only, or already merged) are not re-added.")
+(defvar-local emeld--same-left-only-dirs nil
+  "Hash set of left-only directory relpaths, for the `list' same-file merge.
+Any enumerated left file under one of these is part of a left-only subtree,
+not an identical file, so it is skipped.")
 (defvar-local emeld--gitignore-cache nil
   "Memoized git-ignored path sets, keyed by absolute root directory.
 Each value is a hash set of ignored relative paths (directories stored
@@ -587,6 +594,30 @@ always rendered once the scan completes regardless of this value."
   :type 'number
   :group 'emeld)
 
+(defcustom emeld-same-files-method 'list
+  "How the show-same (S) merge finds identical files.
+
+`list' (default, fast): list the left side's files and treat as identical
+every file that the initial scan did not already report as differing or
+left-only.  This reuses the initial `diff -rq' content comparison instead
+of repeating it, so it is dramatically faster on large trees.
+
+`diff' (exact): re-run `diff -rqs', which re-reads and compares the
+content of every file.  Slower, but does not rely on enumerating the file
+list — use it if the `list' result ever looks wrong."
+  :type '(choice (const :tag "List left files and subtract (fast)" list)
+                 (const :tag "Re-run diff -rqs (exact, slow)" diff))
+  :group 'emeld)
+
+(defcustom emeld-list-command '("find" "." "-type" "f")
+  "Command (program then args) that lists files for `emeld-same-files-method'.
+Run with `default-directory' bound to the directory being listed; it must
+print one path per line relative to that directory (a leading \"./\" is
+stripped).  Defaults to `find', which is universal; set it to e.g.
+\\='(\"fd\" \"--type\" \"f\" \"--hidden\" \"--no-ignore\") to use fd."
+  :type '(repeat string)
+  :group 'emeld)
+
 (defun emeld--build-tree-from-diff (buf)
   "Build tree from `diff -rq' output asynchronously using chunked iterations."
   (when (buffer-live-p buf)
@@ -644,17 +675,20 @@ always rendered once the scan completes regardless of this value."
                                     (if (cl-some (lambda (c) (not (eq (emeld-node-diff-status c) 'same)))
                                                  (emeld-node-children root))
                                         'different 'same))
-                              (setq emeld--status-phase 'done)
                               (setq emeld--scan-process nil
                                     emeld--scan-buf nil)
-                              (when emeld-show-same
-                                (setq emeld--cached-full-lines t))
                               (emeld--restore-expanded root)
                               (emeld--render)
-                              (emeld--update-header-line)
                               (emeld--bench-push "tree built")
                               (emeld--bench-report)
-                              (setq gc-cons-threshold old-gc)))))))))))
+                              (setq gc-cons-threshold old-gc)
+                              (if emeld-show-same
+                                  ;; Differences are placed; merge identical
+                                  ;; files via the fast path rather than having
+                                  ;; assembled them all from diff -rqs.
+                                  (emeld--scan-same-async buf)
+                                (setq emeld--status-phase 'done)
+                                (emeld--update-header-line))))))))))))
           (run-with-timer 0.001 nil #'process-lines-chunk))))))
 
 (defun emeld--entries-to-nodes-progressive (entries prefix parent buf initial-render-cb final-cb &optional gen)
@@ -925,8 +959,12 @@ Uses a process filter to stream-parse output incrementally."
   (emeld--prewarm-gitignore emeld--left-root buf)
   (emeld--prewarm-gitignore emeld--right-root buf)
   (let* ((excludes (emeld--diff-exclude-args))
-         (flags (if emeld-show-same "-rqs" "-rq"))
-         (command `("diff" ,flags
+         ;; Always scan differences only.  Identical files (when
+         ;; `emeld-show-same' is on) are merged afterwards by
+         ;; `emeld--scan-same-async', which is far cheaper than having
+         ;; `diff -rqs' report — and `emeld--entries-to-nodes-progressive'
+         ;; assemble — every identical file up front.
+         (command `("diff" "-rq"
                     ,@excludes
                     ,(expand-file-name emeld--left-root)
                     ,(expand-file-name emeld--right-root)))
@@ -1121,6 +1159,145 @@ new and no per-parent scan is needed."
             (emeld--bench-report)
             (setq gc-cons-threshold old-gc)))))))
 
+(defun emeld--ancestor-in-set-p (rel set)
+  "Non-nil if REL or any of its ancestor directories is a key in SET.
+The walk stops at the filesystem-root fixpoint, so it always terminates."
+  (let ((path (directory-file-name rel)))
+    (catch 'hit
+      (while path
+        (when (gethash path set) (throw 'hit t))
+        (let* ((dir (file-name-directory path))
+               (next (and dir (directory-file-name dir))))
+          (setq path (and next (not (string= next path)) next))))
+      nil)))
+
+(defun emeld--collect-same-exclusions (node prefix skip-files left-only-dirs)
+  "Walk NODE (whose relpath is PREFIX) collecting same-merge exclusions.
+SKIP-FILES gets every existing file node's relpath; LEFT-ONLY-DIRS gets
+each left-only directory's relpath (its whole subtree is then excluded)."
+  (dolist (child (emeld-node-children node))
+    (let ((rel (if (string-empty-p prefix)
+                   (emeld-node-name child)
+                 (concat prefix "/" (emeld-node-name child)))))
+      (if (emeld-node-is-dir child)
+          (if (eq (emeld-node-diff-status child) 'left-only)
+              (puthash rel t left-only-dirs)
+            (emeld--collect-same-exclusions child rel skip-files left-only-dirs))
+        (puthash rel t skip-files)))))
+
+(defun emeld--process-same-files-worker (buf paths root left right old-gc path-hash)
+  "Chunked merge of enumerated left-side PATHS (relpaths) as identical files.
+A path is added as a `same' node unless it is already known
+\(`emeld--same-skip-files': differing/left-only/already-merged) or lies
+under a left-only directory (`emeld--same-left-only-dirs').
+`emeld--add-same-entry-to-tree' additionally honors the active filters."
+  (if (not (buffer-live-p buf))
+      (setq gc-cons-threshold old-gc)
+    (with-current-buffer buf
+      (if (input-pending-p)
+          (run-with-timer 0.001 nil #'emeld--process-same-files-worker
+                          buf paths root left right old-gc path-hash)
+        (let ((chunk-count 0))
+          (while (and paths (< chunk-count emeld-batch-size))
+            (let ((rel (car paths)))
+              (unless (or (gethash rel emeld--same-skip-files)
+                          (emeld--ancestor-in-set-p rel emeld--same-left-only-dirs))
+                (emeld--add-same-entry-to-tree root rel path-hash left right)))
+            (setq paths (cdr paths))
+            (setq chunk-count (1+ chunk-count)))
+          (setq emeld--scan-processed (- emeld--scan-total (length paths)))
+          (force-mode-line-update)
+          (if paths
+              (progn
+                (let ((now (float-time)))
+                  (when (or (null emeld--last-render-time)
+                            (> (- now emeld--last-render-time) emeld-render-throttle))
+                    (setq emeld--last-render-time now)
+                    (emeld--render)))
+                (run-with-timer 0.001 nil #'emeld--process-same-files-worker
+                                buf paths root left right old-gc path-hash))
+            (emeld--bench-push "same merged")
+            (emeld--sort-tree-recursive root)
+            (emeld--bench-push "same sorted")
+            (clrhash path-hash)
+            (setq emeld--status-phase 'done
+                  emeld--scan-process nil
+                  emeld--scan-buf nil
+                  emeld--cached-full-lines t
+                  emeld--same-skip-files nil
+                  emeld--same-left-only-dirs nil)
+            (emeld--render)
+            (emeld--update-header-line)
+            (emeld--bench-push "same rendered")
+            (emeld--bench-report)
+            (setq gc-cons-threshold old-gc)))))))
+
+(defun emeld--scan-same-list (buf)
+  "Find identical files by listing the left tree and subtracting known paths.
+See `emeld-same-files-method'.  Runs `emeld-list-command' asynchronously on
+the left root, then merges the leftover (identical) files into the tree."
+  (with-current-buffer buf
+    (let ((skip (make-hash-table :test 'equal))
+          (lod (make-hash-table :test 'equal)))
+      (emeld--collect-same-exclusions emeld--root-node "" skip lod)
+      (setq emeld--same-skip-files skip
+            emeld--same-left-only-dirs lod))
+    (let* ((left emeld--left-root)
+           (right emeld--right-root)
+           (root emeld--root-node)
+           (accum nil) (accum-tail nil) (partial nil)
+           (default-directory (file-name-as-directory (expand-file-name left)))
+           (proc (make-process
+                  :name "emeld-list-same"
+                  :buffer (generate-new-buffer " *emeld-list-same*")
+                  :command emeld-list-command
+                  :connection-type 'pipe
+                  :noquery t)))
+      (set-process-filter
+       proc
+       (lambda (_p output)
+         (when (buffer-live-p buf)
+           (let* ((combined (if partial (concat partial output) output))
+                  (lines (split-string combined "\n")))
+             (if (string-suffix-p "\n" combined)
+                 (setq partial nil)
+               (setq partial (car (last lines))
+                     lines (butlast lines)))
+             (let ((rels (delq nil
+                               (mapcar (lambda (l)
+                                         (cond ((string-empty-p l) nil)
+                                               ((string-prefix-p "./" l) (substring l 2))
+                                               (t l)))
+                                       lines))))
+               (when rels
+                 (with-current-buffer buf
+                   (cl-incf emeld--scan-diff-count (length rels))
+                   (force-mode-line-update))
+                 (if accum-tail (setcdr accum-tail rels) (setq accum rels))
+                 (setq accum-tail (last rels))))))))
+      (set-process-sentinel
+       proc
+       (lambda (p event)
+         (when (emeld--sentinel-done-p event)
+           (when (buffer-live-p buf)
+             (with-current-buffer buf
+               (let ((pbuf (process-buffer p)))
+                 (when (buffer-live-p pbuf) (kill-buffer pbuf)))
+               (emeld--bench-push "same list done")
+               (let ((old-gc gc-cons-threshold)
+                     (path-hash (make-hash-table :test 'equal)))
+                 (emeld--seed-dir-path-hash root "" path-hash)
+                 (emeld--bench-push "same seeded")
+                 (setq gc-cons-threshold (* 128 1024 1024))
+                 (setq emeld--status-phase 'building-tree
+                       emeld--scan-total (length accum)
+                       emeld--scan-processed 0
+                       emeld--last-render-time nil)
+                 (emeld--update-header-line)
+                 (run-with-timer 0.001 nil #'emeld--process-same-files-worker
+                                 buf accum root left right old-gc path-hash)))))))
+      (setq emeld--scan-process proc))))
+
 (defun emeld--scan-same-async (buf)
   (with-current-buffer buf
     (emeld--stop-scan)
@@ -1138,6 +1315,13 @@ new and no per-parent scan is needed."
     (emeld--prewarm-gitignore emeld--left-root buf)
     (emeld--prewarm-gitignore emeld--right-root buf)
     (emeld--update-header-line)
+    (if (eq emeld-same-files-method 'list)
+        (emeld--scan-same-list buf)
+      (emeld--scan-same-diff buf))))
+
+(defun emeld--scan-same-diff (buf)
+  "Find identical files by re-running `diff -rqs' (see `emeld-same-files-method')."
+  (with-current-buffer buf
     (let* ((excludes (emeld--diff-exclude-args))
            (left emeld--left-root)
            (right emeld--right-root)

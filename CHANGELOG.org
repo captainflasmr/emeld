@@ -1,5 +1,12 @@
 #+TITLE: Changelog for Emeld
 
+* [0.18.0] - 2026-05-26
+** Changed
+- Showing identical files (~S~) is far faster on large trees.  Instead of re-running ~diff -rqs~ (which re-reads and compares every file's content), it now lists the left tree (~emeld-list-command~, ~find~ by default) and treats as identical every left file the initial ~diff -rq~ did not already report as differing or left-only — reusing that content comparison rather than repeating it.  ~emeld-same-files-method~ selects ~list~ (default, fast) or ~diff~ (exact, the old behavior).
+- The scan now always runs ~diff -rq~; when ~emeld-show-same~ is on, identical files are merged afterwards by the method above instead of via ~diff -rqs~ up front.
+** Fixed
+- Rescanning (or first scanning) with ~emeld-show-same~ on no longer appears to hang on large trees.  Identical files were assembled through ~emeld--entries-to-nodes-progressive~, which is roughly O(n²) for tens of thousands of entries (≈58 s for a 20k-file tree); they now use the O(1)-per-file merge instead (≈6 s for the same tree).
+
 * [0.17.0] - 2026-05-26
 ** Added
 - Presets: ~emeld-save-preset~ / ~emeld-load-preset~ / ~emeld-delete-preset~ (transient ~ps~/~pl~/~pd~) save and recall a directory pair via completion.  Stored in ~emeld-presets~ and persisted across sessions through ~savehist~.

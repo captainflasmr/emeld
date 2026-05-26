@@ -303,6 +303,41 @@ must reuse them rather than create siblings with the same name."
       (should (gethash "f3" emeld--marked-paths))
       (should-not (gethash "f5" emeld--marked-paths)))))
 
+(ert-deftest emeld-same-list-exclusions ()
+  "The `list' same-merge keeps only genuinely-identical left files.
+Existing file nodes and files under a left-only directory are excluded;
+a new path that is neither is treated as identical."
+  (let* ((root (emeld-node-create :name "root" :is-dir t))
+         (src (emeld-node-create :name "src" :is-dir t :parent root
+                                 :diff-status 'different))
+         (d1 (emeld-node-create :name "d1.c" :parent src :diff-status 'different))
+         (lo1 (emeld-node-create :name "new.c" :parent src :diff-status 'left-only))
+         (lodir (emeld-node-create :name "newdir" :is-dir t :parent root
+                                   :diff-status 'left-only))
+         (skip (make-hash-table :test #'equal))
+         (lod (make-hash-table :test #'equal)))
+    (setf (emeld-node-children src) (list d1 lo1))
+    (setf (emeld-node-children root) (list src lodir))
+    (emeld--collect-same-exclusions root "" skip lod)
+    (should (gethash "src/d1.c" skip))
+    (should (gethash "src/new.c" skip))
+    (should (gethash "newdir" lod))
+    (should-not (gethash "src" skip))      ; non-left-only dir, recursed not skipped
+    ;; a file under the left-only dir is excluded via ancestor walk
+    (should (emeld--ancestor-in-set-p "newdir/deep/x.c" lod))
+    (should-not (emeld--ancestor-in-set-p "src/fresh.c" lod))
+    ;; the identical candidate is the one neither skipped nor under a left-only dir
+    (should-not (gethash "src/fresh.c" skip))))
+
+(ert-deftest emeld-ancestor-in-set-terminates ()
+  "`emeld--ancestor-in-set-p' terminates on absolute / root paths."
+  (let ((set (make-hash-table :test #'equal)))
+    (puthash "a/b" t set)
+    (with-timeout (5 (ert-fail "ancestor walk did not terminate"))
+      (should (emeld--ancestor-in-set-p "a/b/c/d" set))
+      (should-not (emeld--ancestor-in-set-p "/abs/x" set))
+      (should-not (emeld--ancestor-in-set-p "/" set)))))
+
 (ert-deftest emeld-preset-savehist-registered ()
   "Loading savehist registers `emeld-presets' for cross-session persistence."
   (require 'savehist)
