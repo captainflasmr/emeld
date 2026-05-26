@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.22.0
+;; Version: 0.23.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -1814,6 +1814,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "f")   #'emeld-find-file)
     (define-key map (kbd "v")   #'emeld-find-file)
     (define-key map (kbd "g")   #'emeld-refresh)
+    (define-key map (kbd "R")   #'emeld-refresh-subdir)
     (define-key map (kbd "r")   #'emeld-redraw)
     (define-key map (kbd "W")   #'emeld-swap-panes)
     (define-key map (kbd "n")   #'emeld-next-line)
@@ -2242,6 +2243,83 @@ so Emacs stays fully responsive during the scan."
     (emeld--update-header-line)
     (emeld--render)
     (emeld--start-diff buf)))
+
+(defun emeld--diff-subdir-entries (left-sub right-sub)
+  "Diff LEFT-SUB against RIGHT-SUB, returning subdir-relative entries.
+Each entry is (REL-PATH . STATUS) with REL-PATH relative to the
+subdirectory.  Honors the active filter groups and `.gitignore' via the
+same `--exclude' args as a full scan.  Runs `diff -rqs' when
+`emeld-show-same' is on so identical files are included, else `diff -rq'.
+Synchronous: the diff is scoped to one subtree, so it is bounded."
+  (let ((args (append (list (if emeld-show-same "-rqs" "-rq"))
+                      (emeld--diff-exclude-args)
+                      (list (expand-file-name left-sub)
+                            (expand-file-name right-sub))))
+        (entries nil))
+    (with-temp-buffer
+      (apply #'call-process "diff" nil t nil args)
+      (goto-char (point-min))
+      (while (not (eobp))
+        (let ((parsed (emeld--parse-diff-line
+                       (buffer-substring-no-properties (line-beginning-position)
+                                                       (line-end-position))
+                       left-sub right-sub)))
+          (when parsed (push parsed entries)))
+        (forward-line 1)))
+    (nreverse entries)))
+
+(defun emeld-refresh-subdir ()
+  "Rescan only the directory at point, merging the result into the tree.
+Useful when you know a single subdirectory changed on disk and want to avoid
+a full rescan (\\[emeld-refresh]); the rest of the tree is left untouched.
+If point is on a file, its containing directory is rescanned."
+  (interactive)
+  (unless emeld--root-node (user-error "No comparison loaded"))
+  (let* ((node0 (get-text-property (point) 'emeld-node))
+         (node (cond ((null node0) (user-error "No node at point"))
+                     ((emeld-node-is-dir node0) node0)
+                     (t (emeld-node-parent node0)))))
+    (when (or (null node) (eq node emeld--root-node))
+      (user-error "Use `g' (emeld-refresh) to rescan the whole comparison"))
+    (let* ((rel (emeld--node-relpath node))
+           (left-sub (concat (file-name-as-directory emeld--left-root) rel))
+           (right-sub (concat (file-name-as-directory emeld--right-root) rel))
+           (left-exists (file-directory-p left-sub))
+           (right-exists (file-directory-p right-sub)))
+      (cond
+       ;; Gone on both sides — drop the node from its parent.
+       ((not (or left-exists right-exists))
+        (let ((parent (emeld-node-parent node)))
+          (setf (emeld-node-children parent) (delq node (emeld-node-children parent))))
+        (emeld--render)
+        (message "%s no longer exists on either side; removed" rel))
+       ;; Present on both sides — re-diff and rebuild the subtree.
+       ((and left-exists right-exists)
+        (let ((entries (emeld--diff-subdir-entries left-sub right-sub))
+              (saved (emeld--collect-expanded node)))
+          (setf (emeld-node-left-path node) left-sub
+                (emeld-node-right-path node) right-sub
+                (emeld-node-children node) (emeld--entries-to-nodes entries rel node))
+          (setf (emeld-node-diff-status node)
+                (if (cl-some (lambda (c) (not (eq (emeld-node-diff-status c) 'same)))
+                             (emeld-node-children node))
+                    'different 'same))
+          (let ((emeld--saved-expanded saved)) (emeld--restore-expanded node))
+          (emeld--render)
+          (message "Rescanned %s — %d change%s" rel
+                   (cl-count-if (lambda (e) (not (eq (cdr e) 'same))) entries)
+                   (if (= 1 (cl-count-if (lambda (e) (not (eq (cdr e) 'same))) entries))
+                       "" "s"))))
+       ;; Single-sided now — re-enumerate the side that exists.
+       (t
+        (setf (emeld-node-diff-status node) (if left-exists 'left-only 'right-only)
+              (emeld-node-left-path node) (and left-exists left-sub)
+              (emeld-node-right-path node) (and right-exists right-sub)
+              (emeld-node-children node) nil)
+        (emeld--maybe-populate-lazy-dir node)
+        (emeld--render)
+        (message "Rescanned %s — only on the %s side" rel
+                 (if left-exists "left" "right")))))))
 
 (defun emeld--collect-expanded (node)
   "Return a list of relative paths for expanded directories under NODE."
@@ -3053,6 +3131,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
     ("{" "pane narrow"  emeld-shrink-column :transient t)]
    ["Navigate"
     ("g"   "rescan"             emeld-refresh)
+    ("R"   "rescan dir at point" emeld-refresh-subdir)
     ("r"   "redraw (resize)"    emeld-redraw)
     ("W"   "swap panes"         emeld-swap-panes)
     ("o"   "jump other side"    emeld-jump-other-side :transient t)

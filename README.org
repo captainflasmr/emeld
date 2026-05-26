@@ -19,6 +19,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Export changes as a unified-diff patch (~P~).
 - Presets: save a directory pair and recall it later for fast repeated comparisons.
 - Side-aware navigation (~n~/~p~) and side-jumping (~o~).
+- Targeted rescan of just the directory at point (~R~) when one subtree changed on disk, avoiding a full rescan.
 - Integration with ~ediff~.
 - Fully themeable (uses standard Emacs faces).
 
@@ -39,7 +40,7 @@ The transient menu is organized into groups:
 
 - ~File Status~ :: Toggle file visibility (~S~ same, ~M~ modified, ~N~ added, ~F~ files/directories-only).
 - ~View~ :: Toggle tree-lines (~T~), strikethrough (~s~), ~.gitignore~ respect (~G~), bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~\\~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), pane resize (~{~/~}~).
-- ~Navigate~ :: Swap panes (~W~), rescan (~g~), redraw after a resize (~r~), and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
+- ~Navigate~ :: Swap panes (~W~), rescan (~g~), rescan just the directory at point (~R~), redraw after a resize (~r~), and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
 - ~File~ :: Operate on files (~RET~ ediff/open, ~SPC~ soft diff/fold, ~C~ copy marked/at point, ~d~ delete marked/at point, ~w~ copy path, ~P~ format patch).
 - ~Mark~ :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), or the whole left→right sync set (~* c~); ~U~ unmark all.
 - ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~cl~ list all globs.
@@ -76,7 +77,8 @@ The transient menu is organized into groups:
 | T         | Toggle tree-line display                          |
 | G         | Toggle ~.gitignore~ respect (rescans)             |
 | W         | Swap left/right panes                              |
-| g         | Rescan (~diff -rq~)                              |
+| g         | Rescan whole comparison (~diff -rq~)             |
+| R         | Rescan only the directory at point                |
 | r         | Redraw current tree (e.g. after window resize)    |
 | n/p       | Navigation (Side-aware)                           |
 | M-n/M-p   | Jump to next/previous file change                 |

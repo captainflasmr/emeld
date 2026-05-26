@@ -1,5 +1,9 @@
 #+TITLE: Changelog for Emeld
 
+* [0.23.0] - 2026-05-26
+** Added
+- ~emeld-refresh-subdir~ (~R~, transient Navigate group): targeted rescan of just the directory at point, merged back into the tree without touching the rest of it — for when you know one subdirectory changed on disk and want to avoid a full ~g~ rescan.  Re-diffs that subtree (handling the dir becoming single-sided or vanishing), preserves its expansion state, and honors filter groups / ~.gitignore~.  If point is on a file, its containing directory is rescanned.
+
 * [0.22.0] - 2026-05-26
 ** Changed
 - Marks are now per-side.  Marking (~m~/~u~) tags the file on the side point is in, and the ~*~ is drawn in that side's column next to the filename rather than once at the start of the whole line.  A node can be marked on the left, the right, or both.  ~emeld-copy~ (~C~) copies each marked node from its marked side to the other (a both-marked node copies left→right); ~emeld-delete~ (~d~) deletes each marked node from every side it is marked on.  Bulk-mark commands (~* m~/~* l~/~* c~) mark the left (source) side.  After marking, point advances to the next node on the same side (snapping to the other side only when that side is empty) instead of jumping back to the left column.

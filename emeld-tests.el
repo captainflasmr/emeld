@@ -357,6 +357,85 @@ a new path that is neither is treated as identical."
       (should-not (emeld--ancestor-in-set-p "/abs/x" set))
       (should-not (emeld--ancestor-in-set-p "/" set)))))
 
+(ert-deftest emeld-diff-subdir-entries ()
+  "`emeld--diff-subdir-entries' returns subdir-relative diff entries."
+  (let* ((left (make-temp-file "emeld-l" t))
+         (right (make-temp-file "emeld-r" t)))
+    (unwind-protect
+        (progn
+          (dolist (pair '(("same.txt" "x" "x") ("diff.txt" "a" "b")))
+            (with-temp-file (expand-file-name (nth 0 pair) left) (insert (nth 1 pair)))
+            (with-temp-file (expand-file-name (nth 0 pair) right) (insert (nth 2 pair))))
+          (with-temp-file (expand-file-name "onlyleft.txt" left) (insert "l"))
+          (with-temp-file (expand-file-name "onlyright.txt" right) (insert "r"))
+          (make-directory (expand-file-name "sub" left))
+          (make-directory (expand-file-name "sub" right))
+          (with-temp-file (expand-file-name "sub/deep.txt" left) (insert "1"))
+          (with-temp-file (expand-file-name "sub/deep.txt" right) (insert "2"))
+          (with-temp-buffer
+            (setq-local emeld--left-root (file-name-as-directory left)
+                        emeld--right-root (file-name-as-directory right)
+                        emeld-respect-gitignore nil
+                        emeld--active-filter-groups nil
+                        emeld-show-same nil)
+            (let ((entries (emeld--diff-subdir-entries left right)))
+              (should (eq 'different (cdr (assoc "diff.txt" entries))))
+              (should (eq 'different (cdr (assoc "sub/deep.txt" entries))))
+              (should (eq 'left-only (cdr (assoc "onlyleft.txt" entries))))
+              (should (eq 'right-only (cdr (assoc "onlyright.txt" entries))))
+              (should-not (assoc "same.txt" entries)))
+            ;; With show-same on, identical files are included.
+            (setq-local emeld-show-same t)
+            (let ((entries (emeld--diff-subdir-entries left right)))
+              (should (eq 'same (cdr (assoc "same.txt" entries)))))))
+      (delete-directory left t)
+      (delete-directory right t))))
+
+(ert-deftest emeld-refresh-subdir-rebuilds-subtree ()
+  "`emeld-refresh-subdir' re-diffs the dir at point and splices in the result."
+  (let* ((left (make-temp-file "emeld-l" t))
+         (right (make-temp-file "emeld-r" t)))
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name "d" left))
+          (make-directory (expand-file-name "d" right))
+          ;; Initially d/ holds one differing file.
+          (with-temp-file (expand-file-name "d/a.txt" left) (insert "a"))
+          (with-temp-file (expand-file-name "d/a.txt" right) (insert "b"))
+          (with-temp-buffer
+            (setq-local emeld--left-root (file-name-as-directory left)
+                        emeld--right-root (file-name-as-directory right)
+                        emeld-respect-gitignore nil
+                        emeld--active-filter-groups nil
+                        emeld-show-same nil
+                        emeld--column-width 30)
+            ;; Build a minimal tree: root → d (different) → a.txt (different).
+            (let* ((root (emeld-node-create :name "root" :is-dir t))
+                   (d (emeld-node-create :name "d" :is-dir t :parent root
+                                         :diff-status 'different
+                                         :left-path (expand-file-name "d" left)
+                                         :right-path (expand-file-name "d" right))))
+              (setf (emeld-node-children d)
+                    (list (emeld-node-create :name "a.txt" :parent d :diff-status 'different)))
+              (setf (emeld-node-children root) (list d))
+              (setq-local emeld--root-node root)
+              ;; On disk: a.txt now matches, and a new differing b.txt appears.
+              (with-temp-file (expand-file-name "d/a.txt" right) (insert "a"))
+              (with-temp-file (expand-file-name "d/b.txt" left) (insert "x"))
+              (with-temp-file (expand-file-name "d/b.txt" right) (insert "y"))
+              ;; Put point on a line tagged with the d node, and no-op the render.
+              (insert (propertize "d" 'emeld-node d))
+              (goto-char (point-min))
+              (cl-letf (((symbol-function 'emeld--render) (lambda () nil)))
+                (emeld-refresh-subdir))
+              ;; a.txt is now identical (gone, since show-same is off); b.txt differs.
+              (let ((names (mapcar #'emeld-node-name (emeld-node-children d))))
+                (should (member "b.txt" names))
+                (should-not (member "a.txt" names))
+                (should (eq 'different (emeld-node-diff-status d)))))))
+      (delete-directory left t)
+      (delete-directory right t))))
+
 (ert-deftest emeld-preset-savehist-registered ()
   "Loading savehist registers `emeld-presets' for cross-session persistence."
   (require 'savehist)
