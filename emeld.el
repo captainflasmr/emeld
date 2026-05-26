@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.23.0
+;; Version: 0.25.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -3068,6 +3068,58 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
   (let ((fn (oref obj dynamic-description)))
     (if fn (funcall fn) (cl-call-next-method))))
 
+(transient-define-prefix emeld-dispatch-view ()
+  "Emeld view, visibility and layout options."
+  [["Show"
+    ("F" (lambda () (if emeld-show-files "[x] Files" "[ ] Files"))
+     (lambda () (interactive) (emeld-toggle-show-files)) :transient t)
+    ("T" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
+     (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
+    ("s" (lambda () (if emeld-show-strikethrough "[x] strikethrough" "[ ] strikethrough"))
+     (lambda () (interactive) (emeld-toggle-show-strikethrough)) :transient t)
+    ("G" (lambda () (if emeld-respect-gitignore "[x] gitignore" "[ ] gitignore"))
+     (lambda () (interactive) (emeld-toggle-gitignore)))]
+   ["Layout"
+    ("[" "collapse all"  emeld-collapse-all :transient t)
+    ("]" "expand all"    emeld-expand-all :transient t)
+    ("\\" "expand to changes" emeld-expand-changes :transient t)
+    ("<backtab>" "cycle visibility" emeld-cycle-visibility :transient t)
+    (">" "indent more"  emeld-increase-indent :transient t)
+    ("<" "indent less"  emeld-decrease-indent :transient t)
+    ("}" "pane wider"   emeld-grow-column :transient t)
+    ("{" "pane narrow"  emeld-shrink-column :transient t)]])
+
+(transient-define-prefix emeld-dispatch-navigate ()
+  "Emeld navigation and rescanning."
+  ["Navigate"
+   ("g"   "rescan"             emeld-refresh)
+   ("R"   "rescan dir at point" emeld-refresh-subdir)
+   ("r"   "redraw (resize)"    emeld-redraw)
+   ("W"   "swap panes"         emeld-swap-panes)
+   ("o"   "jump other side"    emeld-jump-other-side :transient t)
+   ("M-n" "next change"        emeld-next-change :transient t)
+   ("M-p" "previous change"    emeld-previous-change :transient t)])
+
+(transient-define-prefix emeld-dispatch-file ()
+  "Emeld file actions."
+  ["File"
+   ("SPC" "soft diff / fold"   emeld-soft-diff)
+   ("RET" "action (ediff)"     emeld-action)
+   ("C"   "copy to other side" emeld-copy)
+   ("d"   "delete marked/at point" emeld-delete)
+   ("w"   "copy path"          emeld-copy-path-at-point)
+   ("P"   "format as patch"    emeld-format-patch)])
+
+(transient-define-prefix emeld-dispatch-mark ()
+  "Emeld marking."
+  ["Mark"
+   ("m"   "mark"            emeld-mark :transient t)
+   ("u"   "unmark"          emeld-unmark :transient t)
+   ("* m" "modified"        emeld-mark-modified :transient t)
+   ("* l" "left-only (new)" emeld-mark-left-only :transient t)
+   ("* c" "→ copy right"    emeld-mark-to-copy :transient t)
+   ("U"   "unmark all"      emeld-unmark-all :transient t)])
+
 (transient-define-prefix emeld-dispatch ()
   "Transient menu for emeld."
   [["File Status"
@@ -3076,9 +3128,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
      ("M" (lambda () (if emeld-show-different "[x] Modified" "[ ] Modified"))
      (lambda () (interactive) (emeld-toggle-show-different)) :transient t)
      ("N" (lambda () (if emeld-show-added "[x] New" "[ ] New"))
-     (lambda () (interactive) (emeld-toggle-show-added)) :transient t)
-     ("F" (lambda () (if emeld-show-files "[x] Files" "[ ] Files"))
-     (lambda () (interactive) (emeld-toggle-show-files)) :transient t)]
+     (lambda () (interactive) (emeld-toggle-show-added)) :transient t)]
    ["Filename"
     :if (lambda () emeld-filter-groups)
     :class transient-column
@@ -3114,43 +3164,11 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
                  (list "cl" "list all globs..." 'emeld-list-filter-groups))
                 suffixes)
           (nreverse suffixes))))]
-   ["View"
-    ("T" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
-     (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
-    ("s" (lambda () (if emeld-show-strikethrough "[x] strikethrough" "[ ] strikethrough"))
-     (lambda () (interactive) (emeld-toggle-show-strikethrough)) :transient t)
-    ("G" (lambda () (if emeld-respect-gitignore "[x] gitignore" "[ ] gitignore"))
-     (lambda () (interactive) (emeld-toggle-gitignore)))
-    ("[" "collapse all"  emeld-collapse-all :transient t)
-    ("]" "expand all"    emeld-expand-all :transient t)
-    ("\\" "expand to changes" emeld-expand-changes :transient t)
-    ("<backtab>" "cycle visibility" emeld-cycle-visibility :transient t)
-    (">" "indent more"  emeld-increase-indent :transient t)
-    ("<" "indent less"  emeld-decrease-indent :transient t)
-    ("}" "pane wider"   emeld-grow-column :transient t)
-    ("{" "pane narrow"  emeld-shrink-column :transient t)]
-   ["Navigate"
-    ("g"   "rescan"             emeld-refresh)
-    ("R"   "rescan dir at point" emeld-refresh-subdir)
-    ("r"   "redraw (resize)"    emeld-redraw)
-    ("W"   "swap panes"         emeld-swap-panes)
-    ("o"   "jump other side"    emeld-jump-other-side :transient t)
-    ("M-n" "next change"        emeld-next-change :transient t)
-    ("M-p" "previous change"    emeld-previous-change :transient t)]
-   ["Action"
-    ("SPC" "soft diff / fold"   emeld-soft-diff)
-    ("RET" "action (ediff)"     emeld-action)
-    ("C"   "copy to other side" emeld-copy)
-    ("d"   "delete marked/at point" emeld-delete)
-    ("w"   "copy path"          emeld-copy-path-at-point)
-    ("P"   "format as patch"    emeld-format-patch)]
-   ["Mark"
-    ("m"   "mark"            emeld-mark :transient t)
-    ("u"   "unmark"          emeld-unmark :transient t)
-    ("* m" "modified"        emeld-mark-modified :transient t)
-    ("* l" "left-only (new)" emeld-mark-left-only :transient t)
-    ("* c" "→ copy right"    emeld-mark-to-copy :transient t)
-    ("U"   "unmark all"      emeld-unmark-all :transient t)]
+   ["Menus"
+    ("v" "View →"     emeld-dispatch-view)
+    ("n" "Navigate →" emeld-dispatch-navigate)
+    ("f" "File →"     emeld-dispatch-file)
+    ("m" "Mark →"     emeld-dispatch-mark)]
    ["Preset"
     ("ps" "save current" emeld-save-preset)
     ("pl" "load…"        emeld-load-preset)

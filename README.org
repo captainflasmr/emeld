@@ -36,15 +36,23 @@ Alternatively, run ~M-x emeld-diff-dwim~ to automatically use open Dired buffers
 
 * Transient Menu (~?~)
 
-The transient menu is organized into groups:
+The transient is a two-level hierarchy.  The top level keeps the menus you reach for most often as full columns, plus a ~Menus~ column whose entries open focused sub-menus.  Pressing ~q~ (or ~C-g~) in a sub-menu returns to the top level.
 
-- ~File Status~ :: Toggle file visibility (~S~ same, ~M~ modified, ~N~ added, ~F~ files/directories-only).
-- ~View~ :: Toggle tree-lines (~T~), strikethrough (~s~), ~.gitignore~ respect (~G~), bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~\\~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), pane resize (~{~/~}~).
-- ~Navigate~ :: Swap panes (~W~), rescan (~g~), rescan just the directory at point (~R~), redraw after a resize (~r~), and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
-- ~File~ :: Operate on files (~RET~ ediff/open, ~SPC~ soft diff/fold, ~C~ copy marked/at point, ~d~ delete marked/at point, ~w~ copy path, ~P~ format patch).
-- ~Mark~ :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), or the whole left→right sync set (~* c~); ~U~ unmark all.
+Top level:
+
+- ~File Status~ :: Toggle file visibility (~S~ same, ~M~ modified, ~N~ added).
 - ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~cl~ list all globs.
 - ~Preset~ :: Save the current directory pair (~ps~), load a saved pair (~pl~), delete one (~pd~).
+- ~Menus~ :: Open a sub-menu — ~v~ View, ~n~ Navigate, ~f~ File, ~m~ Mark.
+
+Sub-menus (opened from the ~Menus~ column):
+
+- ~View~ (~v~) :: Two columns. ~Show~ toggles what is displayed — files (~F~ hide files, show directories only), tree-lines (~T~), strikethrough (~s~), ~.gitignore~ respect (~G~). ~Layout~ holds bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~\\~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), and pane resize (~{~/~}~).
+- ~Navigate~ (~n~) :: Rescan (~g~), rescan just the directory at point (~R~), redraw after a resize (~r~), swap panes (~W~), and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
+- ~File~ (~f~) :: Operate on files (~RET~ ediff/open, ~SPC~ soft diff/fold, ~C~ copy marked/at point, ~d~ delete marked/at point, ~w~ copy path, ~P~ format patch).
+- ~Mark~ (~m~) :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), or the whole left→right sync set (~* c~); ~U~ unmark all.
+
+Every command keeps its direct key binding in ~emeld-mode~ (see below), so the menu hierarchy is only for discovery — you never have to drill through it to reach a command you already know.
 
 * Key Bindings
 | Key       | Action                                            |

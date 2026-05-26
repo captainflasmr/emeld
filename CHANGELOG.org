@@ -1,5 +1,13 @@
 #+TITLE: Changelog for Emeld
 
+* [0.25.0] - 2026-05-26
+** Changed
+- The Files toggle (~F~) moved from the top-level ~File Status~ column into the ~View~ sub-menu, which is now split into two columns: ~Show~ (Files/tree-lines/strikethrough/gitignore toggles) and ~Layout~ (fold, indent, pane-resize).  The ~F~ key binding in ~emeld-mode~ is unchanged.
+
+* [0.24.0] - 2026-05-26
+** Changed
+- The transient (~?~) is now a two-level hierarchy to reduce clutter.  The top level keeps the Meld-style menus as full columns — ~File Status~, ~Filename~ — plus ~Preset~, and adds a ~Menus~ column whose entries open focused sub-menus: ~v~ View, ~n~ Navigate, ~f~ File, ~m~ Mark (new prefixes ~emeld-dispatch-view~/~-navigate~/~-file~/~-mark~).  ~q~/~C-g~ in a sub-menu returns to the top level.  Direct key bindings in ~emeld-mode~ are unchanged, so the hierarchy is only for discovery.
+
 * [0.23.0] - 2026-05-26
 ** Added
 - ~emeld-refresh-subdir~ (~R~, transient Navigate group): targeted rescan of just the directory at point, merged back into the tree without touching the rest of it — for when you know one subdirectory changed on disk and want to avoid a full ~g~ rescan.  Re-diffs that subtree (handling the dir becoming single-sided or vanishing), preserves its expansion state, and honors filter groups / ~.gitignore~.  If point is on a file, its containing directory is rescanned.
