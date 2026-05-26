@@ -9,6 +9,8 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
+** TODO multiple select for delete
+
 ** TODO add directory tree display for dired?
 
 ** TODO sub directory refresh
@@ -21,26 +23,5 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 ** DOING diffs wrong way round on soft diff
 
-** TODO Mine not appearing in category window
-
-(("Backups" t "#*#" ".#*" "~*" "*~" "*.orig" "*.bak" "*.swp")
-("OS metadata" t ".DS_Store" "._*" ".Spotlight-V100" ".Trashes"
-  "Thumbs.db" "Desktop.ini")
-("Version Control" t ".git*" ".svn" ".hg" "CVS" "_darcs" ".bzr"
-  "_MTN" ".fslckout" "_FOSSIL_" ".fos" ".osc")
-("Binaries" t "*.pyc" "*.a" "*.obj" "*.o" "*.so" "*.la" "*.lib"
-  "*.dll" "*.exe")
-("Media" nil "*.jpg" "*.gif" "*.png" "*.bmp" "*.wav" "*.mp3" "*.ogg"
-  "*.flac" "*.avi" "*.mpg" "*.xcf" "*.xpm")
-("Mine" t ".gradle" "confluence" "*.elc" "CLAUDE.md" "emacs-setup"
-  "*.class" "cuis_design.org" "client_common.org" "client_evolved.org"
-  "cuis-proto.org" "BUGS.org" "cuis-server.org" "build" "gradlew"
-  "subapp-example" "sysml-gen" "workflows" "bin" "cuis-test.org"
-  "setup" "vscode-setup" "org.eclipse.jdt.core.prefs" ".settings"
-  "org.eclipse.buildship.core.prefs" ".idea" "gradle" ".project"
-  ".classpath" ".dir-locals*.el" ".ollama-buddy-project.org"
-  ".simply-annotations.el" ".top"))
-
 ** TODO compare git version with folder
 
-** TODO multiple select for delete
