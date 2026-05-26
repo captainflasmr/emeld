@@ -19,9 +19,7 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 ** TODO rethink .dir-locals, top level not loading when local doesn't exist
 
-** TODO add swap panes
-
-** TODO diffs wrong way round on soft diff
+** DOING diffs wrong way round on soft diff
 
 ** TODO Mine not appearing in category window
 

@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.19.0
+;; Version: 0.20.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -668,8 +668,6 @@ stripped).  Defaults to `find', which is universal; set it to e.g.
                         (if remaining-lines
                             (run-with-timer 0.001 nil #'process-lines-chunk)
                            (emeld--bench-push "parse done")
-                          
-                           (message "Structuring tree nodes progressively...")
                           (emeld--entries-to-nodes-progressive
                           entries "" root buf
                           (lambda (top-level-children)
@@ -1815,6 +1813,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "v")   #'emeld-find-file)
     (define-key map (kbd "g")   #'emeld-refresh)
     (define-key map (kbd "r")   #'emeld-redraw)
+    (define-key map (kbd "W")   #'emeld-swap-panes)
     (define-key map (kbd "n")   #'emeld-next-line)
     (define-key map (kbd "p")   #'emeld-previous-line)
     (define-key map (kbd "M-n") #'emeld-next-change)
@@ -2567,6 +2566,42 @@ Creates missing parent directories on the destination side if needed."
               (message "Deleted %s from %s side" (emeld-node-name node) side))
           (error (message "Delete failed: %s" (error-message-string err))))))))
 
+(defun emeld-swap-panes ()
+  "Swap the left and right comparison directories and flip all node paths."
+  (interactive)
+  (unless (and emeld--left-root emeld--right-root)
+    (user-error "No directories loaded to swap"))
+
+  ;; 1. Swap the root directory variables
+  (let ((old-left emeld--left-root))
+    (setq emeld--left-root emeld--right-root)
+    (setq emeld--right-root old-left))
+
+  ;; 2. Recursively swap paths and flip side-exclusive statuses in the tree
+  (cl-labels ((swap-node (node)
+                (when node
+                  ;; Swap left and right paths
+                  (let ((old-l-path (emeld-node-left-path node))
+                        (old-r-path (emeld-node-right-path node)))
+                    (setf (emeld-node-left-path node) old-r-path)
+                    (setf (emeld-node-right-path node) old-l-path))
+                  ;; Flip side-exclusive diff statuses
+                  (cl-case (emeld-node-diff-status node)
+                    (left-only (setf (emeld-node-diff-status node) 'right-only))
+                    (right-only (setf (emeld-node-diff-status node) 'left-only)))
+                  ;; Recurse into children
+                  (mapc #'swap-node (emeld-node-children node)))))
+    ;; Swap the root node's display names too
+    (let ((old-name (emeld-node-name emeld--root-node))
+          (old-name-right (emeld-node-name-right emeld--root-node)))
+      (setf (emeld-node-name emeld--root-node) (or old-name-right old-name))
+      (setf (emeld-node-name-right emeld--root-node) old-name))
+    (swap-node emeld--root-node))
+
+  ;; 3. Redraw
+  (emeld--render)
+  (message "Swapped left and right panes."))
+
 (defun emeld--toggle-indicator (label enabled)
   "Return a string for toggle LABEL showing ENABLED state.
 Enabled toggles are bold; disabled toggles use the plain header-line
@@ -2939,6 +2974,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
    ["Navigate"
     ("g"   "rescan"             emeld-refresh)
     ("r"   "redraw (resize)"    emeld-redraw)
+    ("W"   "swap panes"         emeld-swap-panes)
     ("o"   "jump other side"    emeld-jump-other-side :transient t)
     ("M-n" "next change"        emeld-next-change :transient t)
     ("M-p" "previous change"    emeld-previous-change :transient t)]

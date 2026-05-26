@@ -1,5 +1,9 @@
 #+TITLE: Changelog for Emeld
 
+* [0.20.0] - 2026-05-26
+** Added
+- ~emeld-swap-panes~ (~W~): swap the left and right comparison directories and flip all node paths and side-exclusive diff statuses, with no rescan needed.  Bound to ~W~ in the mode map and the transient Navigate group.
+
 * [0.19.0] - 2026-05-26
 ** Added
 - ~F~ toggle (~emeld-show-files~, default ~t~): hide all regular files to show only the directory hierarchy.
