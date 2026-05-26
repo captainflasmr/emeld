@@ -9,7 +9,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Side-by-side view in a single buffer.
 - Recursive glob-based filtering (like Meld) — excluded at the ~diff~ level.
 - ~.gitignore~ support, on by default — ignored files hidden on both sides, toggle with ~G~.
-- Instant toggles for New, Modified, and Identical files (~S~/~M~/~N~).
+- Instant toggles for New, Modified, Identical, and File visibility (~S~/~M~/~N~/~F~).
 - Orphan files shown with strikethrough on the missing side (Meld-style, toggle ~s~).
 - Dired-style marking (~m~/~u~/~U~) with bulk copy (~C~); bulk-mark by status (~* m~ modified, ~* l~ left-only, ~* c~ the left→right sync set).
 - Filter groups toggleable from the transient menu.
@@ -37,7 +37,7 @@ Alternatively, run ~M-x emeld-diff-dwim~ to automatically use open Dired buffers
 
 The transient menu is organized into groups:
 
-- ~File Status~ :: Toggle file visibility (~S~ same, ~M~ modified, ~N~ added).
+- ~File Status~ :: Toggle file visibility (~S~ same, ~M~ modified, ~N~ added, ~F~ files/directories-only).
 - ~View~ :: Toggle tree-lines (~T~), strikethrough (~s~), ~.gitignore~ respect (~G~), bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~\\~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), pane resize (~{~/~}~).
 - ~Navigate~ :: Rescan (~g~), redraw after a resize (~r~), and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
 - ~File~ :: Operate on files (~RET~ ediff/open, ~SPC~ soft diff/fold, ~C~ copy, ~d~ delete, ~w~ copy path, ~P~ format patch).
@@ -65,6 +65,7 @@ The transient menu is organized into groups:
 | S         | Toggle same (identical) files                     |
 | M         | Toggle modified files                             |
 | N         | Toggle added (new) files                          |
+| F         | Toggle file visibility (hide files, show dirs only)|
 | m         | Mark node                                         |
 | u         | Unmark node                                       |
 | U         | Unmark all nodes                                  |
@@ -102,6 +103,7 @@ Filter-group toggling (~emeld-toggle-filter-group~) and the preset commands (~em
   | Media           | ~*.jpg~, ~*.gif~, ~*.png~, ~*.bmp~, ~*.wav~, ~*.mp3~, ~*.ogg~, ~*.flac~, ~*.avi~, ~*.mpg~, ~*.xcf~, ~*.xpm~ |
 
 - ~emeld-show-same~: Whether to show identical files (default nil).  When enabled, identical files appear in the tree.
+- ~emeld-show-files~: Whether to show regular files (default t).  When disabled, only directories are displayed — isolate the folder hierarchy with ~F~.
 - ~emeld-same-files-method~: How toggling ~S~ finds identical files — ~list~ (default, fast: enumerate the left tree and subtract the files the initial scan already classified, avoiding a second content comparison) or ~diff~ (exact: re-run ~diff -rqs~).
 - ~emeld-list-command~: Program + args used by the ~list~ method to enumerate files (default ~("find" "." "-type" "f")~; set to e.g. ~("fd" "--type" "f" "--hidden" "--no-ignore")~ to use fd).
 - ~emeld-show-strikethrough~: Show strikethrough for orphan files on the missing side (default ~t~).  When nil, the missing side shows nothing.

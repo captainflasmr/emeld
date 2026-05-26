@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.18.0
+;; Version: 0.19.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -83,6 +83,12 @@ Set to \"\" for no prefix."
 When non-nil, a file that exists only on one side shows its tree path
 and filename with strikethrough on the other side, mimicking Meld's
 display.  When nil, the other side shows nothing for the orphan."
+  :type 'boolean
+  :group 'emeld)
+
+(defcustom emeld-show-files t
+  "Whether to show regular files (non-directory entries).
+When nil, only the directory hierarchy is displayed."
   :type 'boolean
   :group 'emeld)
 
@@ -1831,6 +1837,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "T")   #'emeld-toggle-tree-lines)
     (define-key map (kbd "s")   #'emeld-toggle-show-strikethrough)
     (define-key map (kbd "G")   #'emeld-toggle-gitignore)
+    (define-key map (kbd "F")   #'emeld-toggle-show-files)
     (define-key map (kbd ">")   #'emeld-increase-indent)
     (define-key map (kbd "<")   #'emeld-decrease-indent)
     (define-key map (kbd "}")   #'emeld-grow-column)
@@ -1847,6 +1854,7 @@ Mimics Meld's display of missing files."
   (make-local-variable 'emeld-show-different)
   (make-local-variable 'emeld-show-added)
   (make-local-variable 'emeld-show-strikethrough)
+  (make-local-variable 'emeld-show-files)
   (make-local-variable 'emeld-respect-gitignore)
   (setq-local revert-buffer-function #'emeld-refresh)
   (add-hook 'kill-buffer-hook #'emeld--stop-scan nil t)
@@ -2021,6 +2029,14 @@ shows nothing for the orphan."
   (interactive)
   (setq emeld-show-added (not emeld-show-added))
   (message "Show new: %s" (if emeld-show-added "on" "off"))
+  (emeld--render))
+
+(defun emeld-toggle-show-files ()
+  "Toggle file visibility to show only the directory hierarchy.
+When disabled, only directories are displayed."
+  (interactive)
+  (setq emeld-show-files (not emeld-show-files))
+  (message "Show files: %s" (if emeld-show-files "on" "off"))
   (emeld--render))
 
 (defun emeld-toggle-gitignore ()
@@ -2566,6 +2582,7 @@ the standard foreground and background."
      (emeld--toggle-indicator "S" emeld-show-same)
      (emeld--toggle-indicator "M" emeld-show-different)
      (emeld--toggle-indicator "N" emeld-show-added)
+     (emeld--toggle-indicator "F" emeld-show-files)
      (emeld--toggle-indicator "T" emeld-show-tree-lines)
      (emeld--toggle-indicator "s" emeld-show-strikethrough)
      (when groups
@@ -2703,17 +2720,18 @@ Returns t if successfully positioned, otherwise nil."
       nil)))
 
 (defun emeld--node-visible-p (node)
-  "Determine if NODE should be visible based on status filters.
+  "Determine if NODE should be visible based on status and structure filters.
 The root node is always visible.  Directory nodes are always shown
 so collapsed folder rows remain navigable."
   (or (eq node emeld--root-node)
       (and (emeld-node-is-dir node)
            (not (eq (emeld-node-diff-status node) 'same)))
-      (let ((status (emeld-node-diff-status node)))
-        (cond ((eq status 'same) emeld-show-same)
-              ((eq status 'different) emeld-show-different)
-              ((memq status '(left-only right-only)) emeld-show-added)
-              (t t)))))
+      (and emeld-show-files
+           (let ((status (emeld-node-diff-status node)))
+             (cond ((eq status 'same) emeld-show-same)
+                   ((eq status 'different) emeld-show-different)
+                   ((memq status '(left-only right-only)) emeld-show-added)
+                   (t t))))))
 
 (defun emeld--node-relpath (node)
   "Return the relative path of NODE from the root."
@@ -2862,10 +2880,12 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
   [["File Status"
      ("S" (lambda () (if emeld-show-same "[x] Same" "[ ] Same"))
      (lambda () (interactive) (emeld-toggle-show-same)) :transient t)
+     ("M" (lambda () (if emeld-show-different "[x] Modified" "[ ] Modified"))
+     (lambda () (interactive) (emeld-toggle-show-different)) :transient t)
      ("N" (lambda () (if emeld-show-added "[x] New" "[ ] New"))
      (lambda () (interactive) (emeld-toggle-show-added)) :transient t)
-     ("M" (lambda () (if emeld-show-different "[x] Modified" "[ ] Modified"))
-     (lambda () (interactive) (emeld-toggle-show-different)) :transient t)]
+     ("F" (lambda () (if emeld-show-files "[x] Files" "[ ] Files"))
+     (lambda () (interactive) (emeld-toggle-show-files)) :transient t)]
    ["Filename"
     :if (lambda () emeld-filter-groups)
     :class transient-column

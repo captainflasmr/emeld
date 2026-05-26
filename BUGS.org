@@ -13,10 +13,6 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 ** TODO sub directory refresh
 
-** TODO just show directories
-
-** TODO clearer indication when there are no changes
-
 ** TODO turn to sidebar as treemacs
 
 ** TODO Scanning got stuck after copying files and then auto rescan

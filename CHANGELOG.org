@@ -1,5 +1,12 @@
 #+TITLE: Changelog for Emeld
 
+* [0.19.0] - 2026-05-26
+** Added
+- ~F~ toggle (~emeld-show-files~, default ~t~): hide all regular files to show only the directory hierarchy.
+- Buffer placeholder messages: ~Scanning directories, please wait...~ while the async diff is in flight (replaces a blank buffer), and ~No differences detected between directories.~ when the scan completes with no changes.
+** Changed
+- ~emeld--render~ now conditionally inserts these placeholders into the main buffer instead of rendering an empty tree.  The ~emeld--build-tree-from-diff~ final callback sets the status phase to ~done~ before the final render so the "no differences" message appears correctly.
+
 * [0.18.0] - 2026-05-26
 ** Changed
 - Showing identical files (~S~) is far faster on large trees.  Instead of re-running ~diff -rqs~ (which re-reads and compares every file's content), it now lists the left tree (~emeld-list-command~, ~find~ by default) and treats as identical every left file the initial ~diff -rq~ did not already report as differing or left-only — reusing that content comparison rather than repeating it.  ~emeld-same-files-method~ selects ~list~ (default, fast) or ~diff~ (exact, the old behavior).
