@@ -2839,11 +2839,11 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
 (transient-define-prefix emeld-dispatch ()
   "Transient menu for emeld."
   [["File Status"
-    ("S" (lambda () (if emeld-show-same "[x] S" "[ ] S"))
+     ("S" (lambda () (if emeld-show-same "[x] Same" "[ ] Same"))
      (lambda () (interactive) (emeld-toggle-show-same)) :transient t)
-    ("N" (lambda () (if emeld-show-added "[x] N" "[ ] N"))
+     ("N" (lambda () (if emeld-show-added "[x] New" "[ ] New"))
      (lambda () (interactive) (emeld-toggle-show-added)) :transient t)
-    ("M" (lambda () (if emeld-show-different "[x] M" "[ ] M"))
+     ("M" (lambda () (if emeld-show-different "[x] Modified" "[ ] Modified"))
      (lambda () (interactive) (emeld-toggle-show-different)) :transient t)]
    ["Filename"
     :if (lambda () emeld-filter-groups)
