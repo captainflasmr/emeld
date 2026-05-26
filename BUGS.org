@@ -9,7 +9,11 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
-** TODO multiple select for delete
+** TODO refined transient
+
+** TODO better responsiveness duing tree build
+
+** DOING multiple select for delete
 
 ** TODO add directory tree display for dired?
 
