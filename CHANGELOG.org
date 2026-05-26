@@ -2,7 +2,12 @@
 
 * [0.16.0] - 2026-05-25
 ** Added
+- Presets: save the current comparison's directory pair under a name and recall it later, for fast repeated runs.  ~emeld-save-preset~ (~C-c s~ / transient ~ps~) saves the current left/right (pre-filling a suggested name); ~emeld-load-preset~ (~C-c l~ / transient ~pl~, also autoloaded for use outside a comparison) picks a saved pair via ~completing-read~ (annotated with the directories) and starts the diff; ~emeld-delete-preset~ (transient ~pd~) removes one.  Stored in ~emeld-presets~, which is registered with ~savehist-additional-variables~ so presets persist across sessions when ~savehist-mode~ is enabled.
 - Benchmark coverage for the identical-files (~S~) merge stack.  When ~emeld-benchmark~ is non-nil, toggling ~S~ now emits its own phased timing report — ~same diff done~, ~same seeded~, ~same merged~, ~same sorted~, ~same rendered~ — independent of the initial scan's report, so the merge phase can be measured in isolation.
+- ~emeld-benchmark-record~: append the benchmark runs collected this session to an Org log (~emeld-benchmark-file~, default ~BENCHMARKS.org~ beside ~emeld.el~).  Each entry stamps machine specs and the emeld build — host, OS/kernel (~uname~), CPU + thread count and RAM (from ~/proc~ on Linux), Emacs version, emeld version and git revision (~emeld--system-info~) — followed by an aligned timing table per run, so readings can be diffed across commits/machines to catch regressions.  Runs accumulate automatically (one per completed scan) while benchmarking is on; recording flushes and clears them.
+- ~emeld-benchmark-system-info~: insert the current machine/build facts at point as an Org list.
+- ~test/bench.sh~ now appends its runs to the benchmark log too (default on; ~EMELD_BENCH_RECORD=0~ to disable, ~EMELD_BENCH_SAME=1~ to also run and record the identical-files pass, ~EMELD_BENCH_FILE=PATH~ to redirect), so synthetic and large-repo runs land in the same ~BENCHMARKS.org~.
+- The same-files (~S~) scan now shows a live entry count (~[Scanning… N entries]~) during its scan phase, matching the initial scan (a process filter counts entries as ~diff -rqs~ streams).
 ** Changed
 - Header-line scan counters now update regularly during a scan.  Each counter bump (entries seen while ~diff~ runs, lines parsed while the tree builds) marks the header line for redisplay via ~force-mode-line-update~, so progress animates on its own instead of only refreshing when point moves or input arrives.
 - The benchmark report spells out ~cumulative~ in full rather than ~cum~.

@@ -248,5 +248,32 @@ must reuse them rather than create siblings with the same name."
             (should (member "--exclude=node_modules" args))))
       (delete-directory dir t))))
 
+(ert-deftest emeld-preset-save-load-delete ()
+  "Presets save, overwrite in place, load to a comparison, and delete."
+  (let ((emeld-presets nil)
+        (emeld--left-root "/a/")
+        (emeld--right-root "/b/"))
+    (emeld-save-preset "p1")
+    (should (equal (assoc "p1" emeld-presets) '("p1" "/a/" "/b/")))
+    ;; Reusing a name overwrites it (new dirs), without duplicating.
+    (let ((emeld--left-root "/x/") (emeld--right-root "/y/"))
+      (emeld-save-preset "p1"))
+    (should (= 1 (length emeld-presets)))
+    (should (equal (assoc "p1" emeld-presets) '("p1" "/x/" "/y/")))
+    ;; Loading dispatches to `emeld-diff' with the stored dirs.
+    (let (captured)
+      (cl-letf (((symbol-function 'emeld-diff)
+                 (lambda (l r) (setq captured (list l r)))))
+        (emeld-load-preset "p1"))
+      (should (equal captured '("/x/" "/y/"))))
+    ;; Deleting removes it.
+    (emeld-delete-preset "p1")
+    (should (null emeld-presets))))
+
+(ert-deftest emeld-preset-savehist-registered ()
+  "Loading savehist registers `emeld-presets' for cross-session persistence."
+  (require 'savehist)
+  (should (memq 'emeld-presets savehist-additional-variables)))
+
 (message "Running tests...")
 (ert-run-tests-batch-and-exit)

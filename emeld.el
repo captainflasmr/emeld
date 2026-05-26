@@ -13,6 +13,9 @@
 (require 'subr-x)
 (require 'transient)
 
+(declare-function find-library-name "find-func" (library))
+(defvar savehist-additional-variables)
+
 (defgroup emeld nil
   "Meld-Inspired Local Diff."
   :group 'tools)
@@ -111,6 +114,21 @@ Requires the `git' executable; has no effect outside a work tree."
   "Obsolete.  Removed in 0.9.4.  Kept for dir-locals compatibility.")
 (make-obsolete-variable 'emeld-simple-comparison nil "0.9.4")
 
+(defcustom emeld-presets nil
+  "Saved directory pairs for quick recall, as a list of (NAME LEFT RIGHT).
+Populated by `emeld-save-preset' and recalled by `emeld-load-preset', so
+frequently-compared directory pairs can be re-run without retyping their
+paths.  Registered with `savehist-additional-variables' (see below) so
+presets persist across sessions when `savehist-mode' is enabled."
+  :type '(alist :key-type (string :tag "Name")
+                :value-type (group (directory :tag "Left")
+                                   (directory :tag "Right")))
+  :group 'emeld)
+
+;; Persist presets across sessions via savehist, when it is in use.
+(with-eval-after-load 'savehist
+  (add-to-list 'savehist-additional-variables 'emeld-presets))
+
 (defun emeld--apply-dir-locals ()
   "Apply .dir-locals.el from `default-directory' to the current buffer."
   (hack-dir-local-variables-non-file-buffer))
@@ -151,10 +169,27 @@ Requires the `git' executable; has no effect outside a work tree."
   :type 'boolean
   :group 'emeld)
 
+(defcustom emeld-benchmark-file
+  (expand-file-name "BENCHMARKS.org"
+                    (or (and load-file-name (file-name-directory load-file-name))
+                        user-emacs-directory))
+  "Org file where `emeld-benchmark-record' appends timing entries.
+Defaults to BENCHMARKS.org beside emeld.el so the log can be kept under
+version control.  Each entry stamps the machine specs and emeld build
+\(`emeld--system-info') so readings can be compared across commits and
+machines to catch regressions."
+  :type 'file
+  :group 'emeld)
+
 (defvar-local emeld--benchmark-data nil
   "List of (LABEL . FLOAT-TIME) timestamps for the current scan cycle.")
 (defvar-local emeld--benchmark-start-time nil
   "Float-time captured when the background diff process starts.")
+(defvar emeld--benchmark-log nil
+  "Session list of completed benchmark runs awaiting `emeld-benchmark-record'.
+Newest first.  Each element is a plist with :time :kind :left :right
+:entries :total and :stages (a list of (LABEL STAGE-MS CUM-MS)), appended
+by `emeld--bench-report' and flushed to `emeld-benchmark-file'.")
 
 (defvar-local emeld--assembly-done nil
   "Non-nil when the progressive tree assembly has fully completed.")
@@ -196,13 +231,16 @@ Killed by `emeld--stop-scan' so a rescan cannot leave stale workers.")
     (push (cons label (float-time)) emeld--benchmark-data)))
 
 (defun emeld--bench-report ()
-  "Print a structured timing report from `emeld--benchmark-data'."
+  "Print a structured timing report from `emeld--benchmark-data'.
+Also push a structured copy of the run onto `emeld--benchmark-log' so
+`emeld-benchmark-record' can later write it to `emeld-benchmark-file'."
   (when emeld-benchmark
     (let* ((data (nreverse emeld--benchmark-data))
            (base (or emeld--benchmark-start-time (cdar data)))
            (last-time (cdr (car (last data))))
            (total (* (- last-time base) 1000.0))
            (pairs nil)
+           (stages nil)
            (prev-time base))
       (dolist (item data)
         (let* ((label (car item))
@@ -212,13 +250,169 @@ Killed by `emeld--stop-scan' so a rescan cannot leave stale workers.")
           (push (format "  %-30s %5.0f ms (cumulative %6.0f ms)"
                         label stage-delta cum-delta)
                 pairs)
+          (push (list label (round stage-delta) (round cum-delta)) stages)
           (setq prev-time timestamp)))
+      (setq stages (nreverse stages))
+      (push (list :time (current-time)
+                  :kind (if (and stages (string-prefix-p "same" (car (car stages))))
+                            'same 'initial)
+                  :left emeld--left-root
+                  :right emeld--right-root
+                  :entries emeld--scan-total
+                  :total (round total)
+                  :stages stages)
+            emeld--benchmark-log)
       (setq emeld--benchmark-data nil
             emeld--benchmark-start-time nil)
       (message "=== Emeld Benchmark ===\n%s\n  %-30s %5.0f ms (total)\n========================"
                (string-join (nreverse pairs) "\n")
                "elapsed total"
                total))))
+
+(defun emeld--package-version ()
+  "Return the emeld version from its source header, or \"?\"."
+  (or (ignore-errors
+        (require 'find-func)
+        (with-temp-buffer
+          (insert-file-contents (find-library-name "emeld") nil 0 4000)
+          (goto-char (point-min))
+          (when (re-search-forward "^;;+[ \t]*Version:[ \t]*\\(.+\\)$" nil t)
+            (string-trim (match-string 1)))))
+      "?"))
+
+(defun emeld--git-describe ()
+  "Return \"<short-rev>[+dirty]\" for the emeld working tree, or \"?\"."
+  (or (ignore-errors
+        (require 'find-func)
+        (let ((default-directory (file-name-directory (find-library-name "emeld"))))
+          (when (and (executable-find "git")
+                     (eq 0 (call-process "git" nil nil nil
+                                         "rev-parse" "--is-inside-work-tree")))
+            (let ((rev (with-temp-buffer
+                         (when (eq 0 (call-process "git" nil t nil
+                                                   "rev-parse" "--short" "HEAD"))
+                           (string-trim (buffer-string)))))
+                  (dirty (with-temp-buffer
+                           (call-process "git" nil t nil "status" "--porcelain")
+                           (> (buffer-size) 0))))
+              (and rev (concat rev (if dirty "+dirty" "")))))))
+      "?"))
+
+(defun emeld--system-info ()
+  "Return an alist of machine and build facts for a benchmark record.
+CPU and memory are read from /proc on Linux; other systems fall back to
+\"unknown\" for those fields."
+  (let ((cpu "unknown")
+        (cores (if (fboundp 'num-processors) (num-processors) nil))
+        (mem "unknown"))
+    (when (file-readable-p "/proc/cpuinfo")
+      (with-temp-buffer
+        (insert-file-contents "/proc/cpuinfo")
+        (goto-char (point-min))
+        (when (re-search-forward "^model name[ \t]*:[ \t]*\\(.+\\)$" nil t)
+          (setq cpu (string-trim (match-string 1))))
+        (unless cores
+          (goto-char (point-min))
+          (setq cores (how-many "^processor[ \t]*:")))))
+    (when (file-readable-p "/proc/meminfo")
+      (with-temp-buffer
+        (insert-file-contents "/proc/meminfo")
+        (goto-char (point-min))
+        (when (re-search-forward "^MemTotal:[ \t]*\\([0-9]+\\) kB" nil t)
+          (setq mem (format "%.1f GiB"
+                            (/ (string-to-number (match-string 1)) 1048576.0))))))
+    (list (cons "Host"      (system-name))
+          (cons "OS"        (string-trim (shell-command-to-string "uname -srm")))
+          (cons "CPU"       (if cores (format "%s (%d threads)" cpu cores) cpu))
+          (cons "Memory"    mem)
+          (cons "Emacs"     emacs-version)
+          (cons "Emeld"     (emeld--package-version))
+          (cons "Emeld rev" (emeld--git-describe)))))
+
+(defun emeld--org-table (header rows)
+  "Return an aligned Org table string for HEADER and ROWS (lists of cells).
+Cells are coerced to strings; columns are padded to their widest cell."
+  (let* ((to-str (lambda (r) (mapcar (lambda (c) (format "%s" c)) r)))
+         (h (funcall to-str header))
+         (rs (mapcar to-str rows))
+         (ncol (length h))
+         (widths (mapcar (lambda (c)
+                           (apply #'max (mapcar (lambda (r) (length (nth c r)))
+                                                (cons h rs))))
+                         (number-sequence 0 (1- ncol))))
+         (fmt-row (lambda (r)
+                    (concat "| "
+                            (mapconcat (lambda (c)
+                                         (format (format "%%-%ds" (nth c widths))
+                                                 (nth c r)))
+                                       (number-sequence 0 (1- ncol)) " | ")
+                            " |")))
+         (hline (concat "|" (mapconcat (lambda (w) (make-string (+ w 2) ?-))
+                                       widths "+")
+                        "|")))
+    (concat (funcall fmt-row h) "\n" hline "\n"
+            (mapconcat fmt-row rs "\n") "\n")))
+
+(defun emeld--benchmark-run-org (run)
+  "Format one RUN plist (see `emeld--benchmark-log') as an Org subtree."
+  (let* ((kind (plist-get run :kind))
+         (entries (plist-get run :entries))
+         (rows (append (mapcar (lambda (s) (list (nth 0 s) (nth 1 s) (nth 2 s)))
+                               (plist-get run :stages))
+                       (list (list "*total*" (plist-get run :total) "")))))
+    (concat
+     (format "*** %s :: %s vs %s%s\n"
+             (if (eq kind 'same) "identical-files (S)" "initial (diff -rq)")
+             (abbreviate-file-name (or (plist-get run :left) "?"))
+             (abbreviate-file-name (or (plist-get run :right) "?"))
+             (if (and entries (> entries 0)) (format " — %d entries" entries) ""))
+     (emeld--org-table '("stage" "ms" "cumulative ms") rows))))
+
+(defun emeld--benchmark-org-entry (runs info time)
+  "Build the Org entry string for RUNS, system INFO, recorded at TIME."
+  (concat
+   (format "* %s — emeld %s (%s)\n"
+           (format-time-string "[%Y-%m-%d %a %H:%M]" time)
+           (cdr (assoc "Emeld" info)) (cdr (assoc "Emeld rev" info)))
+   "** System\n"
+   (mapconcat (lambda (kv) (format "- %s :: %s" (car kv) (cdr kv))) info "\n")
+   "\n** Runs\n"
+   (mapconcat #'emeld--benchmark-run-org runs "\n")))
+
+(defun emeld-benchmark-record ()
+  "Append the benchmark runs collected this session to `emeld-benchmark-file'.
+Runs accumulate (one per completed scan) while `emeld-benchmark' is
+non-nil.  This writes them under a single Org heading stamped with the
+machine specs and emeld build from `emeld--system-info', then clears the
+collected runs and visits the file at the new entry."
+  (interactive)
+  (unless emeld--benchmark-log
+    (user-error "No benchmark runs collected; enable `emeld-benchmark' and run a comparison"))
+  (let* ((runs (reverse emeld--benchmark-log))
+         (file (expand-file-name emeld-benchmark-file))
+         (new (not (file-exists-p file)))
+         (entry (emeld--benchmark-org-entry runs (emeld--system-info) (current-time))))
+    (with-temp-buffer
+      (when new
+        (insert "#+TITLE: Emeld Benchmark Log\n"
+                "#+STARTUP: showall\n\n"))
+      (insert entry "\n")
+      (write-region (point-min) (point-max) file t 'silent))
+    (setq emeld--benchmark-log nil)
+    ;; In batch (bench.sh) just write; interactively, visit the new entry.
+    (unless noninteractive
+      (find-file file)
+      (goto-char (point-max)))
+    (message "Recorded %d benchmark run(s) to %s"
+             (length runs) (abbreviate-file-name file))))
+
+(defun emeld-benchmark-system-info ()
+  "Insert this machine's specs and emeld build (`emeld--system-info') at point.
+Useful for filling in the System block of a hand-written benchmark entry."
+  (interactive)
+  (insert (mapconcat (lambda (kv) (format "- %s :: %s" (car kv) (cdr kv)))
+                     (emeld--system-info) "\n")
+          "\n"))
 
 ;;;; ─── Async scan via make-process ─────────────────────────────────
 
@@ -1314,6 +1508,64 @@ Prompts for confirmation or selection."
         (user-error "Cannot compare a directory with itself: %s" left-abs)
       (emeld-diff left-abs right-abs))))
 
+;;;; ─── Presets (saved directory pairs) ─────────────────────────────
+
+(defun emeld--read-preset (prompt)
+  "Read a saved preset name via `completing-read' with PROMPT.
+Candidates are annotated with their left/right directories."
+  (unless emeld-presets
+    (user-error "No saved presets (use `emeld-save-preset')"))
+  (let ((completion-extra-properties
+         (list :annotation-function
+               (lambda (name)
+                 (let ((e (assoc name emeld-presets)))
+                   (when e
+                     (concat "   "
+                             (abbreviate-file-name (nth 1 e)) " ↔ "
+                             (abbreviate-file-name (nth 2 e)))))))))
+    (completing-read prompt (mapcar #'car emeld-presets) nil t)))
+
+(defun emeld-save-preset (name)
+  "Save the current comparison's directories as preset NAME.
+Recall it later with `emeld-load-preset'.  Reusing an existing name
+overwrites it.  Must be called from an emeld comparison buffer."
+  (interactive
+   (progn
+     (unless (and emeld--left-root emeld--right-root)
+       (user-error "No active emeld comparison to save"))
+     (list (completing-read
+            "Save preset as: " (mapcar #'car emeld-presets) nil nil
+            ;; Pre-fill an editable suggested name (RET to accept as-is).
+            (format "%s <-> %s"
+                    (file-name-nondirectory (directory-file-name emeld--left-root))
+                    (file-name-nondirectory (directory-file-name emeld--right-root)))))))
+  (unless (and emeld--left-root emeld--right-root)
+    (user-error "No active emeld comparison to save"))
+  (when (string-empty-p (string-trim name))
+    (user-error "Preset name must not be empty"))
+  (setq emeld-presets
+        (cons (list name emeld--left-root emeld--right-root)
+              (assoc-delete-all name emeld-presets)))
+  (message "Saved preset \"%s\": %s ↔ %s" name
+           (abbreviate-file-name emeld--left-root)
+           (abbreviate-file-name emeld--right-root)))
+
+;;;###autoload
+(defun emeld-load-preset (name)
+  "Load saved preset NAME and start the comparison.
+NAME is chosen from `emeld-presets' via completion."
+  (interactive (list (emeld--read-preset "Load preset: ")))
+  (let ((entry (assoc name emeld-presets)))
+    (unless entry
+      (user-error "No preset named \"%s\"" name))
+    (emeld-diff (nth 1 entry) (nth 2 entry))))
+
+(defun emeld-delete-preset (name)
+  "Delete saved preset NAME from `emeld-presets'."
+  (interactive (list (emeld--read-preset "Delete preset: ")))
+  (setq emeld-presets (assoc-delete-all name emeld-presets))
+  (message "Deleted preset \"%s\"" name))
+
 (defface emeld-same-face
   '((t :inherit font-lock-comment-face))
   "Face for files that are the same."
@@ -1394,6 +1646,8 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "}")   #'emeld-grow-column)
     (define-key map (kbd "{")   #'emeld-shrink-column)
     (define-key map (kbd "C-c f") #'emeld-toggle-filter-group)
+    (define-key map (kbd "C-c s") #'emeld-save-preset)
+    (define-key map (kbd "C-c l") #'emeld-load-preset)
     map)
   "Keymap for `emeld-mode'.")
 
@@ -2416,6 +2670,10 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
     ("d"   "delete from side"   emeld-delete)
     ("w"   "copy path"          emeld-copy-path-at-point)
     ("P"   "format as patch"    emeld-format-patch)]
+   ["Preset"
+    ("ps" "save current" emeld-save-preset)
+    ("pl" "load…"        emeld-load-preset)
+    ("pd" "delete…"      emeld-delete-preset)]
    ])
 
 (define-key emeld-mode-map (kbd "?") #'emeld-dispatch)

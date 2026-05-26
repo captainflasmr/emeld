@@ -16,6 +16,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Bulk expand/collapse: ~[~ collapse all, ~]~ expand all, ~\\~ expand only paths leading to changes.
 - File copying between directories (~C~).
 - Export changes as a unified-diff patch (~P~).
+- Presets: save a directory pair (~C-c s~) and recall it later (~C-c l~) for fast repeated comparisons.
 - Side-aware navigation (~n~/~p~) and side-jumping (~o~).
 - Integration with ~ediff~.
 - Fully themeable (uses standard Emacs faces).
@@ -40,6 +41,7 @@ The transient menu is organized into four groups:
 - ~Navigate~ :: Rescan (~g~) and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
 - ~File~ :: Operate on files (~RET~ ediff/open, ~SPC~ soft diff/fold, ~C~ copy, ~d~ delete, ~w~ copy path, ~P~ format patch).
 - ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~cl~ list all globs.
+- ~Preset~ :: Save the current directory pair (~ps~), load a saved pair (~pl~), delete one (~pd~).
 
 * Key Bindings
 | Key       | Action                                            |
@@ -72,6 +74,8 @@ The transient menu is organized into four groups:
 | M-n/M-p   | Jump to next/previous file change                 |
 | { / }     | Shrink/grow left pane width                       |
 | C-c f     | Toggle a named filter group on/off                |
+| C-c s     | Save current directories as a preset              |
+| C-c l     | Load a saved preset (completion)                  |
 
 * Customization
 
@@ -92,6 +96,54 @@ The transient menu is organized into four groups:
 - ~emeld-column-ratio~: Left pane width as percentage of window (default 50).
 - ~emeld-render-throttle~: Minimum seconds between intermediate buffer redraws during a scan (default 0.15).  Raise it to redraw less often on very large trees; the final result is always rendered on completion.
 - ~emeld-benchmark~: When non-nil, collect and report phased scan timings (default nil).  Both the initial scan and the identical-files (~S~) merge print a per-stage timing report to the echo area / ~*Messages*~.
+- ~emeld-benchmark-file~: Org file where ~emeld-benchmark-record~ appends timing entries (default ~BENCHMARKS.org~ beside ~emeld.el~).
+- ~emeld-presets~: Saved directory pairs as ~(NAME LEFT RIGHT)~, managed by the preset commands (see below) and persisted across sessions via ~savehist~.
+
+* Presets
+
+Frequently-compared directory pairs can be saved and recalled:
+
+- ~M-x emeld-save-preset~ (~C-c s~, or ~ps~ in the transient) — name and save
+  the current comparison's left/right directories.
+- ~M-x emeld-load-preset~ (~C-c l~, or ~pl~) — pick a saved pair via
+  completion (annotated with its directories) and start the comparison.
+  This is autoloaded, so it works as an entry point even before any
+  comparison is open.
+- ~M-x emeld-delete-preset~ (~pd~) — remove a saved pair.
+
+Presets are stored in ~emeld-presets~, which emeld registers with
+~savehist-additional-variables~.  With ~savehist-mode~ enabled they persist
+across sessions automatically; without it they last only for the current
+session.
+
+* Benchmarking and Regression Tracking
+
+To keep a record of large-repo comparison timings across builds:
+
+1. Enable timing collection: ~(setq emeld-benchmark t)~.
+2. Run one or more comparisons (the initial scan, and toggle ~S~ for the
+   identical-files pass).  Each completed scan prints a report and is
+   queued in memory.
+3. ~M-x emeld-benchmark-record~ writes all queued runs to
+   ~emeld-benchmark-file~ under a single dated heading, stamped with the
+   machine specs and emeld git revision, then clears the queue.
+
+Because every entry records the host, CPU, RAM, Emacs version and emeld
+build, the resulting ~BENCHMARKS.org~ lets you compare runs across commits
+and machines to spot performance regressions.  ~M-x
+emeld-benchmark-system-info~ inserts the current machine's specs at point
+if you want to annotate an entry by hand.
+
+The ~test/bench.sh~ script feeds the same log non-interactively:
+
+#+begin_src sh
+test/bench.sh small [N]   # synthetic tree (default 10000 files)
+test/bench.sh large       # Linux kernel v7.0 vs v6.19 (git clone on first run)
+#+end_src
+
+It records to ~BENCHMARKS.org~ by default.  Set ~EMELD_BENCH_SAME=1~ to also
+run and record the identical-files pass, ~EMELD_BENCH_RECORD=0~ to print
+without recording, or ~EMELD_BENCH_FILE=PATH~ to redirect the log.
 
 * Per-Project Configuration with ~.dir-locals.el~
 
