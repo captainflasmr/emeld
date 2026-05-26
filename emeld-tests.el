@@ -436,6 +436,24 @@ a new path that is neither is treated as identical."
       (delete-directory left t)
       (delete-directory right t))))
 
+(ert-deftest emeld-same-dir-hidden-when-same-off ()
+  "Top-level `same'-only dirs hide when Same is off; changed dirs stay visible."
+  (let* ((root (emeld-node-create :name "root" :is-dir t))
+         (same-dir (emeld-node-create :name "samedir" :is-dir t :parent root
+                                      :diff-status 'same))
+         (diff-dir (emeld-node-create :name "diffdir" :is-dir t :parent root
+                                      :diff-status 'different))
+         (emeld--root-node root))
+    (setf (emeld-node-children root) (list same-dir diff-dir))
+    ;; Same on: structural context exposes the all-identical dir too.
+    (let ((emeld-show-same t) (emeld-show-files t) (emeld-show-different t))
+      (should (emeld--node-visible-p same-dir))
+      (should (emeld--node-visible-p diff-dir)))
+    ;; Same off: the all-identical dir disappears; the changed dir remains.
+    (let ((emeld-show-same nil) (emeld-show-files t) (emeld-show-different t))
+      (should-not (emeld--node-visible-p same-dir))
+      (should (emeld--node-visible-p diff-dir)))))
+
 (ert-deftest emeld-preset-savehist-registered ()
   "Loading savehist registers `emeld-presets' for cross-session persistence."
   (require 'savehist)

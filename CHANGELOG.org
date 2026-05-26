@@ -1,5 +1,9 @@
 #+TITLE: Changelog for Emeld
 
+* [0.26.0] - 2026-05-26
+** Fixed
+- Toggling Same off now returns to a pure diff view.  Top-level directories that contain only identical files (merged in, and lazily loaded, when Same is toggled on) were kept visible by an unconditional "expose top-level subdirectories" rule; they are now hidden when ~emeld-show-same~ is off, leaving only directories that contain differences.
+
 * [0.25.0] - 2026-05-26
 ** Changed
 - The Files toggle (~F~) moved from the top-level ~File Status~ column into the ~View~ sub-menu, which is now split into two columns: ~Show~ (Files/tree-lines/strikethrough/gitignore toggles) and ~Layout~ (fold, indent, pane-resize).  The ~F~ key binding in ~emeld-mode~ is unchanged.

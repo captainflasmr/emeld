@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.25.0
+;; Version: 0.26.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -2907,12 +2907,16 @@ Returns t if successfully positioned, otherwise nil."
 
 (defun emeld--node-visible-p (node)
   "Determine if NODE should be visible based on status and structure filters.
-The root node and its immediate subdirectories are always visible
-for structural reference.  Other directory nodes are always shown
-so collapsed folder rows remain navigable."
+The root node is always visible.  When showing identical files, top-level
+subdirectories are exposed for structural reference; with identical files
+hidden, an all-identical (`same') directory is hidden too, so toggling Same
+off returns to a pure diff view.  Directories containing changes are always
+shown so collapsed folder rows remain navigable."
   (or (eq node emeld--root-node)
-      ;; Keep top-level subdirectories always exposed for structural context
-      (and (emeld-node-is-dir node)
+      ;; Expose top-level subdirectories for structural context, but only while
+      ;; showing identical files; otherwise a `same' dir must not surface.
+      (and emeld-show-same
+           (emeld-node-is-dir node)
            (eq (emeld-node-parent node) emeld--root-node))
       (and (emeld-node-is-dir node)
            (not (eq (emeld-node-diff-status node) 'same)))
