@@ -670,25 +670,27 @@ stripped).  Defaults to `find', which is universal; set it to e.g.
                             (setf (emeld-node-children root) top-level-children)
                             (emeld--render))
                           (lambda ()
-                            (with-current-buffer buf
-                              (setf (emeld-node-diff-status root)
-                                    (if (cl-some (lambda (c) (not (eq (emeld-node-diff-status c) 'same)))
-                                                 (emeld-node-children root))
-                                        'different 'same))
-                              (setq emeld--scan-process nil
-                                    emeld--scan-buf nil)
-                              (emeld--restore-expanded root)
-                              (emeld--render)
-                              (emeld--bench-push "tree built")
-                              (emeld--bench-report)
-                              (setq gc-cons-threshold old-gc)
-                              (if emeld-show-same
-                                  ;; Differences are placed; merge identical
-                                  ;; files via the fast path rather than having
-                                  ;; assembled them all from diff -rqs.
-                                  (emeld--scan-same-async buf)
-                                (setq emeld--status-phase 'done)
-                                (emeld--update-header-line))))))))))))
+                             (with-current-buffer buf
+                               (setf (emeld-node-diff-status root)
+                                     (if (cl-some (lambda (c) (not (eq (emeld-node-diff-status c) 'same))
+                                                               )
+                                                  (emeld-node-children root))
+                                         'different 'same))
+                               (setq emeld--scan-process nil
+                                     emeld--scan-buf nil)
+                               (emeld--restore-expanded root)
+                               (unless emeld-show-same
+                                 (setq emeld--status-phase 'done))
+                               (emeld--render)
+                               (emeld--bench-push "tree built")
+                               (emeld--bench-report)
+                               (setq gc-cons-threshold old-gc)
+                               (if emeld-show-same
+                                   ;; Differences are placed; merge identical
+                                   ;; files via the fast path rather than having
+                                   ;; assembled them all from diff -rqs.
+                                   (emeld--scan-same-async buf)
+                                 (emeld--update-header-line))))))))))))
           (run-with-timer 0.001 nil #'process-lines-chunk))))))
 
 (defun emeld--entries-to-nodes-progressive (entries prefix parent buf initial-render-cb final-cb &optional gen)
@@ -2630,25 +2632,44 @@ reflects the live scan counters without needing to be re-installed."
     (erase-buffer)
     (remove-overlays)
     
-    ;; Headers (with emeld-header property for interactive directory switching)
-    (let ((header-start (point)))
-      (insert (propertize (truncate-string-to-width (abbreviate-file-name emeld--left-root)
-                                                    emeld--column-width nil ?\s)
-                          'face 'emeld-header-face))
-      (insert (propertize (truncate-string-to-width (abbreviate-file-name emeld--right-root)
-                                                    emeld--column-width nil ?\s)
-                          'face 'emeld-header-face))
-      (add-text-properties header-start (point) '(emeld-header t mouse-face highlight)))
-    (insert "\n" (make-string (* 2 emeld--column-width) ?-) "\n")
-    ;; Root node (collapsible)
-    (emeld--render-nodes (list emeld--root-node) "" emeld--column-width)
-    
-    ;; Restore point based on path matching or structural layout line
-    (or (and target-path
-             (emeld--move-to-node-by-path target-path target-is-dir current-col))
-        (progn
-          (goto-char (point-min))
-          (forward-line (1- (min fallback-line (count-lines (point-min) (point-max)))))))
+    (cond
+     ;; Scan in progress, no nodes arrived yet
+     ((and (memq emeld--status-phase '(running-diff building-tree))
+           (or (null emeld--root-node)
+               (null (emeld-node-children emeld--root-node))))
+      (insert "\n\n")
+      (insert (propertize "  Scanning directories, please wait..." 'face 'font-lock-comment-face))
+      (insert "\n"))
+     
+     ;; Scan complete, no differences to show
+     ((and (eq emeld--status-phase 'done)
+           (or (null emeld--root-node)
+               (null (emeld-node-children emeld--root-node))))
+      (insert "\n\n")
+      (insert (propertize "  No differences detected between directories." 'face 'font-lock-comment-face))
+      (insert "\n"))
+     
+     ;; Normal tree rendering
+     (t
+      ;; Headers (with emeld-header property for interactive directory switching)
+      (let ((header-start (point)))
+        (insert (propertize (truncate-string-to-width (abbreviate-file-name emeld--left-root)
+                                                      emeld--column-width nil ?\s)
+                            'face 'emeld-header-face))
+        (insert (propertize (truncate-string-to-width (abbreviate-file-name emeld--right-root)
+                                                      emeld--column-width nil ?\s)
+                            'face 'emeld-header-face))
+        (add-text-properties header-start (point) '(emeld-header t mouse-face highlight)))
+      (insert "\n" (make-string (* 2 emeld--column-width) ?-) "\n")
+      ;; Root node (collapsible)
+      (emeld--render-nodes (list emeld--root-node) "" emeld--column-width)
+      
+      ;; Restore point based on path matching or structural layout line
+      (or (and target-path
+               (emeld--move-to-node-by-path target-path target-is-dir current-col))
+          (progn
+            (goto-char (point-min))
+            (forward-line (1- (min fallback-line (count-lines (point-min) (point-max)))))))))
     
     (set-buffer-modified-p nil)))
 
