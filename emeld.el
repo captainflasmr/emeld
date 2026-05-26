@@ -2693,16 +2693,16 @@ reflects the live scan counters without needing to be re-installed."
       (insert (propertize "  Scanning directories, please wait..." 'face 'font-lock-comment-face))
       (insert "\n"))
      
-     ;; Scan complete, no differences to show
-     ((and (eq emeld--status-phase 'done)
-           (or (null emeld--root-node)
-               (null (emeld-node-children emeld--root-node))))
-      (insert "\n\n")
-      (insert (propertize "  No differences detected between directories." 'face 'font-lock-comment-face))
-      (insert "\n"))
-     
-     ;; Normal tree rendering
+     ;; Done or no-tree — always render headers and root structure for reference
      (t
+      ;; Status banner when the tree is empty (no differences)
+      (when (and (eq emeld--status-phase 'done)
+                 (or (null emeld--root-node)
+                     (null (emeld-node-children emeld--root-node))))
+        (insert "\n")
+        (insert (propertize "  No differences detected between directories." 'face 'font-lock-comment-face))
+        (insert "\n\n"))
+      
       ;; Headers (with emeld-header property for interactive directory switching)
       (let ((header-start (point)))
         (insert (propertize (truncate-string-to-width (abbreviate-file-name emeld--left-root)
@@ -2713,8 +2713,10 @@ reflects the live scan counters without needing to be re-installed."
                             'face 'emeld-header-face))
         (add-text-properties header-start (point) '(emeld-header t mouse-face highlight)))
       (insert "\n" (make-string (* 2 emeld--column-width) ?-) "\n")
-      ;; Root node (collapsible)
-      (emeld--render-nodes (list emeld--root-node) "" emeld--column-width)
+      ;; Root node (collapsible) — draws even with no children so the
+      ;; directory structure stays visible for visual reference.
+      (when emeld--root-node
+        (emeld--render-nodes (list emeld--root-node) "" emeld--column-width))
       
       ;; Restore point based on path matching or structural layout line
       (or (and target-path
@@ -2756,9 +2758,13 @@ Returns t if successfully positioned, otherwise nil."
 
 (defun emeld--node-visible-p (node)
   "Determine if NODE should be visible based on status and structure filters.
-The root node is always visible.  Directory nodes are always shown
+The root node and its immediate subdirectories are always visible
+for structural reference.  Other directory nodes are always shown
 so collapsed folder rows remain navigable."
   (or (eq node emeld--root-node)
+      ;; Keep top-level subdirectories always exposed for structural context
+      (and (emeld-node-is-dir node)
+           (eq (emeld-node-parent node) emeld--root-node))
       (and (emeld-node-is-dir node)
            (not (eq (emeld-node-diff-status node) 'same)))
       (and emeld-show-files
