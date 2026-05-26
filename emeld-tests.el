@@ -283,25 +283,44 @@ must reuse them rather than create siblings with the same name."
          (emeld--root-node root))
     (setf (emeld-node-children dirA) (list f1 f2))
     (setf (emeld-node-children root) (list dirA f3 f4 f5))
-    ;; modified only
+    ;; modified only — marked on the left (source) side by default
     (let ((emeld--marked-paths (make-hash-table :test #'equal)))
       (should (= 2 (emeld--mark-nodes-by-status '(different))))
-      (should (gethash "dirA/f1" emeld--marked-paths))
-      (should (gethash "f4" emeld--marked-paths))
+      (should (emeld--marked-side-p "dirA/f1" 'left))
+      (should (emeld--marked-side-p "f4" 'left))
+      (should-not (emeld--marked-side-p "dirA/f1" 'right))
       (should-not (gethash "dirA/f2" emeld--marked-paths))
       (should-not (gethash "f3" emeld--marked-paths))
       (should-not (gethash "dirA" emeld--marked-paths)))
     ;; left-only only
     (let ((emeld--marked-paths (make-hash-table :test #'equal)))
       (should (= 1 (emeld--mark-nodes-by-status '(left-only))))
-      (should (gethash "f3" emeld--marked-paths)))
+      (should (emeld--marked-side-p "f3" 'left)))
     ;; sync set (to copy left→right): modified + left-only, never right-only
     (let ((emeld--marked-paths (make-hash-table :test #'equal)))
       (should (= 3 (emeld--mark-nodes-by-status '(different left-only))))
-      (should (gethash "dirA/f1" emeld--marked-paths))
-      (should (gethash "f4" emeld--marked-paths))
-      (should (gethash "f3" emeld--marked-paths))
+      (should (emeld--marked-side-p "dirA/f1" 'left))
+      (should (emeld--marked-side-p "f4" 'left))
+      (should (emeld--marked-side-p "f3" 'left))
       (should-not (gethash "f5" emeld--marked-paths)))))
+
+(ert-deftest emeld-mark-side-toggle ()
+  "`emeld--set-mark' tracks per-side marks and drops empty entries."
+  (let ((emeld--marked-paths (make-hash-table :test #'equal)))
+    (emeld--set-mark "x" 'left t)
+    (should (emeld--marked-side-p "x" 'left))
+    (should-not (emeld--marked-side-p "x" 'right))
+    (emeld--set-mark "x" 'right t)
+    (should (emeld--marked-side-p "x" 'left))
+    (should (emeld--marked-side-p "x" 'right))
+    ;; Unmarking one side leaves the other and keeps the entry.
+    (emeld--set-mark "x" 'left nil)
+    (should-not (emeld--marked-side-p "x" 'left))
+    (should (emeld--marked-side-p "x" 'right))
+    (should (gethash "x" emeld--marked-paths))
+    ;; Unmarking the last side removes the entry entirely.
+    (emeld--set-mark "x" 'right nil)
+    (should-not (gethash "x" emeld--marked-paths))))
 
 (ert-deftest emeld-same-list-exclusions ()
   "The `list' same-merge keeps only genuinely-identical left files.
@@ -342,6 +361,42 @@ a new path that is neither is treated as identical."
   "Loading savehist registers `emeld-presets' for cross-session persistence."
   (require 'savehist)
   (should (memq 'emeld-presets savehist-additional-variables)))
+
+(ert-deftest emeld-delete-marked-side-aware ()
+  "`emeld-delete' with marks deletes each node from its marked side(s)."
+  (let* ((left (make-temp-file "emeld-left" t))
+         (right (make-temp-file "emeld-right" t)))
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name "sub" left))
+          (dolist (f '("a.txt" "b.txt" "sub/c.txt"))
+            (with-temp-file (expand-file-name f left) (insert "x")))
+          (dolist (f '("a.txt" "d.txt"))
+            (with-temp-file (expand-file-name f right) (insert "x")))
+          (with-temp-buffer
+            (setq-local emeld--left-root left
+                        emeld--right-root right
+                        emeld--column-width 40
+                        emeld--marked-paths (make-hash-table :test #'equal))
+            ;; a.txt marked on BOTH sides; b.txt + sub/c.txt on the left only;
+            ;; d.txt unmarked (must survive).
+            (emeld--set-mark "a.txt" 'left t)
+            (emeld--set-mark "a.txt" 'right t)
+            (emeld--set-mark "b.txt" 'left t)
+            (emeld--set-mark "sub/c.txt" 'left t)
+            (cl-letf (((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+                      ((symbol-function 'emeld-refresh) (lambda () nil)))
+              (emeld-delete))
+            ;; Every marked side is deleted; the unmarked right d.txt survives.
+            (should-not (file-exists-p (expand-file-name "a.txt" left)))
+            (should-not (file-exists-p (expand-file-name "a.txt" right)))
+            (should-not (file-exists-p (expand-file-name "b.txt" left)))
+            (should-not (file-exists-p (expand-file-name "sub/c.txt" left)))
+            (should (file-exists-p (expand-file-name "d.txt" right)))
+            ;; Marks cleared after the operation.
+            (should (= 0 (hash-table-count emeld--marked-paths)))))
+      (delete-directory left t)
+      (delete-directory right t))))
 
 (message "Running tests...")
 (ert-run-tests-batch-and-exit)

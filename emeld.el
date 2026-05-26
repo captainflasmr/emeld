@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.20.0
+;; Version: 0.22.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -218,7 +218,9 @@ With `emeld--scan-processed' this drives the header-line progress bar.")
 (defvar-local emeld--saved-point-col nil
   "Saved point column to restore across async refresh cycle.")
 (defvar-local emeld--marked-paths nil
-  "Hash table of relative paths for marked nodes (Dired-style marking).")
+  "Hash table of marked nodes (Dired-style marking).
+Keys are relative paths; each value is a list of marked sides — a subset
+of (left right).  A node can be marked on either side independently.")
 (defvar-local emeld--last-render-time nil
   "Float-time of the last `emeld--render' call, for render throttling.")
 (defvar-local emeld--same-skip-files nil
@@ -2376,27 +2378,63 @@ If on a file, show a quick diff of the current node."
               (diff right left)
             (message "Soft diff only works for comparing two files")))))))
 
-(defun emeld-mark ()
-  "Mark the node at point (Dired-style)."
-  (interactive)
+(defun emeld--marked-sides (rel)
+  "Return the list of marked sides (subset of (left right)) for REL."
+  (and emeld--marked-paths (gethash rel emeld--marked-paths)))
+
+(defun emeld--marked-side-p (rel side)
+  "Return non-nil if REL is marked on SIDE (`left' or `right')."
+  (memq side (emeld--marked-sides rel)))
+
+(defun emeld--set-mark (rel side on)
+  "Mark (ON non-nil) or unmark REL on SIDE in `emeld--marked-paths'.
+Drops the entry entirely when no sides remain marked."
+  (let ((sides (if on (cl-adjoin side (emeld--marked-sides rel))
+                 (delq side (copy-sequence (emeld--marked-sides rel))))))
+    (if sides
+        (puthash rel sides emeld--marked-paths)
+      (remhash rel emeld--marked-paths))))
+
+(defun emeld--node-side-at-point ()
+  "Return (NODE . SIDE) for the file at point, SIDE being `left' or `right'.
+The side is chosen by the column; if that side has no file but the other
+does, the other side is returned so the mark always sits next to a file.
+Signals a `user-error' if there is no node at point."
   (let ((node (get-text-property (point) 'emeld-node)))
     (unless node (user-error "No node at point"))
-    (let ((rel (emeld--node-relpath node)))
-      (puthash rel t emeld--marked-paths)
-      (emeld--render)
-      (forward-line 1)
-      (emeld--move-to-node-name (>= (current-column) emeld--column-width)))))
+    (let* ((on-left (< (current-column) emeld--column-width))
+           (this (if on-left 'left 'right))
+           (this-path (if on-left (emeld-node-left-path node)
+                        (emeld-node-right-path node))))
+      (cons node
+            (cond (this-path this)
+                  ((if on-left (emeld-node-right-path node)
+                     (emeld-node-left-path node))
+                   (if on-left 'right 'left))
+                  (t this))))))
+
+(defun emeld-mark ()
+  "Mark the file at point on the current side (Dired-style).
+The side is determined by which column point is in.  Point then advances to
+the next node, staying on the same side where possible."
+  (interactive)
+  (let* ((ns (emeld--node-side-at-point))
+         (side (cdr ns)))
+    (emeld--set-mark (emeld--node-relpath (car ns)) side t)
+    (emeld--render)
+    (forward-line 1)
+    (emeld--move-to-node-name (eq side 'right))))
 
 (defun emeld-unmark ()
-  "Unmark the node at point."
+  "Unmark the file at point on the current side.
+Point then advances to the next node, staying on the same side where possible."
   (interactive)
-  (let ((node (get-text-property (point) 'emeld-node)))
-    (unless node (user-error "No node at point"))
-    (let ((rel (emeld--node-relpath node)))
-      (remhash rel emeld--marked-paths)
-      (emeld--render)
-      (forward-line 1)
-      (emeld--move-to-node-name (>= (current-column) emeld--column-width)))))
+  (let* ((ns (emeld--node-side-at-point))
+         (side (cdr ns)))
+    (emeld--set-mark (emeld--node-relpath (car ns)) side nil)
+    (emeld--render)
+    (forward-line 1)
+    (emeld--move-to-node-name (eq side 'right))))
 
 (defun emeld-unmark-all ()
   "Unmark all nodes."
@@ -2405,16 +2443,18 @@ If on a file, show a quick diff of the current node."
   (emeld--render)
   (message "Marks cleared"))
 
-(defun emeld--mark-nodes-by-status (statuses)
-  "Mark every file node whose `diff-status' is in STATUSES.
-Adds to any existing marks and returns the number newly marked."
-  (let ((count 0))
+(defun emeld--mark-nodes-by-status (statuses &optional side)
+  "Mark on SIDE every file node whose `diff-status' is in STATUSES.
+SIDE defaults to `left' (the source side for the left→right sync workflow);
+the matched statuses all have a left file.  Adds to any existing marks and
+returns the number newly marked."
+  (let ((side (or side 'left)) (count 0))
     (cl-labels ((walk (nodes)
                   (dolist (node nodes)
                     (if (emeld-node-is-dir node)
                         (walk (emeld-node-children node))
                       (when (memq (emeld-node-diff-status node) statuses)
-                        (puthash (emeld--node-relpath node) t emeld--marked-paths)
+                        (emeld--set-mark (emeld--node-relpath node) side t)
                         (cl-incf count))))))
       (when emeld--root-node
         (walk (emeld-node-children emeld--root-node))))
@@ -2490,7 +2530,8 @@ Creates missing parent directories."
 
 (defun emeld-copy ()
   "Copy marked files/dirs to the other side.
-When marks exist, all marked nodes are copied.
+When marks exist, each marked node is copied from its marked side to the
+opposite side (a node marked on both sides copies left→right).
 Otherwise, copy the node at point.
 Creates missing parent directories on the destination side if needed."
   (interactive)
@@ -2499,21 +2540,19 @@ Creates missing parent directories on the destination side if needed."
                   (nreverse paths))))
     (if marked
         (let ((count 0) (errors 0))
-          (when (yes-or-no-p (format "Copy %d marked node(s) to %s? "
-                                     (length marked) emeld--right-root))
+          (when (yes-or-no-p (format "Copy %d marked node(s) to the other side? "
+                                     (length marked)))
             (dolist (rel marked)
-              (let ((left (expand-file-name rel emeld--left-root))
-                    (right (expand-file-name rel emeld--right-root)))
-                (cond ((file-exists-p left)
-                       (condition-case nil
-                           (progn (emeld--copy-one left emeld--right-root)
-                                  (setq count (1+ count)))
-                         (error (setq errors (1+ errors)))))
-                      ((file-exists-p right)
-                       (condition-case nil
-                           (progn (emeld--copy-one right emeld--left-root)
-                                  (setq count (1+ count)))
-                         (error (setq errors (1+ errors))))))))
+              ;; left-priority: a both-marked node copies left→right.
+              (let* ((from (if (emeld--marked-side-p rel 'left) 'left 'right))
+                     (src-root (if (eq from 'left) emeld--left-root emeld--right-root))
+                     (dst-root (if (eq from 'left) emeld--right-root emeld--left-root))
+                     (src (expand-file-name rel src-root)))
+                (if (file-exists-p src)
+                    (condition-case nil
+                        (progn (emeld--copy-one src dst-root) (cl-incf count))
+                      (error (cl-incf errors)))
+                  (cl-incf errors))))
             (emeld-refresh)
             (clrhash emeld--marked-paths)
             (message "Copied %d node(s)%s" count
@@ -2546,25 +2585,57 @@ Creates missing parent directories on the destination side if needed."
                     (message "Copied %s" (emeld-node-name node)))
                 (error (message "Copy failed: %s" (error-message-string err)))))))))))
 
+(defun emeld--delete-one (path)
+  "Delete the file or directory at PATH recursively, moving it to trash."
+  (if (file-directory-p path)
+      (delete-directory path t t)
+    (delete-file path t)))
+
 (defun emeld-delete ()
-  "Delete the file/directory at point from the current side."
+  "Delete files/directories on their marked side(s).
+When marks exist, each marked node is deleted from every side it is marked
+on (a node marked on both sides is deleted from both).  Otherwise the node at
+point is deleted from the current side (the column point is in)."
   (interactive)
-  (let* ((node (get-text-property (point) 'emeld-node))
-         (cur-col (current-column))
-         (on-left (< cur-col emeld--column-width)))
-    (unless node (user-error "No node at point"))
-    (let* ((path (if on-left (emeld-node-left-path node) (emeld-node-right-path node)))
-           (side (if on-left "left" "right")))
-      (unless path (user-error "No file on %s side to delete" side))
-      (when (yes-or-no-p (format "Delete %s from %s side?" (emeld-node-name node) side))
-        (condition-case err
-            (progn
-              (if (file-directory-p path)
-                  (delete-directory path t t)
-                (delete-file path t))
+  (let* ((on-left (< (current-column) emeld--column-width))
+         (side (if on-left "left" "right"))
+         (marked (let (paths)
+                   (maphash (lambda (k _) (push k paths)) emeld--marked-paths)
+                   (nreverse paths))))
+    (if marked
+        ;; Count side-marks so the prompt reflects what will actually be deleted.
+        (let ((targets 0))
+          (dolist (rel marked) (setq targets (+ targets (length (emeld--marked-sides rel)))))
+          (when (yes-or-no-p (format "Delete %d marked file(s) on their marked side(s)? "
+                                     targets))
+            (let ((count 0) (errors 0) (missing 0))
+              (dolist (rel marked)
+                (dolist (s (emeld--marked-sides rel))
+                  (let ((path (expand-file-name rel (if (eq s 'left)
+                                                        emeld--left-root
+                                                      emeld--right-root))))
+                    (if (file-exists-p path)
+                        (condition-case nil
+                            (progn (emeld--delete-one path) (cl-incf count))
+                          (error (cl-incf errors)))
+                      (cl-incf missing)))))
               (emeld-refresh)
-              (message "Deleted %s from %s side" (emeld-node-name node) side))
-          (error (message "Delete failed: %s" (error-message-string err))))))))
+              (clrhash emeld--marked-paths)
+              (message "Deleted %d file(s)%s%s" count
+                       (if (> missing 0) (format ", %d already gone" missing) "")
+                       (if (> errors 0) (format " (%d errors)" errors) "")))))
+      (let* ((node (get-text-property (point) 'emeld-node))
+             (path (and node (if on-left (emeld-node-left-path node)
+                               (emeld-node-right-path node)))))
+        (unless node (user-error "No node at point"))
+        (unless path (user-error "No file on %s side to delete" side))
+        (when (yes-or-no-p (format "Delete %s from %s side?" (emeld-node-name node) side))
+          (condition-case err
+              (progn
+                (emeld--delete-one path)
+                (emeld-refresh)
+                (message "Deleted %s from %s side" (emeld-node-name node) side))
+            (error (message "Delete failed: %s" (error-message-string err)))))))))
 
 (defun emeld-swap-panes ()
   "Swap the left and right comparison directories and flip all node paths."
@@ -2858,12 +2929,14 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
                                   (concat (if (emeld-node-expanded node) "[-] " "[+] ")
                                           emeld-dir-prefix)
                                 "")))
-          (let ((start (point))
-                (mark-char (if (and emeld--marked-paths
-                                    (gethash (emeld--node-relpath node) emeld--marked-paths))
-                               (propertize "*" 'face 'font-lock-keyword-face)
-                             " ")))
-            (insert mark-char " ")
+          (let* ((start (point))
+                 (rel (emeld--node-relpath node))
+                 (left-mark (if (emeld--marked-side-p rel 'left)
+                                (propertize "*" 'face 'font-lock-keyword-face) " "))
+                 (right-mark (if (emeld--marked-side-p rel 'right)
+                                 (propertize "*" 'face 'font-lock-keyword-face) " ")))
+            ;; Left mark column
+            (insert left-mark " ")
             ;; Left Side
             (insert (propertize full-prefix 'face 'shadow))
             (if (emeld-node-left-path node)
@@ -2881,7 +2954,8 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
                   (insert (make-string (- column-width current-len) ?\s))
                 (insert "  ")))
 
-            ;; Right Side
+            ;; Right mark column + Right Side
+            (insert right-mark " ")
             (insert (propertize full-prefix 'face 'shadow))
             (if (emeld-node-right-path node)
                 (progn
@@ -2988,7 +3062,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
     ("SPC" "soft diff / fold"   emeld-soft-diff)
     ("RET" "action (ediff)"     emeld-action)
     ("C"   "copy to other side" emeld-copy)
-    ("d"   "delete from side"   emeld-delete)
+    ("d"   "delete marked/at point" emeld-delete)
     ("w"   "copy path"          emeld-copy-path-at-point)
     ("P"   "format as patch"    emeld-format-patch)]
    ["Mark"

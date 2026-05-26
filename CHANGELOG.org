@@ -1,5 +1,13 @@
 #+TITLE: Changelog for Emeld
 
+* [0.22.0] - 2026-05-26
+** Changed
+- Marks are now per-side.  Marking (~m~/~u~) tags the file on the side point is in, and the ~*~ is drawn in that side's column next to the filename rather than once at the start of the whole line.  A node can be marked on the left, the right, or both.  ~emeld-copy~ (~C~) copies each marked node from its marked side to the other (a both-marked node copies left→right); ~emeld-delete~ (~d~) deletes each marked node from every side it is marked on.  Bulk-mark commands (~* m~/~* l~/~* c~) mark the left (source) side.  After marking, point advances to the next node on the same side (snapping to the other side only when that side is empty) instead of jumping back to the left column.
+
+* [0.21.0] - 2026-05-26
+** Changed
+- ~emeld-delete~ (~d~) now acts on marks: when nodes are marked it deletes every marked node present on the current side (skipping those absent there), mirroring ~emeld-copy~ (~C~).  With no marks it still deletes the node at point.  This makes the mark-then-delete workflow (e.g. ~* l~ then ~d~) possible.
+
 * [0.20.0] - 2026-05-26
 ** Added
 - ~emeld-swap-panes~ (~W~): swap the left and right comparison directories and flip all node paths and side-exclusive diff statuses, with no rescan needed.  Bound to ~W~ in the mode map and the transient Navigate group.

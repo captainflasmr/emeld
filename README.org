@@ -11,7 +11,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - ~.gitignore~ support, on by default — ignored files hidden on both sides, toggle with ~G~.
 - Instant toggles for New, Modified, Identical, and File visibility (~S~/~M~/~N~/~F~).
 - Orphan files shown with strikethrough on the missing side (Meld-style, toggle ~s~).
-- Dired-style marking (~m~/~u~/~U~) with bulk copy (~C~); bulk-mark by status (~* m~ modified, ~* l~ left-only, ~* c~ the left→right sync set).
+- Dired-style, per-side marking (~m~/~u~/~U~): the ~*~ sits in the column of the side you mark, and a node can be marked left, right, or both.  Bulk copy (~C~) copies each marked node from its marked side; bulk delete (~d~) deletes from every marked side; bulk-mark by status (~* m~ modified, ~* l~ left-only, ~* c~ the left→right sync set).
 - Filter groups toggleable from the transient menu.
 - Org-mode-style visibility cycling: ~S-TAB~ cycles the whole tree (TOP → DIRS → CHANGES), ~TAB~ does the equivalent for the subtree at point.
 - Bulk expand/collapse: ~[~ collapse all, ~]~ expand all, ~\\~ expand only paths leading to changes.
@@ -40,8 +40,8 @@ The transient menu is organized into groups:
 - ~File Status~ :: Toggle file visibility (~S~ same, ~M~ modified, ~N~ added, ~F~ files/directories-only).
 - ~View~ :: Toggle tree-lines (~T~), strikethrough (~s~), ~.gitignore~ respect (~G~), bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~\\~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), pane resize (~{~/~}~).
 - ~Navigate~ :: Swap panes (~W~), rescan (~g~), redraw after a resize (~r~), and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
-- ~File~ :: Operate on files (~RET~ ediff/open, ~SPC~ soft diff/fold, ~C~ copy, ~d~ delete, ~w~ copy path, ~P~ format patch).
-- ~Mark~ :: Mark/unmark at point (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), or the whole left→right sync set (~* c~); ~U~ unmark all.
+- ~File~ :: Operate on files (~RET~ ediff/open, ~SPC~ soft diff/fold, ~C~ copy marked/at point, ~d~ delete marked/at point, ~w~ copy path, ~P~ format patch).
+- ~Mark~ :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), or the whole left→right sync set (~* c~); ~U~ unmark all.
 - ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~cl~ list all globs.
 - ~Preset~ :: Save the current directory pair (~ps~), load a saved pair (~pl~), delete one (~pd~).
 
@@ -56,8 +56,8 @@ The transient menu is organized into groups:
 | \\        | Expand only paths to changes                      |
 | RET, e, = | Action (Ediff if different)                       |
 | f, v      | Find File (Open current side)                     |
-| d         | Delete file/dir from current side                 |
-| C         | Copy marked nodes (or node at point)              |
+| d         | Delete marked nodes (each from its marked side) or node at point |
+| C         | Copy marked nodes (each from its marked side) or node at point |
 | P         | Format as patch (unified diff)                    |
 | w         | Copy filename (C-u w for full path)               |
 | SPC       | Fold/Unfold (Dir) or Soft Diff (File)             |
@@ -66,8 +66,8 @@ The transient menu is organized into groups:
 | M         | Toggle modified files                             |
 | N         | Toggle added (new) files                          |
 | F         | Toggle file visibility (hide files, show dirs only)|
-| m         | Mark node                                         |
-| u         | Unmark node                                       |
+| m         | Mark file on current side                         |
+| u         | Unmark file on current side                       |
 | U         | Unmark all nodes                                  |
 | * m       | Mark all modified files                           |
 | * l       | Mark all left-only (created) files                |
