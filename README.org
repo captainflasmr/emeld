@@ -169,4 +169,4 @@ Emeld ships with Meld-style default filter groups (see above).  To override them
                             ("Config" nil "*.cfg" "config/*"))))))
 #+end_src
 
-Toggle named groups on/off from the transient menu (~?~) or with ~M-x emeld-toggle-filter-group~.  The header line shows the current display state and active groups in brackets.
+Toggle named groups on/off from the transient menu (~?~) or with ~M-x emeld-toggle-filter-group~.  The header line shows the current display state; review which groups are active and their globs with ~M-x emeld-list-filter-groups~ (~cl~ in the transient).

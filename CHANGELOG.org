@@ -1,5 +1,21 @@
 #+TITLE: Changelog for Emeld
 
+* [0.32.0] - 2026-05-27
+** Added
+- The header-line display state now includes a ~G~ flag for ~emeld-respect-gitignore~ (toggled with ~G~), bold when gitignore rules are being honored — e.g. ~[SMN │ FTsG]~.
+
+* [0.31.0] - 2026-05-27
+** Changed
+- When files are hidden (~F~ off), the header-line now emphasizes it: the ~F~ flag and an explicit ~⚠ files hidden~ note are shown in the ~warning~ face.  A files-less tree shows only directories and can look empty, which could otherwise be mistaken for "no differences".
+
+* [0.30.0] - 2026-05-27
+** Changed
+- The header-line display state now separates the Meld-style primary filters (~S~ Same / ~M~ Modified / ~N~ New) from the secondary display flags (~F~ / ~T~ / ~s~) with a vertical bar — e.g. ~[SMN │ FTs]~ — so the primary filtering stays visually distinct.
+
+* [0.29.0] - 2026-05-27
+** Changed
+- The header-line no longer lists the active filter groups (the ~[group]~ tags after the toggle indicators).  Filter groups still apply and are still toggled the same way; review them with ~M-x emeld-list-filter-groups~.
+
 * [0.28.0] - 2026-05-27
 ** Changed
 - Tree building (the initial ~diff -rq~ build and the identical-files ~S~ merge) no longer redraws the whole buffer as it streams in, which was the chief cause of jerkiness on large repositories: each redraw rebuilt the entire visible tree and, once started, ran to completion before Emacs could service input.  By default emeld now updates only the lightweight header-line progress bar during a scan and renders the finished tree once on completion, keeping Emacs fully responsive (scrolling/typing) while a large comparison builds.

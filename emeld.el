@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.28.0
+;; Version: 0.32.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -2806,18 +2806,30 @@ the standard foreground and background."
   (if enabled (propertize label 'face 'bold) label))
 
 (defun emeld--display-state-string ()
-  "Return a compact string showing current display toggle states."
-  (let ((groups (mapcar (lambda (g) (concat "[" g "]"))
-                        emeld--active-filter-groups)))
-    (concat
-     (emeld--toggle-indicator "S" emeld-show-same)
-     (emeld--toggle-indicator "M" emeld-show-different)
-     (emeld--toggle-indicator "N" emeld-show-added)
-     (emeld--toggle-indicator "F" emeld-show-files)
-     (emeld--toggle-indicator "T" emeld-show-tree-lines)
-     (emeld--toggle-indicator "s" emeld-show-strikethrough)
-     (when groups
-       (concat " " (mapconcat #'identity groups " "))))))
+  "Return a compact string showing current display toggle states.
+The Meld-style primary filters (Same/Modified/New) are grouped first and
+separated by a vertical bar from the secondary display flags (F files,
+T tree-lines, s strikethrough, G respect-gitignore) so the primary
+filtering stays distinct from the rest.  When files are hidden
+\(`emeld-show-files' nil) the F flag and an explicit \"files hidden\"
+note are shown in the `warning' face, since a files-less tree can look
+empty and be mistaken for \"no differences\"."
+  (concat
+   ;; Meld primary filtering: Same / Modified / New
+   (emeld--toggle-indicator "S" emeld-show-same)
+   (emeld--toggle-indicator "M" emeld-show-different)
+   (emeld--toggle-indicator "N" emeld-show-added)
+   " │ "
+   ;; Secondary display flags.  Files-off is emphasized: hiding files can
+   ;; make the tree look empty even when differences exist.
+   (if emeld-show-files
+       (emeld--toggle-indicator "F" t)
+     (propertize "F" 'face 'warning))
+   (emeld--toggle-indicator "T" emeld-show-tree-lines)
+   (emeld--toggle-indicator "s" emeld-show-strikethrough)
+   (emeld--toggle-indicator "G" emeld-respect-gitignore)
+   (unless emeld-show-files
+     (propertize " ⚠ files hidden" 'face 'warning))))
 
 (defun emeld--progress-bar (fraction &optional width)
   "Return a WIDTH-character text bar visualizing FRACTION (0.0-1.0).
