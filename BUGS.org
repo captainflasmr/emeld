@@ -9,8 +9,6 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
-** DOING Delete to be "D"
-
 ** TODO when edited file and then rescanned newly modified files didn't show
 
 ** TODO stepping through modified files should expand accordingly
