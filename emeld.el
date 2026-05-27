@@ -1868,8 +1868,8 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "]")   #'emeld-expand-all)
     (define-key map (kbd "\\")  #'emeld-expand-changes)
     (define-key map (kbd "RET") #'emeld-action)
-    (define-key map (kbd "e")   #'emeld-action)
-    (define-key map (kbd "=")   #'emeld-action)
+    (define-key map (kbd "e")   #'emeld-ediff)
+    (define-key map (kbd "=")   #'emeld-soft-diff)
     (define-key map (kbd "f")   #'emeld-find-file)
     (define-key map (kbd "v")   #'emeld-find-file)
     (define-key map (kbd "g")   #'emeld-refresh)
@@ -1884,16 +1884,19 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "P")   #'emeld-format-patch)
     (define-key map (kbd "C")   #'emeld-copy)
     (define-key map (kbd "w")   #'emeld-copy-path-at-point)
-    (define-key map (kbd "D")   #'emeld-delete)
+    (define-key map (kbd "x")   #'emeld-delete)
+    (define-key map (kbd "D")   #'emeld-diff-root)
+    (define-key map (kbd "d")   #'emeld-diff-dir)
     (define-key map (kbd "SPC") #'emeld-soft-diff)
     (define-key map (kbd "m")   #'emeld-mark)
     (define-key map (kbd "u")   #'emeld-unmark)
     (define-key map (kbd "U")   #'emeld-unmark-all)
+    (define-key map (kbd "M")   #'emeld-mark-all)
     (define-key map (kbd "* m") #'emeld-mark-modified)
     (define-key map (kbd "* l") #'emeld-mark-left-only)
     (define-key map (kbd "* c") #'emeld-mark-to-copy)
     (define-key map (kbd "S")   #'emeld-toggle-show-same)
-    (define-key map (kbd "M")   #'emeld-toggle-show-different)
+    (define-key map (kbd "M-d") #'emeld-toggle-show-different)
     (define-key map (kbd "N")   #'emeld-toggle-show-added)
     (define-key map (kbd "T")   #'emeld-toggle-tree-lines)
     (define-key map (kbd "c")   #'emeld-toggle-compact-tree)
@@ -2273,15 +2276,30 @@ Repeated invocations cycle TOP → DIRS → CHANGES → TOP."
         emeld--scan-diff-lines nil
         emeld--scan-buf nil))
 
+(defun emeld--reset-display-var (var)
+  "Reset VAR to the standard value from its `defcustom' definition."
+  (let ((std (get var 'standard-value)))
+    (when std
+      (set var (eval (car std) t)))))
+
 (defun emeld-redraw ()
-  "Re-render the current tree without rescanning.
-Recomputes the column width from the current window width and redraws,
-preserving point and expansion state.  Use this after resizing the
-window or frame; for a fresh comparison use `emeld-refresh' (\\[emeld-refresh])."
+  "Reset the display layout to defaults and re-render, without rescanning.
+Restores the indentation (`emeld-indent-offset') and the pane/tree
+separation (`emeld-column-ratio') to their standard values, recomputes
+the column width from the current window width, and redraws — preserving
+point and expansion state.  Use this to undo layout tweaks made with
+\\[emeld-increase-indent]/\\[emeld-decrease-indent] or
+\\[emeld-grow-column]/\\[emeld-shrink-column], or after resizing the
+window or frame.  For a fresh comparison use `emeld-refresh'
+\(\\[emeld-refresh])."
   (interactive)
   (unless emeld--root-node
     (user-error "No comparison loaded"))
-  (emeld--render))
+  (emeld--reset-display-var 'emeld-indent-offset)
+  (emeld--reset-display-var 'emeld-column-ratio)
+  (emeld--render)
+  (message "Display reset (indent %d, columns %d/%d)"
+           emeld-indent-offset emeld-column-ratio (- 100 emeld-column-ratio)))
 
 (defun emeld-refresh ()
   "Refresh the comparison asynchronously.
@@ -2509,9 +2527,19 @@ On files, run ediff or open.  On directories, open in dired."
           (message "No file on %s side" (if (< cur-col emeld--column-width) "left" "right")))))))
 
 (defun emeld-soft-diff ()
-  "Contextual action for SPC.
-If on a directory, toggle expansion.
-If on a file, show a quick diff of the current node."
+  "Contextual \"just act\" command for SPC (and `=').
+Do the obvious thing for the node at point:
+
+- on a directory, toggle its expansion;
+- on a file that differs between the two sides, show a quick `diff';
+- on a file that exists on only one side (new), or is identical on
+  both, show it in another window (preferring the side at point).
+
+Unlike \\[emeld-action], this is a preview: the diff or file is only
+displayed, never selected, so point stays in the tree buffer.  Combined
+with \\[emeld-next-line]/\\[emeld-previous-line] to step and
+\\[emeld-jump-other-side] to switch sides, SPC lets you walk the tree and
+preview each node without leaving it."
   (interactive)
   (let ((node (get-text-property (point) 'emeld-node)))
     (if (not node)
@@ -2520,9 +2548,97 @@ If on a file, show a quick diff of the current node."
           (emeld-toggle-expand)
         (let ((left (emeld-node-left-path node))
               (right (emeld-node-right-path node)))
-          (if (and left right (not (file-directory-p left)) (not (file-directory-p right)))
-              (diff right left)
-            (message "Soft diff only works for comparing two files")))))))
+          ;; Display, never select: keep the tree window current so SPC can
+          ;; preview successive nodes.  `diff' already uses `display-buffer';
+          ;; the file branch uses `find-file-noselect' + `display-buffer'
+          ;; instead of `find-file-other-window' for the same reason, and the
+          ;; `save-selected-window' guards against any window the displays or
+          ;; their hooks might otherwise select.
+          (save-selected-window
+            (cond
+             ;; Modified: present on both sides and differing -> quick diff.
+             ((and left right
+                   (not (file-directory-p left))
+                   (not (file-directory-p right))
+                   (eq (emeld-node-diff-status node) 'different))
+              (diff right left))
+             ;; New (one side only) or identical -> show the side at point.
+             ((or left right)
+              (let* ((side (cdr (emeld--node-side-at-point)))
+                     (path (if (eq side 'left) left right)))
+                (display-buffer (find-file-noselect (or path left right)))))
+             (t (message "No file at point")))))))))
+
+(defun emeld-ediff ()
+  "Run Ediff on the file at point, comparing the left and right sides.
+Requires a file present on both sides.  On a directory, or when only
+one side exists, report what is missing (use RET to open a directory)."
+  (interactive)
+  (let ((node (get-text-property (point) 'emeld-node)))
+    (cond
+     ((null node) (message "No node at point"))
+     ((emeld-node-is-dir node)
+      (message "Ediff needs a file; use RET to open the directory"))
+     (t
+      (let ((left (emeld-node-left-path node))
+            (right (emeld-node-right-path node)))
+        (if (and left right)
+            (ediff-files left right)
+          (message "Ediff needs a file on both sides")))))))
+
+(defun emeld--diff-dirs (left right what)
+  "Show a recursive unified `diff' of directories RIGHT vs LEFT.
+The orientation matches `emeld-soft-diff' (right is OLD, left is NEW),
+and the active filter groups and `.gitignore' settings are honoured via
+`--exclude', so the diff covers the same files as the comparison tree.
+WHAT labels the directory in the echo-area message.
+
+A directory present on only one side has nothing to compare; its node may
+even carry a fabricated path for the missing side (intermediate nodes are
+synthesised with both paths during the scan), so confirm both sides exist
+on disk before diffing rather than running a diff that would just error."
+  (let ((have-left (and left (file-directory-p left)))
+        (have-right (and right (file-directory-p right))))
+    (cond
+     ((and have-left have-right)
+      ;; `diff' (via `diff-no-select') runs the command through the user's
+      ;; shell but, unlike the file arguments, does not quote the switches.
+      ;; The `--exclude=GLOB' patterns would otherwise reach the shell
+      ;; unquoted and be glob-expanded against the cwd (fish even errors on no
+      ;; match), so quote each switch to pass the literal pattern through.
+      (let ((switches (mapcar #'shell-quote-argument
+                              (append '("-r" "-u") (emeld--diff-exclude-args)))))
+        (diff (directory-file-name right) (directory-file-name left) switches)
+        (message "Diff of %s" what)))
+     ((or have-left have-right)
+      (message "%s exists on only one side — nothing to diff" what))
+     (t
+      (message "No directory to diff (%s)" what)))))
+
+(defun emeld-diff-root ()
+  "Show a recursive unified `diff' of the two root directories.
+Differences appear in a `*Diff*' buffer; filter groups and `.gitignore'
+settings are honoured, matching the comparison tree.  See also
+`emeld-diff-dir' for the directory at point."
+  (interactive)
+  (unless (and emeld--left-root emeld--right-root)
+    (user-error "No comparison loaded"))
+  (emeld--diff-dirs emeld--left-root emeld--right-root "root"))
+
+(defun emeld-diff-dir ()
+  "Show a recursive unified `diff' of the directory at point.
+If point is on a file, its containing directory is used; above any
+subdirectory this falls back to the root (so it matches
+`emeld-diff-root').  Differences appear in a `*Diff*' buffer."
+  (interactive)
+  (let ((node (get-text-property (point) 'emeld-node)))
+    (while (and node (not (emeld-node-is-dir node)))
+      (setq node (emeld-node-parent node)))
+    (let ((dir (or node emeld--root-node)))
+      (unless dir (user-error "No comparison loaded"))
+      (emeld--diff-dirs (emeld-node-left-path dir)
+                        (emeld-node-right-path dir)
+                        (emeld-node-name dir)))))
 
 (defun emeld--marked-sides (rel)
   "Return the list of marked sides (subset of (left right)) for REL."
@@ -2632,6 +2748,14 @@ With these marked, `emeld-copy' (\\[emeld-copy]) copies each to the right,
 making the right directory match the left for those files."
   (interactive)
   (emeld--mark-and-report '(different left-only) "file to copy"))
+
+(defun emeld-mark-all ()
+  "Mark all changed files: modified plus left-only (new) files.
+This is the left-to-right sync set, so the marked files can then be
+copied with `emeld-copy'.  Mirrors the single-key mark-all of `vc-dir';
+same file set as `emeld-mark-to-copy'."
+  (interactive)
+  (emeld--mark-and-report '(different left-only) "changed file"))
 
 (defun emeld-copy-path-at-point (arg)
   "Copy the filename at point to the kill ring.
@@ -2930,6 +3054,7 @@ reflects the live scan counters without needing to be re-installed."
       (when (and (eq emeld--status-phase 'done)
                  (or (null emeld--root-node)
                      (null (emeld-node-children emeld--root-node))))
+        (insert "\n")
         (insert (propertize "  No differences detected between directories." 'face 'font-lock-comment-face))
         (insert "\n\n"))
       
@@ -3190,7 +3315,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
   ["Navigate"
    ("g"   "rescan"             emeld-refresh)
    ("R"   "rescan dir at point" emeld-refresh-subdir)
-   ("r"   "redraw (resize)"    emeld-redraw)
+   ("r"   "reset layout + redraw" emeld-redraw)
    ("W"   "swap panes"         emeld-swap-panes)
    ("o"   "jump other side"    emeld-jump-other-side :transient t)
    ("M-n" "next change"        emeld-next-change :transient t)
@@ -3199,10 +3324,14 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
 (transient-define-prefix emeld-dispatch-file ()
   "Emeld file actions."
   ["File"
-   ("SPC" "soft diff / fold"   emeld-soft-diff)
-   ("RET" "action (ediff)"     emeld-action)
+   ("RET" "action (smart)"     emeld-action)
+   ("e"   "ediff"              emeld-ediff)
+   ("="   "diff / open / fold" emeld-soft-diff)
+   ("SPC" "diff / open / fold" emeld-soft-diff)
+   ("D"   "diff root (recursive)" emeld-diff-root)
+   ("d"   "diff dir at point"   emeld-diff-dir)
    ("C"   "copy to other side" emeld-copy)
-   ("D"   "delete marked/at point" emeld-delete)
+   ("x"   "delete marked/at point" emeld-delete)
    ("w"   "copy path"          emeld-copy-path-at-point)
    ("P"   "format as patch"    emeld-format-patch)])
 
@@ -3210,6 +3339,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
   "Emeld marking."
   ["Mark"
    ("m"   "mark"            emeld-mark :transient t)
+   ("M"   "all changed"     emeld-mark-all :transient t)
    ("u"   "unmark"          emeld-unmark :transient t)
    ("* m" "modified"        emeld-mark-modified :transient t)
    ("* l" "left-only (new)" emeld-mark-left-only :transient t)
@@ -3221,7 +3351,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
   [["File Status"
      ("S" (lambda () (if emeld-show-same "[x] Same" "[ ] Same"))
      (lambda () (interactive) (emeld-toggle-show-same)) :transient t)
-     ("M" (lambda () (if emeld-show-different "[x] Modified" "[ ] Modified"))
+     ("M-d" (lambda () (if emeld-show-different "[x] Modified" "[ ] Modified"))
      (lambda () (interactive) (emeld-toggle-show-different)) :transient t)
      ("N" (lambda () (if emeld-show-added "[x] New" "[ ] New"))
      (lambda () (interactive) (emeld-toggle-show-added)) :transient t)]

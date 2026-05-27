@@ -29,13 +29,7 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 ** TODO check copy whole dir what does it copy?
 
-** TODO r "R" to be more of a reset of everything
-
-** TODO format as patch from current position
-
 ** TODO check re-render in window that obeys proper proportions;
-
-** TODO squeeze line spacing for more compact view
 
 ** TODO add directory tree display for dired?
 

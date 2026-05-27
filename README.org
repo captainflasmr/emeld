@@ -49,8 +49,8 @@ Sub-menus (opened from the ~Menus~ column):
 
 - ~View~ (~v~) :: Two columns. ~Show~ toggles what is displayed — files (~F~ hide files, show directories only), tree-lines (~T~), compact indentation (~c~), strikethrough (~s~), ~.gitignore~ respect (~G~). ~Layout~ holds bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~\\~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), and pane resize (~{~/~}~).
 - ~Navigate~ (~n~) :: Rescan (~g~), rescan just the directory at point (~R~), redraw after a resize (~r~), swap panes (~W~), and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
-- ~File~ (~f~) :: Operate on files (~RET~ ediff/open, ~SPC~ soft diff/fold, ~C~ copy marked/at point, ~D~ delete marked/at point, ~w~ copy path, ~P~ format patch).
-- ~Mark~ (~m~) :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), or the whole left→right sync set (~* c~); ~U~ unmark all.
+- ~File~ (~f~) :: Operate on files (~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree — soft diff a modified file, show a new/one-sided one, fold a directory, ~D~ diff whole root, ~d~ diff directory at point, ~C~ copy marked/at point, ~x~ delete marked/at point, ~w~ copy path, ~P~ format patch).
+- ~Mark~ (~m~) :: Mark/unmark the file on the current side (~m~/~u~); mark all changed files (~M~); bulk-mark by status — modified (~* m~), left-only (~* l~), or the whole left→right sync set (~* c~, same set as ~M~); ~U~ unmark all.
 
 Every command keeps its direct key binding in ~emeld-mode~ (see below), so the menu hierarchy is only for discovery — you never have to drill through it to reach a command you already know.
 
@@ -63,19 +63,24 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | [         | Collapse all                                      |
 | ]         | Expand all                                        |
 | \\        | Expand only paths to changes                      |
-| RET, e, = | Action (Ediff if different)                       |
+| RET       | Smart action (Ediff/open file; dired/expand dir)  |
+| e         | Ediff the file at point (left vs right)           |
+| =         | Preview (point stays in tree): soft diff (modified), show file (new), fold (Dir) |
 | f, v      | Find File (Open current side)                     |
-| D         | Delete marked nodes (each from its marked side) or node at point |
+| D         | Diff whole root (recursive unified ~diff~ buffer) |
+| d         | Diff directory at point (recursive; file → its dir) |
 | C         | Copy marked nodes (each from its marked side) or node at point |
+| x         | Delete marked nodes (each from its marked side) or node at point |
 | P         | Format as patch (unified diff)                    |
 | w         | Copy filename (C-u w for full path)               |
-| SPC       | Fold/Unfold (Dir) or Soft Diff (File)             |
+| SPC       | Preview (point stays in tree): fold (Dir), soft diff (modified), show file (new) |
 | o         | Jump to the other side                            |
 | S         | Toggle same (identical) files                     |
-| M         | Toggle modified files                             |
+| M-d       | Toggle modified files                             |
 | N         | Toggle added (new) files                          |
 | F         | Toggle file visibility (hide files, show dirs only)|
 | m         | Mark file on current side                         |
+| M         | Mark all changed files (modified + left-only)     |
 | u         | Unmark file on current side                       |
 | U         | Unmark all nodes                                  |
 | * m       | Mark all modified files                           |
@@ -88,7 +93,7 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | W         | Swap left/right panes                              |
 | g         | Rescan whole comparison (~diff -rq~)             |
 | R         | Rescan only the directory at point                |
-| r         | Redraw current tree (e.g. after window resize)    |
+| r         | Reset layout (indent + pane split) to defaults and redraw |
 | n/p       | Navigation (Side-aware)                           |
 | M-n/M-p   | Jump to next/previous file change                 |
 | { / }     | Shrink/grow left pane width                       |
