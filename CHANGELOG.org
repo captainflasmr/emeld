@@ -1,5 +1,17 @@
 #+TITLE: Changelog for Emeld
 
+* [0.35.0] - 2026-05-27
+** Changed
+- Tree indentation widened by one space per level, applied uniformly to files and directories, so a child's connector hangs one column past the parent's content (~│  └─file~) and reads as hooking into the parent's subtree.  This replaces the 0.34.0 files-only indent, which pushed files one column deeper than directories and made a file that was a sibling of a directory (e.g. ~build.gradle.kts~ next to ~src~) look like it belonged to a different directory.  Files now always align with their sibling directories under the correct parent.
+
+* [0.34.0] - 2026-05-27
+** Changed
+- Files now hang one column deeper than directories in the tree: a file's branch connector is pushed right so it sits tight against the name (~│  └─RoutingEngine.java~), reading as the file hooking onto its parent directory's subtree.  This replaces the 0.33.0 approach of adding a space after the connector (~├─ file~); directory rows are unchanged.
+
+* [0.33.0] - 2026-05-27
+** Changed
+- File names now render one column to the right of the tree-line connector (~├─ file~ instead of ~├─file~), so the branch dash reads as a connector hooking into the file the way it does for directories (whose expand toggle and folder icon already provide that gap).  Connector and sibling alignment are unchanged.
+
 * [0.32.0] - 2026-05-27
 ** Added
 - The header-line display state now includes a ~G~ flag for ~emeld-respect-gitignore~ (toggled with ~G~), bold when gitignore rules are being honored — e.g. ~[SMN │ FTsG]~.

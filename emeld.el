@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.32.0
+;; Version: 0.35.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -3112,13 +3112,17 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
             (add-text-properties start (point) `(emeld-node ,node mouse-face highlight))
             (insert "\n")
             
-            ;; Recurse
+            ;; Recurse.  The continuation indent is one space wider than the
+            ;; branch dashes (offset spaces vs offset-1 dashes), so a child's
+            ;; connector hangs one column past the parent's content start and
+            ;; reads as hooking into the parent's subtree.  Files and dirs use
+            ;; the same indent, so siblings always align under their parent.
             (when (and (emeld-node-expanded node) (emeld-node-children node))
               (emeld--render-nodes (emeld-node-children node)
                                    (if emeld-show-tree-lines
-                                       (concat indent-prefix 
+                                       (concat indent-prefix
                                                (if is-last " " "│")
-                                               (make-string (1- emeld-indent-offset) ?\s))
+                                               (make-string emeld-indent-offset ?\s))
                                      (concat indent-prefix (make-string emeld-indent-offset ?\s)))
                                    column-width))))))))
 
