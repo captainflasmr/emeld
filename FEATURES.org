@@ -15,10 +15,6 @@ Gaps between emeld and Meld, ordered by usefulness for an Emacs variant.
 
   Per-change merge actions across three panes.
 
-* TODO Export
-
-** TODO Export As Patch
-  
 * TODO Text / Content Filters
 
 ** TODO Regex-based line filtering for diff comparison
@@ -34,8 +30,6 @@ Gaps between emeld and Meld, ordered by usefulness for an Emacs variant.
   Files that differ but become identical after content filters — shown italicized.
 
 * TODO Folder Comparison Enhancements
-
-** TODO Swap Left and Right "panes"
 
 ** TODO Flattened view
 

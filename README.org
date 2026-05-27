@@ -11,7 +11,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - ~.gitignore~ support, on by default — ignored files hidden on both sides, toggle with ~G~.
 - Instant toggles for New, Modified, Identical, and File visibility (~S~/~M~/~N~/~F~).
 - Orphan files shown with strikethrough on the missing side (Meld-style, toggle ~s~).
-- Dired-style, per-side marking (~m~/~u~/~U~): the ~*~ sits in the column of the side you mark, and a node can be marked left, right, or both.  Bulk copy (~C~) copies each marked node from its marked side; bulk delete (~d~) deletes from every marked side; bulk-mark by status (~* m~ modified, ~* l~ left-only, ~* c~ the left→right sync set).
+- Dired-style, per-side marking (~m~/~u~/~U~): the ~*~ sits in the column of the side you mark, and a node can be marked left, right, or both.  Bulk copy (~C~) copies each marked node from its marked side; bulk delete (~D~) deletes from every marked side; bulk-mark by status (~* m~ modified, ~* l~ left-only, ~* c~ the left→right sync set).
 - Filter groups toggleable from the transient menu.
 - Org-mode-style visibility cycling: ~S-TAB~ cycles the whole tree (TOP → DIRS → CHANGES), ~TAB~ does the equivalent for the subtree at point.
 - Bulk expand/collapse: ~[~ collapse all, ~]~ expand all, ~\\~ expand only paths leading to changes.
@@ -49,7 +49,7 @@ Sub-menus (opened from the ~Menus~ column):
 
 - ~View~ (~v~) :: Two columns. ~Show~ toggles what is displayed — files (~F~ hide files, show directories only), tree-lines (~T~), compact indentation (~c~), strikethrough (~s~), ~.gitignore~ respect (~G~). ~Layout~ holds bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~\\~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), and pane resize (~{~/~}~).
 - ~Navigate~ (~n~) :: Rescan (~g~), rescan just the directory at point (~R~), redraw after a resize (~r~), swap panes (~W~), and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
-- ~File~ (~f~) :: Operate on files (~RET~ ediff/open, ~SPC~ soft diff/fold, ~C~ copy marked/at point, ~d~ delete marked/at point, ~w~ copy path, ~P~ format patch).
+- ~File~ (~f~) :: Operate on files (~RET~ ediff/open, ~SPC~ soft diff/fold, ~C~ copy marked/at point, ~D~ delete marked/at point, ~w~ copy path, ~P~ format patch).
 - ~Mark~ (~m~) :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), or the whole left→right sync set (~* c~); ~U~ unmark all.
 
 Every command keeps its direct key binding in ~emeld-mode~ (see below), so the menu hierarchy is only for discovery — you never have to drill through it to reach a command you already know.
@@ -65,7 +65,7 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | \\        | Expand only paths to changes                      |
 | RET, e, = | Action (Ediff if different)                       |
 | f, v      | Find File (Open current side)                     |
-| d         | Delete marked nodes (each from its marked side) or node at point |
+| D         | Delete marked nodes (each from its marked side) or node at point |
 | C         | Copy marked nodes (each from its marked side) or node at point |
 | P         | Format as patch (unified diff)                    |
 | w         | Copy filename (C-u w for full path)               |

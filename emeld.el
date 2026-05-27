@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.38.0
+;; Version: 0.39.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -1884,7 +1884,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "P")   #'emeld-format-patch)
     (define-key map (kbd "C")   #'emeld-copy)
     (define-key map (kbd "w")   #'emeld-copy-path-at-point)
-    (define-key map (kbd "d")   #'emeld-delete)
+    (define-key map (kbd "D")   #'emeld-delete)
     (define-key map (kbd "SPC") #'emeld-soft-diff)
     (define-key map (kbd "m")   #'emeld-mark)
     (define-key map (kbd "u")   #'emeld-unmark)
@@ -3202,7 +3202,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
    ("SPC" "soft diff / fold"   emeld-soft-diff)
    ("RET" "action (ediff)"     emeld-action)
    ("C"   "copy to other side" emeld-copy)
-   ("d"   "delete marked/at point" emeld-delete)
+   ("D"   "delete marked/at point" emeld-delete)
    ("w"   "copy path"          emeld-copy-path-at-point)
    ("P"   "format as patch"    emeld-format-patch)])
 

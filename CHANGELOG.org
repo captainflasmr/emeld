@@ -1,5 +1,9 @@
 #+TITLE: Changelog for Emeld
 
+* [0.39.0] - 2026-05-27
+** Changed
+- Delete is now bound to ~D~ (was ~d~) in ~emeld-mode~ and the transient File menu, to align with Dired.  ~d~ is no longer bound.
+
 * [0.38.0] - 2026-05-27
 ** Changed
 - Removed the leading blank line before the dim in-buffer status messages (~Scanning directories, please wait…~ and ~No differences detected…~), so they sit at the top without a gap above.
