@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.37.0
+;; Version: 0.38.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -2920,7 +2920,7 @@ reflects the live scan counters without needing to be re-installed."
      ((and (memq emeld--status-phase '(running-diff building-tree))
            (or (null emeld--root-node)
                (null (emeld-node-children emeld--root-node))))
-      (insert "\n\n")
+      (insert "\n")
       (insert (propertize "  Scanning directories, please wait..." 'face 'font-lock-comment-face))
       (insert "\n"))
      
@@ -2930,7 +2930,6 @@ reflects the live scan counters without needing to be re-installed."
       (when (and (eq emeld--status-phase 'done)
                  (or (null emeld--root-node)
                      (null (emeld-node-children emeld--root-node))))
-        (insert "\n")
         (insert (propertize "  No differences detected between directories." 'face 'font-lock-comment-face))
         (insert "\n\n"))
       

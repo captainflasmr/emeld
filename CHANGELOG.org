@@ -1,5 +1,9 @@
 #+TITLE: Changelog for Emeld
 
+* [0.38.0] - 2026-05-27
+** Changed
+- Removed the leading blank line before the dim in-buffer status messages (~Scanning directories, please wait…~ and ~No differences detected…~), so they sit at the top without a gap above.
+
 * [0.37.0] - 2026-05-27
 ** Added
 - The header-line shows a bold ~[Compact]~ label when compact tree indentation (~c~) is active.
