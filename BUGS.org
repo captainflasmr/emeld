@@ -15,6 +15,8 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 ** TODO other copy options, maybe rsync?
 
+** TODO rethink .dir-locals, top level not loading when local doesn't exist
+
 ** TODO preview diff before copy?
 
 ** TODO check copy whole dir what does it copy?
@@ -32,8 +34,6 @@ This document contains the current bugs/improvements, this is just for me mainly
 ** TODO turn to sidebar as treemacs
 
 ** TODO Scanning got stuck after copying files and then auto rescan
-
-** TODO rethink .dir-locals, top level not loading when local doesn't exist
 
 ** TODO compare git version with folder
 
