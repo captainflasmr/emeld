@@ -78,14 +78,15 @@ Set to \"\" for no prefix."
   :type 'boolean
   :group 'emeld)
 
-(defcustom emeld-compact-tree nil
-  "When non-nil, use compact tree indentation.
-The default (nil) indents each level one space wider than the branch
+(defcustom emeld-compact-tree t
+  "When non-nil, use compact tree indentation (the default).
+Compact (the default) matches the continuation indent to the branch
+width for a tighter tree (`│ └─file') that sits better in the available
+space.  When nil, each level is indented one space wider than the branch
 connector, so a child's connector hangs one column past the parent's
 content (`│  └─file') and reads as hooking into the parent's subtree.
-When non-nil, the continuation indent matches the branch width for a
-tighter tree (`│ └─file').  Either way files and directories share the
-same indent, so siblings always align under their parent.  Toggle with
+Either way files and directories share the same indent, so siblings
+always align under their parent.  Toggle to the wider layout with
 `emeld-toggle-compact-tree' (\\`c')."
   :type 'boolean
   :group 'emeld)
@@ -3016,8 +3017,9 @@ reflects the live scan counters without needing to be re-installed."
         '(:eval
           (concat (emeld--scan-progress-string)
                   " [" (emeld--display-state-string) "] "
-                  (when emeld-compact-tree
-                    (propertize "[Compact] " 'face 'bold))))))
+                  ;; Compact is the default, so flag only the wider layout.
+                  (unless emeld-compact-tree
+                    (propertize "[Wide] " 'face 'bold))))))
 
 (defun emeld--current-node ()
   "Return the emeld-node text-property at point."
