@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.35.0
+;; Version: 0.37.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -75,6 +75,18 @@ Set to \"\" for no prefix."
 
 (defcustom emeld-show-tree-lines t
   "Whether to show hierarchical tree lines."
+  :type 'boolean
+  :group 'emeld)
+
+(defcustom emeld-compact-tree nil
+  "When non-nil, use compact tree indentation.
+The default (nil) indents each level one space wider than the branch
+connector, so a child's connector hangs one column past the parent's
+content (`│  └─file') and reads as hooking into the parent's subtree.
+When non-nil, the continuation indent matches the branch width for a
+tighter tree (`│ └─file').  Either way files and directories share the
+same indent, so siblings always align under their parent.  Toggle with
+`emeld-toggle-compact-tree' (\\`c')."
   :type 'boolean
   :group 'emeld)
 
@@ -1884,6 +1896,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "M")   #'emeld-toggle-show-different)
     (define-key map (kbd "N")   #'emeld-toggle-show-added)
     (define-key map (kbd "T")   #'emeld-toggle-tree-lines)
+    (define-key map (kbd "c")   #'emeld-toggle-compact-tree)
     (define-key map (kbd "s")   #'emeld-toggle-show-strikethrough)
     (define-key map (kbd "G")   #'emeld-toggle-gitignore)
     (define-key map (kbd "F")   #'emeld-toggle-show-files)
@@ -2026,6 +2039,14 @@ Uses cached data when available to avoid re-scanning."
   "Toggle the display of tree lines."
   (interactive)
   (setq emeld-show-tree-lines (not emeld-show-tree-lines))
+  (emeld--render))
+
+(defun emeld-toggle-compact-tree ()
+  "Toggle compact tree indentation.
+See `emeld-compact-tree'."
+  (interactive)
+  (setq emeld-compact-tree (not emeld-compact-tree))
+  (message "Compact tree: %s" (if emeld-compact-tree "on" "off"))
   (emeld--render))
 
 (defun emeld-toggle-show-strikethrough ()
@@ -2870,7 +2891,9 @@ reflects the live scan counters without needing to be re-installed."
   (setq header-line-format
         '(:eval
           (concat (emeld--scan-progress-string)
-                  " [" (emeld--display-state-string) "] "))))
+                  " [" (emeld--display-state-string) "] "
+                  (when emeld-compact-tree
+                    (propertize "[Compact] " 'face 'bold))))))
 
 (defun emeld--current-node ()
   "Return the emeld-node text-property at point."
@@ -3112,17 +3135,22 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
             (add-text-properties start (point) `(emeld-node ,node mouse-face highlight))
             (insert "\n")
             
-            ;; Recurse.  The continuation indent is one space wider than the
-            ;; branch dashes (offset spaces vs offset-1 dashes), so a child's
-            ;; connector hangs one column past the parent's content start and
-            ;; reads as hooking into the parent's subtree.  Files and dirs use
+            ;; Recurse.  By default the continuation indent is one space wider
+            ;; than the branch dashes (offset spaces vs offset-1 dashes), so a
+            ;; child's connector hangs one column past the parent's content
+            ;; start and reads as hooking into the parent's subtree.  When
+            ;; `emeld-compact-tree' is non-nil the continuation matches the
+            ;; branch width for a tighter tree.  Either way files and dirs use
             ;; the same indent, so siblings always align under their parent.
             (when (and (emeld-node-expanded node) (emeld-node-children node))
               (emeld--render-nodes (emeld-node-children node)
                                    (if emeld-show-tree-lines
                                        (concat indent-prefix
                                                (if is-last " " "│")
-                                               (make-string emeld-indent-offset ?\s))
+                                               (make-string (if emeld-compact-tree
+                                                                (1- emeld-indent-offset)
+                                                              emeld-indent-offset)
+                                                            ?\s))
                                      (concat indent-prefix (make-string emeld-indent-offset ?\s)))
                                    column-width))))))))
 
@@ -3142,6 +3170,8 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
      (lambda () (interactive) (emeld-toggle-show-files)) :transient t)
     ("T" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
      (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
+    ("c" (lambda () (if emeld-compact-tree "[x] compact" "[ ] compact"))
+     (lambda () (interactive) (emeld-toggle-compact-tree)) :transient t)
     ("s" (lambda () (if emeld-show-strikethrough "[x] strikethrough" "[ ] strikethrough"))
      (lambda () (interactive) (emeld-toggle-show-strikethrough)) :transient t)
     ("G" (lambda () (if emeld-respect-gitignore "[x] gitignore" "[ ] gitignore"))

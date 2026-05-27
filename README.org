@@ -47,7 +47,7 @@ Top level:
 
 Sub-menus (opened from the ~Menus~ column):
 
-- ~View~ (~v~) :: Two columns. ~Show~ toggles what is displayed — files (~F~ hide files, show directories only), tree-lines (~T~), strikethrough (~s~), ~.gitignore~ respect (~G~). ~Layout~ holds bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~\\~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), and pane resize (~{~/~}~).
+- ~View~ (~v~) :: Two columns. ~Show~ toggles what is displayed — files (~F~ hide files, show directories only), tree-lines (~T~), compact indentation (~c~), strikethrough (~s~), ~.gitignore~ respect (~G~). ~Layout~ holds bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~\\~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), and pane resize (~{~/~}~).
 - ~Navigate~ (~n~) :: Rescan (~g~), rescan just the directory at point (~R~), redraw after a resize (~r~), swap panes (~W~), and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
 - ~File~ (~f~) :: Operate on files (~RET~ ediff/open, ~SPC~ soft diff/fold, ~C~ copy marked/at point, ~d~ delete marked/at point, ~w~ copy path, ~P~ format patch).
 - ~Mark~ (~m~) :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), or the whole left→right sync set (~* c~); ~U~ unmark all.
@@ -83,6 +83,7 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | * c       | Mark all to copy left→right (modified + left-only)|
 | s         | Toggle strikethrough display                      |
 | T         | Toggle tree-line display                          |
+| c         | Toggle compact tree indentation                   |
 | G         | Toggle ~.gitignore~ respect (rescans)             |
 | W         | Swap left/right panes                              |
 | g         | Rescan whole comparison (~diff -rq~)             |
@@ -119,6 +120,7 @@ Filter-group toggling (~emeld-toggle-filter-group~) and the preset commands (~em
 - ~emeld-list-command~: Program + args used by the ~list~ method to enumerate files (default ~("find" "." "-type" "f")~; set to e.g. ~("fd" "--type" "f" "--hidden" "--no-ignore")~ to use fd).
 - ~emeld-show-strikethrough~: Show strikethrough for orphan files on the missing side (default ~t~).  When nil, the missing side shows nothing.
 - ~emeld-respect-gitignore~: Respect ~.gitignore~ rules during comparison (default ~t~).  Ignored files are hidden on both sides via a cached ~git ls-files~ query per root (honors nested ~.gitignore~, ~.git/info/exclude~, and the global excludes file).  Toggle interactively with ~G~.  Requires the ~git~ executable; has no effect outside a work tree.
+- ~emeld-compact-tree~: Compact tree indentation (default nil).  By default each level indents one space wider than the branch connector so a child's connector hangs one column past the parent's content (~│  └─file~), reading as hooking into the parent's subtree; non-nil tightens the spacing to ~│ └─file~.  Files align with their sibling directories either way.  Toggle with ~c~.
 - ~emeld-dir-prefix~: Unicode prefix for directory names (default ~"📁 "~).
 - ~emeld-column-ratio~: Left pane width as percentage of window (default 50).
 - ~emeld-scan-live-render~: Whether to redraw the tree progressively while a scan builds it (default nil).  Each redraw rebuilds the whole visible tree and, once started, blocks input until it finishes — the chief cause of jerkiness while a large comparison streams in.  By default emeld instead updates only the lightweight header-line progress bar during a scan and draws the finished tree once on completion, keeping Emacs fully responsive.  Set to ~t~ to watch the tree grow live (throttled by ~emeld-render-throttle~), at some cost to responsiveness on large repositories.
