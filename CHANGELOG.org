@@ -1,5 +1,17 @@
 #+TITLE: Changelog for Emeld
 
+* [0.28.0] - 2026-05-27
+** Changed
+- Tree building (the initial ~diff -rq~ build and the identical-files ~S~ merge) no longer redraws the whole buffer as it streams in, which was the chief cause of jerkiness on large repositories: each redraw rebuilt the entire visible tree and, once started, ran to completion before Emacs could service input.  By default emeld now updates only the lightweight header-line progress bar during a scan and renders the finished tree once on completion, keeping Emacs fully responsive (scrolling/typing) while a large comparison builds.
+** Added
+- ~emeld-scan-live-render~ (default nil): set to ~t~ to restore watching the tree grow live during a scan (throttled by ~emeld-render-throttle~ and skipped while input is pending), at some cost to responsiveness on large repositories.
+
+* [0.27.0] - 2026-05-26
+** Changed
+- Building the identical-files (~S~) tree on large repos is much less jerky.  Intermediate redraws are now skipped while there is pending input, so the merge never blocks scrolling or typing (the header-line progress still updates, and the final tree is always rendered on completion).
+** Fixed
+- The identical-files merge recomputed its progress with ~(length REMAINING)~ on every chunk — O(n²) over a large repo.  It now tracks progress incrementally, cutting wasted work during the merge.
+
 * [0.26.0] - 2026-05-26
 ** Fixed
 - Toggling Same off now returns to a pure diff view.  Top-level directories that contain only identical files (merged in, and lazily loaded, when Same is toggled on) were kept visible by an unconditional "expose top-level subdirectories" rule; they are now hidden when ~emeld-show-same~ is off, leaving only directories that contain differences.

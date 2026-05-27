@@ -9,9 +9,9 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
-** TODO squeeze line spacing for more compact view
+** DOING better responsiveness during tree build
 
-** TODO better responsiveness during tree build
+** TODO squeeze line spacing for more compact view
 
 ** TODO add directory tree display for dired?
 

@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.26.0
+;; Version: 0.28.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -597,9 +597,33 @@ Lower numbers keep Emacs snappier; higher numbers process faster."
 (defcustom emeld-render-throttle 0.15
   "Minimum seconds between intermediate buffer redraws during a scan.
 Each redraw rebuilds the whole visible tree, so throttling keeps Emacs
-responsive while a large comparison streams in.  The final result is
-always rendered once the scan completes regardless of this value."
+responsive while a large comparison streams in.  Intermediate redraws are
+additionally skipped whenever there is pending input, so an in-progress
+scan never blocks scrolling or typing.  The final result is always
+rendered once the scan completes regardless of this value.
+
+Only consulted when `emeld-scan-live-render' is non-nil; otherwise no
+intermediate redraws happen at all."
   :type 'number
+  :group 'emeld)
+
+(defcustom emeld-scan-live-render nil
+  "Whether to redraw the tree progressively while a scan builds it.
+
+Each redraw erases and re-inserts the whole visible tree, so it grows more
+expensive as the tree fills and, once started, runs to completion before
+Emacs can service input — that is the chief cause of jerkiness while a
+large comparison streams in.  When nil (the default) emeld keeps Emacs
+maximally responsive during a scan: it updates only the lightweight
+header-line progress indicator as work proceeds and draws the finished
+tree once, when the scan completes.  Set to t to watch the tree grow
+live (throttled by `emeld-render-throttle'), at some cost to
+responsiveness on large repositories.
+
+Applies to both the initial `diff -rq' build and the identical-file merge
+enabled by `emeld-show-same'.  The completed tree is always rendered when
+the scan finishes regardless of this setting."
+  :type 'boolean
   :group 'emeld)
 
 (defcustom emeld-same-files-method 'list
@@ -854,12 +878,15 @@ allowing identical/same branches to populate quietly afterward."
                                  (let ((any-diff (cl-some (lambda (n) (not (eq (emeld-node-diff-status n) 'same))) sub-tier-nodes)))
                                    (setf (emeld-node-diff-status dir-node) (if any-diff 'different 'same))))
                                (lambda ()
-                                 (let ((now (float-time))
-                                       (last-render (with-current-buffer buf emeld--last-render-time)))
-                                   (when (or (null last-render) (> (- now last-render) emeld-render-throttle))
-                                     (with-current-buffer buf
-                                       (setq emeld--last-render-time now)
-                                       (emeld--render))))
+                                 (when emeld-scan-live-render
+                                   (let ((now (float-time))
+                                         (last-render (with-current-buffer buf emeld--last-render-time)))
+                                     (when (and (not (input-pending-p))
+                                                (or (null last-render)
+                                                    (> (- now last-render) emeld-render-throttle)))
+                                       (with-current-buffer buf
+                                         (setq emeld--last-render-time now)
+                                         (emeld--render)))))
                                  (cl-decf outstanding)
                                  (funcall finish-check))
                                current-gen))
@@ -886,12 +913,15 @@ allowing identical/same branches to populate quietly afterward."
                                  (lambda (sub-tier-nodes)
                                    (setf (emeld-node-children dir-node) sub-tier-nodes))
                                  (lambda ()
-                                   (let ((now (float-time))
-                                         (last-render (with-current-buffer buf emeld--last-render-time)))
-                                     (when (or is-last (null last-render) (> (- now last-render) emeld-render-throttle))
-                                       (with-current-buffer buf
-                                         (setq emeld--last-render-time now)
-                                         (emeld--render))))
+                                   (when emeld-scan-live-render
+                                     (let ((now (float-time))
+                                           (last-render (with-current-buffer buf emeld--last-render-time)))
+                                       (when (and (not (input-pending-p))
+                                                  (or is-last (null last-render)
+                                                      (> (- now last-render) emeld-render-throttle)))
+                                         (with-current-buffer buf
+                                           (setq emeld--last-render-time now)
+                                           (emeld--render)))))
                                    (cl-decf outstanding)
                                    (funcall finish-check))
                                  current-gen)))
@@ -1140,17 +1170,25 @@ new and no per-parent scan is needed."
                     (emeld--add-same-entry-to-tree root (car parsed) path-hash left right)))))
             (setq remaining-lines (cdr remaining-lines))
             (setq chunk-count (1+ chunk-count)))
-          (setq emeld--scan-processed (- emeld--scan-total (length remaining-lines)))
+          ;; Track progress incrementally; `(length remaining-lines)' each chunk
+          ;; would be O(n) per chunk, i.e. O(n^2) over a large repo.
+          (cl-incf emeld--scan-processed chunk-count)
           (force-mode-line-update)
           (if remaining-lines
               (progn
-                ;; Throttle intermediate redraws; the final state is always
-                ;; rendered once the scan completes (the else branch below).
-                (let ((now (float-time)))
-                  (when (or (null emeld--last-render-time)
-                            (> (- now emeld--last-render-time) emeld-render-throttle))
-                    (setq emeld--last-render-time now)
-                    (emeld--render)))
+                ;; Intermediate redraws are off by default: rebuilding the
+                ;; whole tree each batch blocks input until it finishes, so we
+                ;; let the header-line progress bar carry feedback and draw the
+                ;; finished tree once on completion (the else branch below).
+                ;; `emeld-scan-live-render' opts back into live growth, still
+                ;; throttled and skipped while input is pending.
+                (when emeld-scan-live-render
+                  (let ((now (float-time)))
+                    (when (and (not (input-pending-p))
+                               (or (null emeld--last-render-time)
+                                   (> (- now emeld--last-render-time) emeld-render-throttle)))
+                      (setq emeld--last-render-time now)
+                      (emeld--render))))
                 (run-with-timer 0.001 nil #'emeld--process-same-chunk-worker
                                 buf remaining-lines root left right old-gc path-hash))
             (emeld--bench-push "same merged")
@@ -1213,15 +1251,24 @@ under a left-only directory (`emeld--same-left-only-dirs').
                 (emeld--add-same-entry-to-tree root rel path-hash left right)))
             (setq paths (cdr paths))
             (setq chunk-count (1+ chunk-count)))
-          (setq emeld--scan-processed (- emeld--scan-total (length paths)))
+          ;; Track progress incrementally; `(length paths)' each chunk would be
+          ;; O(n) per chunk, i.e. O(n^2) over a large repo.
+          (cl-incf emeld--scan-processed chunk-count)
           (force-mode-line-update)
           (if paths
               (progn
-                (let ((now (float-time)))
-                  (when (or (null emeld--last-render-time)
-                            (> (- now emeld--last-render-time) emeld-render-throttle))
-                    (setq emeld--last-render-time now)
-                    (emeld--render)))
+                ;; Intermediate redraws are off by default (see
+                ;; `emeld-scan-live-render'): a full re-render each batch blocks
+                ;; scrolling/typing until it finishes.  The header-line progress
+                ;; keeps updating regardless, and the final tree is always
+                ;; rendered on completion below.
+                (when emeld-scan-live-render
+                  (let ((now (float-time)))
+                    (when (and (not (input-pending-p))
+                               (or (null emeld--last-render-time)
+                                   (> (- now emeld--last-render-time) emeld-render-throttle)))
+                      (setq emeld--last-render-time now)
+                      (emeld--render))))
                 (run-with-timer 0.001 nil #'emeld--process-same-files-worker
                                 buf paths root left right old-gc path-hash))
             (emeld--bench-push "same merged")
