@@ -9,17 +9,18 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Side-by-side view in a single buffer.
 - Recursive glob-based filtering (like Meld) — excluded at the ~diff~ level.
 - ~.gitignore~ support, on by default — ignored files hidden on both sides, toggle with ~G~.
-- Instant toggles for New, Modified, Identical, and File visibility (~S~/~M~/~N~/~F~).
+- Instant toggles for Identical, Modified, New, and File visibility (~S~/~M-d~/~N~/~F~).
 - Orphan files shown with strikethrough on the missing side (Meld-style, toggle ~s~).
-- Dired-style, per-side marking (~m~/~u~/~U~): the ~*~ sits in the column of the side you mark, and a node can be marked left, right, or both.  Bulk copy (~C~) copies each marked node from its marked side; bulk delete (~D~) deletes from every marked side; bulk-mark by status (~* m~ modified, ~* l~ left-only, ~* c~ the left→right sync set).
+- Dired-style, per-side marking (~m~/~u~/~U~): the ~*~ sits in the column of the side you mark, and a node can be marked left, right, or both.  Bulk copy (~C~) copies each marked node from its marked side; bulk delete (~x~) deletes from every marked side; mark all changed files (~M~), or bulk-mark by status (~* m~ modified, ~* l~ left-only, ~* c~ the left→right sync set).
 - Filter groups toggleable from the transient menu.
 - Org-mode-style visibility cycling: ~S-TAB~ cycles the whole tree (TOP → DIRS → CHANGES), ~TAB~ does the equivalent for the subtree at point.
 - Bulk expand/collapse: ~[~ collapse all, ~]~ expand all, ~\\~ expand only paths leading to changes.
-- File copying between directories (~C~).
+- File copying between directories (~C~), via rsync when available — asynchronous and delta-efficient, with an optional exact-mirror (~--delete~) mode toggled with ~R~.
+- Recursive ~diff~ buffers for the whole root (~D~) or the directory at point (~d~), and a non-intrusive preview (~=~/~SPC~) that diffs/opens the node at point while keeping point in the tree.
 - Export changes as a unified-diff patch (~P~).
 - Presets: save a directory pair and recall it later for fast repeated comparisons.
 - Side-aware navigation (~n~/~p~) and side-jumping (~o~).
-- Targeted rescan of just the directory at point (~R~) when one subtree changed on disk, avoiding a full rescan.
+- Targeted rescan of just the directory at point (~C-u g~) when one subtree changed on disk, avoiding a full rescan.
 - Integration with ~ediff~.
 - Fully themeable (uses standard Emacs faces).
 
@@ -40,16 +41,16 @@ The transient is a two-level hierarchy.  The top level keeps the menus you reach
 
 Top level:
 
-- ~File Status~ :: Toggle file visibility (~S~ same, ~M~ modified, ~N~ added).
+- ~File Status~ :: Toggle file visibility (~S~ same, ~M-d~ modified, ~N~ added).
 - ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~cl~ list all globs.
 - ~Preset~ :: Save the current directory pair (~ps~), load a saved pair (~pl~), delete one (~pd~).
 - ~Menus~ :: Open a sub-menu — ~v~ View, ~n~ Navigate, ~f~ File, ~m~ Mark.
 
 Sub-menus (opened from the ~Menus~ column):
 
-- ~View~ (~v~) :: Two columns. ~Show~ toggles what is displayed — files (~F~ hide files, show directories only), tree-lines (~T~), compact indentation (~c~), strikethrough (~s~), ~.gitignore~ respect (~G~). ~Layout~ holds bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~\\~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), and pane resize (~{~/~}~).
-- ~Navigate~ (~n~) :: Rescan (~g~), rescan just the directory at point (~R~), redraw after a resize (~r~), swap panes (~W~), and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
-- ~File~ (~f~) :: Operate on files (~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree — soft diff a modified file, show a new/one-sided one, fold a directory, ~D~ diff whole root, ~d~ diff directory at point, ~C~ copy marked/at point, ~x~ delete marked/at point, ~w~ copy path, ~P~ format patch).
+- ~View~ (~v~) :: Two columns. ~Show~ toggles what is displayed — files (~F~ hide files, show directories only), tree-lines (~T~), compact indentation (~z~), strikethrough (~s~), ~.gitignore~ respect (~G~). ~Layout~ holds bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~\\~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), and pane resize (~{~/~}~).
+- ~Navigate~ (~n~) :: Rescan (~g~; ~C-u g~ rescans just the directory at point), redraw after a resize (~r~), swap panes (~W~), and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
+- ~File~ (~f~) :: Operate on files (~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree — soft diff a modified file, show a new/one-sided one, fold a directory, ~D~ diff whole root, ~d~ diff directory at point, ~C~ copy marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point, ~w~ copy path, ~P~ format patch).
 - ~Mark~ (~m~) :: Mark/unmark the file on the current side (~m~/~u~); mark all changed files (~M~); bulk-mark by status — modified (~* m~), left-only (~* l~), or the whole left→right sync set (~* c~, same set as ~M~); ~U~ unmark all.
 
 Every command keeps its direct key binding in ~emeld-mode~ (see below), so the menu hierarchy is only for discovery — you never have to drill through it to reach a command you already know.
@@ -88,11 +89,11 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | * c       | Mark all to copy left→right (modified + left-only)|
 | s         | Toggle strikethrough display                      |
 | T         | Toggle tree-line display                          |
-| c         | Toggle compact (default) / wide tree indentation  |
+| z         | Toggle compact (default) / wide tree indentation  |
 | G         | Toggle ~.gitignore~ respect (rescans)             |
 | W         | Swap left/right panes                              |
-| g         | Rescan whole comparison (~diff -rq~)             |
-| R         | Rescan only the directory at point                |
+| g         | Rescan whole comparison (~C-u g~: rescan dir at point) |
+| R         | Toggle mirror copy (rsync ~--delete~; shows ~[Mirror]~ in header) |
 | r         | Reset layout (indent + pane split) to defaults and redraw |
 | n/p       | Navigation (Side-aware)                           |
 | M-n/M-p   | Jump to next/previous file change                 |
@@ -125,13 +126,17 @@ Filter-group toggling (~emeld-toggle-filter-group~) and the preset commands (~em
 - ~emeld-list-command~: Program + args used by the ~list~ method to enumerate files (default ~("find" "." "-type" "f")~; set to e.g. ~("fd" "--type" "f" "--hidden" "--no-ignore")~ to use fd).
 - ~emeld-show-strikethrough~: Show strikethrough for orphan files on the missing side (default ~t~).  When nil, the missing side shows nothing.
 - ~emeld-respect-gitignore~: Respect ~.gitignore~ rules during comparison (default ~t~).  Ignored files are hidden on both sides via a cached ~git ls-files~ query per root (honors nested ~.gitignore~, ~.git/info/exclude~, and the global excludes file).  Toggle interactively with ~G~.  Requires the ~git~ executable; has no effect outside a work tree.
-- ~emeld-compact-tree~: Compact tree indentation (default t).  By default the continuation indent matches the branch width for a tighter tree (~│ └─file~) that sits better in the available space; set to nil for the wider layout, where each level indents one space wider than the branch connector so a child's connector hangs one column past the parent's content (~│  └─file~), reading as hooking into the parent's subtree.  Files align with their sibling directories either way.  Toggle with ~c~.
+- ~emeld-compact-tree~: Compact tree indentation (default t).  By default the continuation indent matches the branch width for a tighter tree (~│ └─file~) that sits better in the available space; set to nil for the wider layout, where each level indents one space wider than the branch connector so a child's connector hangs one column past the parent's content (~│  └─file~), reading as hooking into the parent's subtree.  Files align with their sibling directories either way.  Toggle with ~z~.
 - ~emeld-dir-prefix~: Unicode prefix for directory names (default ~"📁 "~).
 - ~emeld-column-ratio~: Left pane width as percentage of window (default 50).
 - ~emeld-scan-live-render~: Whether to redraw the tree progressively while a scan builds it (default nil).  Each redraw rebuilds the whole visible tree and, once started, blocks input until it finishes — the chief cause of jerkiness while a large comparison streams in.  By default emeld instead updates only the lightweight header-line progress bar during a scan and draws the finished tree once on completion, keeping Emacs fully responsive.  Set to ~t~ to watch the tree grow live (throttled by ~emeld-render-throttle~), at some cost to responsiveness on large repositories.
 - ~emeld-render-throttle~: Minimum seconds between intermediate buffer redraws during a scan (default 0.15).  Only consulted when ~emeld-scan-live-render~ is non-nil; raise it to redraw less often on very large trees.  Intermediate redraws are also skipped whenever there is pending input, so an in-progress scan never blocks scrolling or typing; the final result is always rendered on completion.
 - ~emeld-benchmark~: When non-nil, collect and report phased scan timings (default nil).  Both the initial scan and the identical-files (~S~) merge print a per-stage timing report to the echo area / ~*Messages*~.
 - ~emeld-benchmark-file~: Org file where ~emeld-benchmark-record~ appends timing entries (default ~BENCHMARKS.org~ beside ~emeld.el~).
+- ~emeld-copy-method~: How ~emeld-copy~ (~C~) transfers files — ~auto~ (default: use rsync when found on ~exec-path~, else the built-in copy), ~rsync~ (always rsync; error up front if missing), or ~builtin~ (always ~copy-file~ / ~copy-directory~).  rsync only sends the changed parts of a file, preserves metadata, and recurses efficiently, so it is faster and more robust for large or partly-synced trees.  rsync copies run *asynchronously* (one node at a time, so Emacs stays responsive; progress and the final tally show in the echo area, output is logged to ~ *emeld-rsync*~); built-in copies are synchronous.
+- ~emeld-rsync-command~: Name or absolute path of the rsync executable (default ~"rsync"~).
+- ~emeld-rsync-options~: Options passed to rsync, as a list of strings (default ~("-a")~).  ~-a~ preserves permissions, timestamps and symlinks and recurses; add e.g. ~"-z"~ for compression.  ~--delete~ is controlled separately by ~emeld-copy-mirror~, not by this list.
+- ~emeld-copy-mirror~: When non-nil, rsync directory copies are exact mirrors via ~--delete~ (default nil) — the destination directory is made to match the source exactly, removing files present only on the destination, so "copy left→right" becomes a true mirror rather than a merge.  Only affects rsync copies of directories (single files and the built-in copy are unaffected, since ~--delete~ has nothing to prune for one file and ~copy-directory~ cannot delete).  To mirror a whole tree, copy a directory node (e.g. a left-only directory) with this enabled.  ~emeld-copy~ labels the action "Mirror" and warns before proceeding.  Toggle it interactively with ~R~ (~emeld-toggle-mirror~); while on, the header line shows ~[Mirror]~.
 - ~emeld-presets~: Saved directory pairs as ~(NAME LEFT RIGHT)~, managed by the preset commands (see below) and persisted across sessions via ~savehist~.
 
 * Presets

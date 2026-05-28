@@ -1,5 +1,19 @@
 #+TITLE: Changelog for Emeld
 
+* [0.40.0] - 2026-05-28
+** Added
+- ~emeld-ediff~ (~e~): Ediff the file at point (left vs right) directly, separate from the ~RET~ action.
+- ~emeld-diff-root~ (~D~) and ~emeld-diff-dir~ (~d~): show a recursive unified ~diff~ of the whole comparison root, or of the directory at point, in a ~*Diff*~ buffer — honoring the active filter groups and ~.gitignore~ via ~--exclude~.  Switches are shell-quoted so glob excludes (~--exclude=*.foo~) survive shells like fish that error on unmatched wildcards.
+- ~emeld-mark-all~ (~M~): mark all changed files (modified + left-only) — the left→right sync set — in a single key.
+- rsync copy backend: ~emeld-copy-method~ (~auto~/~rsync~/~builtin~, default ~auto~), ~emeld-rsync-command~ and ~emeld-rsync-options~.  rsync only transfers the changed parts of a file and recurses efficiently; copies run asynchronously (one node at a time) so Emacs stays responsive, with progress and a final tally in the echo area.
+- Exact-mirror copying: ~emeld-copy-mirror~ and ~emeld-toggle-mirror~ (~R~).  When on, rsync directory copies use ~--delete~ so the destination exactly matches the source ("copy left→right" becomes a true mirror rather than a merge); the header-line shows ~[Mirror]~ while enabled.
+** Changed
+- ~=~/~SPC~ (~emeld-soft-diff~) is now a contextual preview that keeps point in the tree: a directory folds/unfolds, a modified file shows a soft ~diff~, and a new/one-sided/identical file is displayed — all without selecting the other window.  ~RET~ (~emeld-action~) remains the focus-moving action (open/Ediff a file, open/expand a directory).
+- ~e~ now runs Ediff and ~=~ runs the soft-diff preview (previously both ran the combined ~RET~ action).
+- ~r~ (~emeld-redraw~) now also resets the layout — indentation (~emeld-indent-offset~) and pane split (~emeld-column-ratio~) — to their defaults before redrawing.
+- ~g~ is now ~emeld-rescan~: plain ~g~ rescans the whole comparison; ~C-u g~ rescans only the directory at point (formerly the dedicated ~R~ key).
+- Keybinding moves: ~D~ diff root, ~d~ diff dir at point, ~x~ delete (was ~D~), ~M~ mark-all changed, ~M-d~ toggle modified visibility, ~z~ toggle compact indentation, ~R~ toggle mirror copy.  ~c~ is now unbound.
+
 * [0.39.0] - 2026-05-27
 ** Changed
 - Delete is now bound to ~D~ (was ~d~) in ~emeld-mode~ and the transient File menu, to align with Dired.  ~d~ is no longer bound.

@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.39.0
+;; Version: 0.40.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -87,7 +87,7 @@ connector, so a child's connector hangs one column past the parent's
 content (`│  └─file') and reads as hooking into the parent's subtree.
 Either way files and directories share the same indent, so siblings
 always align under their parent.  Toggle to the wider layout with
-`emeld-toggle-compact-tree' (\\`c')."
+`emeld-toggle-compact-tree' (\\`z')."
   :type 'boolean
   :group 'emeld)
 
@@ -126,6 +126,48 @@ past that (anchored, nested or otherwise complex rules) is caught during
 tree assembly by a single cached `git ls-files' query per root, which
 also honors `.git/info/exclude' and the global excludes file.
 Requires the `git' executable; has no effect outside a work tree."
+  :type 'boolean
+  :group 'emeld)
+
+(defcustom emeld-copy-method 'auto
+  "How `emeld-copy' transfers files and directories between the two sides.
+- `auto'    : use rsync when `emeld-rsync-command' is found on `exec-path',
+              otherwise fall back to Emacs's built-in copy.
+- `rsync'   : always use rsync; error up front if it is not available.
+- `builtin' : always use `copy-file' / `copy-directory'.
+rsync only sends the parts of a file that changed, preserves metadata,
+and recurses efficiently, so it is faster and more robust for large or
+already-partly-synced trees.  See `emeld-rsync-options'."
+  :type '(choice (const :tag "Use rsync if available" auto)
+                 (const :tag "Always rsync" rsync)
+                 (const :tag "Always built-in copy" builtin))
+  :group 'emeld)
+
+(defcustom emeld-rsync-command "rsync"
+  "Name or absolute path of the rsync executable.
+Used by `emeld-copy' when `emeld-copy-method' permits rsync."
+  :type 'string
+  :group 'emeld)
+
+(defcustom emeld-rsync-options '("-a")
+  "Options passed to rsync for each copy, as a list of strings.
+`-a' (archive) preserves permissions, timestamps, symlinks and recurses.
+Add e.g. \"-z\" for compression.  `--delete' is controlled separately by
+`emeld-copy-mirror', not by this list."
+  :type '(repeat string)
+  :group 'emeld)
+
+(defcustom emeld-copy-mirror nil
+  "When non-nil, rsync directory copies are exact mirrors (`--delete').
+The destination directory is made to match the source exactly, removing
+files that exist only on the destination — so \"copy left→right\" becomes
+a true mirror rather than a merge.  Only affects rsync copies of
+directories (`emeld-copy-method' must allow rsync); single files and the
+built-in copy are unaffected, since `--delete' has nothing to prune for a
+single file and `copy-directory' cannot delete.  To mirror a whole tree,
+copy a directory node (or a left-only directory) with this enabled.
+Because it deletes files, `emeld-copy' labels the action as a mirror and
+warns before proceeding."
   :type 'boolean
   :group 'emeld)
 
@@ -1873,8 +1915,8 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "=")   #'emeld-soft-diff)
     (define-key map (kbd "f")   #'emeld-find-file)
     (define-key map (kbd "v")   #'emeld-find-file)
-    (define-key map (kbd "g")   #'emeld-refresh)
-    (define-key map (kbd "R")   #'emeld-refresh-subdir)
+    (define-key map (kbd "g")   #'emeld-rescan)
+    (define-key map (kbd "R")   #'emeld-toggle-mirror)
     (define-key map (kbd "r")   #'emeld-redraw)
     (define-key map (kbd "W")   #'emeld-swap-panes)
     (define-key map (kbd "n")   #'emeld-next-line)
@@ -1900,7 +1942,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "M-d") #'emeld-toggle-show-different)
     (define-key map (kbd "N")   #'emeld-toggle-show-added)
     (define-key map (kbd "T")   #'emeld-toggle-tree-lines)
-    (define-key map (kbd "c")   #'emeld-toggle-compact-tree)
+    (define-key map (kbd "z")   #'emeld-toggle-compact-tree)
     (define-key map (kbd "s")   #'emeld-toggle-show-strikethrough)
     (define-key map (kbd "G")   #'emeld-toggle-gitignore)
     (define-key map (kbd "F")   #'emeld-toggle-show-files)
@@ -2052,6 +2094,17 @@ See `emeld-compact-tree'."
   (setq emeld-compact-tree (not emeld-compact-tree))
   (message "Compact tree: %s" (if emeld-compact-tree "on" "off"))
   (emeld--render))
+
+(defun emeld-toggle-mirror ()
+  "Toggle `emeld-copy-mirror', rsync `--delete' exact-mirror copying.
+When on, `emeld-copy' (\\[emeld-copy]) makes a destination directory
+exactly match its source, deleting destination-only files.  The header
+line shows `[Mirror]' while it is enabled.  Has no effect unless copies
+use rsync (see `emeld-copy-method')."
+  (interactive)
+  (setq emeld-copy-mirror (not emeld-copy-mirror))
+  (force-mode-line-update)
+  (message "Copy mirror (rsync --delete): %s" (if emeld-copy-mirror "ON" "off")))
 
 (defun emeld-toggle-show-strikethrough ()
   "Toggle strikethrough display for orphan files on the missing side.
@@ -2291,8 +2344,8 @@ the column width from the current window width, and redraws — preserving
 point and expansion state.  Use this to undo layout tweaks made with
 \\[emeld-increase-indent]/\\[emeld-decrease-indent] or
 \\[emeld-grow-column]/\\[emeld-shrink-column], or after resizing the
-window or frame.  For a fresh comparison use `emeld-refresh'
-\(\\[emeld-refresh])."
+window or frame.  For a fresh comparison use `emeld-rescan'
+\(\\[emeld-rescan])."
   (interactive)
   (unless emeld--root-node
     (user-error "No comparison loaded"))
@@ -2357,9 +2410,10 @@ Synchronous: the diff is scoped to one subtree, so it is bounded."
 
 (defun emeld-refresh-subdir ()
   "Rescan only the directory at point, merging the result into the tree.
-Useful when you know a single subdirectory changed on disk and want to avoid
-a full rescan (\\[emeld-refresh]); the rest of the tree is left untouched.
-If point is on a file, its containing directory is rescanned."
+Bound to \\`C-u g' (see `emeld-rescan').  Useful when you know a single
+subdirectory changed on disk and want to avoid a full rescan
+(\\[emeld-rescan]); the rest of the tree is left untouched.  If point is
+on a file, its containing directory is rescanned."
   (interactive)
   (unless emeld--root-node (user-error "No comparison loaded"))
   (let* ((node0 (get-text-property (point) 'emeld-node))
@@ -2367,7 +2421,7 @@ If point is on a file, its containing directory is rescanned."
                      ((emeld-node-is-dir node0) node0)
                      (t (emeld-node-parent node0)))))
     (when (or (null node) (eq node emeld--root-node))
-      (user-error "Use `g' (emeld-refresh) to rescan the whole comparison"))
+      (user-error "Use `g' to rescan the whole comparison"))
     (let* ((rel (emeld--node-relpath node))
            (left-sub (concat (file-name-as-directory emeld--left-root) rel))
            (right-sub (concat (file-name-as-directory emeld--right-root) rel))
@@ -2407,6 +2461,16 @@ If point is on a file, its containing directory is rescanned."
         (emeld--render)
         (message "Rescanned %s — only on the %s side" rel
                  (if left-exists "left" "right")))))))
+
+(defun emeld-rescan (&optional arg)
+  "Rescan the comparison.
+With a prefix ARG (\\[universal-argument]), rescan only the directory at
+point (`emeld-refresh-subdir'); otherwise rescan the whole comparison
+asynchronously (`emeld-refresh')."
+  (interactive "P")
+  (if arg
+      (emeld-refresh-subdir)
+    (emeld-refresh)))
 
 (defun emeld--collect-expanded (node)
   "Return a list of relative paths for expanded directories under NODE."
@@ -2777,9 +2841,19 @@ The side is determined by the current column."
               (message "Copied: %s" text))
           (message "No file on this side"))))))
 
-(defun emeld--copy-one (source dest-root)
-  "Copy a single file or directory at SOURCE to DEST-ROOT preserving path.
-Creates missing parent directories."
+(defun emeld--copy-use-rsync-p ()
+  "Return the rsync program path when copies should go through rsync, else nil.
+Honours `emeld-copy-method'; for `auto'/`rsync' this is `executable-find'
+of `emeld-rsync-command'.  Does not signal: the strict `rsync' case is
+checked once up front in `emeld-copy'."
+  (and (memq emeld-copy-method '(auto rsync))
+       (executable-find emeld-rsync-command)))
+
+(defun emeld--copy-dest (source dest-root)
+  "Return the destination path for SOURCE under DEST-ROOT, making its parent.
+The path within the side is preserved; a stray file occupying the parent
+directory slot is removed first.  Run in the emeld buffer (reads the
+buffer-local roots)."
   (let* ((rel-path (file-relative-name source
                                        (if (string-prefix-p (expand-file-name emeld--left-root)
                                                             (expand-file-name source))
@@ -2790,6 +2864,27 @@ Creates missing parent directories."
     (unless (file-directory-p dest-parent)
       (when (file-exists-p dest-parent) (delete-file dest-parent))
       (make-directory dest-parent t))
+    dest))
+
+(defun emeld--rsync-args (source dest)
+  "Return the rsync argument list to copy SOURCE to DEST.
+A trailing slash is added to a directory SOURCE/DEST so the contents
+mirror into DEST (matching `copy-directory' with COPY-CONTENTS) rather
+than nesting SOURCE inside DEST.  `--delete' is appended for a directory
+when `emeld-copy-mirror' is enabled, making DEST exactly match SOURCE."
+  (let* ((dir (file-directory-p source))
+         (src (if dir (file-name-as-directory source) source))
+         (dst (if dir (file-name-as-directory dest) dest)))
+    (append emeld-rsync-options
+            (and dir emeld-copy-mirror '("--delete"))
+            (list "--" src dst))))
+
+(defun emeld--copy-one (source dest-root)
+  "Copy a single file or directory at SOURCE to DEST-ROOT preserving path.
+Synchronous built-in copy (`copy-file' / `copy-directory'); rsync copies
+go through `emeld--copy-async' instead.  Creates missing parent
+directories."
+  (let ((dest (emeld--copy-dest source dest-root)))
     (if (file-directory-p source)
         (if (fboundp 'copy-directory-contents)
             (copy-directory source dest t t t)
@@ -2797,64 +2892,136 @@ Creates missing parent directories."
             (delete-file dest))
           (copy-directory source dest t t))
       (copy-file source dest t))
-    (message "Copied %s" rel-path)))
+    (message "Copied %s" (file-name-nondirectory (directory-file-name source)))))
 
-(defun emeld-copy ()
-  "Copy marked files/dirs to the other side.
-When marks exist, each marked node is copied from its marked side to the
-opposite side (a node marked on both sides copies left→right).
-Otherwise, copy the node at point.
-Creates missing parent directories on the destination side if needed."
-  (interactive)
+(defvar-local emeld--copy-proc nil
+  "In-flight async rsync process for `emeld-copy', or nil when idle.")
+
+(defun emeld--copy-async (jobs)
+  "Copy JOBS via rsync, one at a time, asynchronously.
+JOBS is a list of (SOURCE . DEST-ROOT).  Parent directories are created
+synchronously per job; on completion the buffer is refreshed, marks are
+cleared and a summary is reported.  rsync output is logged to the hidden
+buffer ` *emeld-rsync*'."
+  (when (and emeld--copy-proc (process-live-p emeld--copy-proc))
+    (user-error "A copy is already in progress"))
+  (let* ((buf (current-buffer))
+         (prog (executable-find emeld-rsync-command))
+         (log (get-buffer-create " *emeld-rsync*"))
+         (total (length jobs))
+         (done 0) (count 0) (errors 0)
+         run-next)
+    (with-current-buffer log (erase-buffer))
+    (setq run-next
+          (lambda (remaining)
+            (cond
+             ((not (buffer-live-p buf)) nil) ; emeld buffer gone; abandon quietly
+             ((null remaining)
+              (with-current-buffer buf
+                (setq emeld--copy-proc nil)
+                (clrhash emeld--marked-paths)
+                (emeld-refresh))
+              (message "Copied %d/%d node(s) via rsync%s" count total
+                       (if (> errors 0)
+                           (format " (%d error%s — see ` *emeld-rsync*')"
+                                   errors (if (= errors 1) "" "s"))
+                         "")))
+             (t
+              (let ((src (caar remaining))
+                    (dst-root (cdar remaining)))
+                (cl-incf done)
+                (if (not (file-exists-p src))
+                    (progn (cl-incf errors) (funcall run-next (cdr remaining)))
+                  (condition-case _err
+                      (let* ((dest (with-current-buffer buf (emeld--copy-dest src dst-root)))
+                             (proc (make-process
+                                    :name "emeld-rsync"
+                                    :buffer log
+                                    :noquery t
+                                    :connection-type 'pipe
+                                    :command (cons prog (emeld--rsync-args src dest))
+                                    :sentinel
+                                    (lambda (p _event)
+                                      (when (memq (process-status p) '(exit signal))
+                                        (if (eq (process-exit-status p) 0)
+                                            (cl-incf count)
+                                          (cl-incf errors))
+                                        (funcall run-next (cdr remaining)))))))
+                        (with-current-buffer buf (setq emeld--copy-proc proc))
+                        (message "Copying %d/%d: %s" done total
+                                 (file-name-nondirectory (directory-file-name src))))
+                    (error (cl-incf errors)
+                           (funcall run-next (cdr remaining))))))))))
+    (message "Copying %d node(s) via rsync..." total)
+    (funcall run-next jobs)))
+
+(defun emeld--copy-sync (jobs)
+  "Copy JOBS (list of (SOURCE . DEST-ROOT)) synchronously with the built-in copy."
+  (let ((count 0) (errors 0))
+    (dolist (job jobs)
+      (if (file-exists-p (car job))
+          (condition-case nil
+              (progn (emeld--copy-one (car job) (cdr job)) (cl-incf count))
+            (error (cl-incf errors)))
+        (cl-incf errors)))
+    (clrhash emeld--marked-paths)
+    (emeld-refresh)
+    (message "Copied %d node(s)%s" count
+             (if (> errors 0) (format " (%d errors)" errors) ""))))
+
+(defun emeld--copy-jobs ()
+  "Return the copy jobs as a list of (SOURCE . DEST-ROOT).
+From the marked set if any (each from its marked side; a both-marked node
+copies left→right), otherwise the single node at point on the current
+side.  Signals a `user-error' when there is nothing to copy."
   (let ((marked (let (paths)
                   (maphash (lambda (k _) (push k paths)) emeld--marked-paths)
                   (nreverse paths))))
     (if marked
-        (let ((count 0) (errors 0))
-          (when (yes-or-no-p (format "Copy %d marked node(s) to the other side? "
-                                     (length marked)))
-            (dolist (rel marked)
-              ;; left-priority: a both-marked node copies left→right.
-              (let* ((from (if (emeld--marked-side-p rel 'left) 'left 'right))
-                     (src-root (if (eq from 'left) emeld--left-root emeld--right-root))
-                     (dst-root (if (eq from 'left) emeld--right-root emeld--left-root))
-                     (src (expand-file-name rel src-root)))
-                (if (file-exists-p src)
-                    (condition-case nil
-                        (progn (emeld--copy-one src dst-root) (cl-incf count))
-                      (error (cl-incf errors)))
-                  (cl-incf errors))))
-            (emeld-refresh)
-            (clrhash emeld--marked-paths)
-            (message "Copied %d node(s)%s" count
-                     (if (> errors 0) (format " (%d errors)" errors) ""))))
+        (mapcar (lambda (rel)
+                  (let* ((from (if (emeld--marked-side-p rel 'left) 'left 'right))
+                         (src-root (if (eq from 'left) emeld--left-root emeld--right-root))
+                         (dst-root (if (eq from 'left) emeld--right-root emeld--left-root)))
+                    (cons (expand-file-name rel src-root) dst-root)))
+                marked)
       (let* ((node (get-text-property (point) 'emeld-node))
-             (cur-col (current-column))
-             (on-left (< cur-col emeld--column-width)))
+             (on-left (< (current-column) emeld--column-width)))
         (unless node (user-error "No node at point"))
-        (let* ((source (if on-left (emeld-node-left-path node) (emeld-node-right-path node)))
-               (source-root (if on-left emeld--left-root emeld--right-root))
-               (dest-root (if on-left emeld--right-root emeld--left-root)))
+        (let ((source (if on-left (emeld-node-left-path node) (emeld-node-right-path node)))
+              (dst-root (if on-left emeld--right-root emeld--left-root)))
           (unless source (user-error "No file on current side to copy"))
-          (let* ((rel-path (file-relative-name source source-root))
-                 (dest (directory-file-name (expand-file-name rel-path dest-root)))
-                 (dest-parent (file-name-directory dest)))
-            (when (yes-or-no-p (format "Copy %s to %s?" (emeld-node-name node) dest-root))
-              (condition-case err
-                  (progn
-                    (unless (file-directory-p dest-parent)
-                      (when (file-exists-p dest-parent) (delete-file dest-parent))
-                      (make-directory dest-parent t))
-                    (if (file-directory-p source)
-                        (if (fboundp 'copy-directory-contents)
-                            (copy-directory source dest t t t)
-                          (when (and (file-exists-p dest) (not (file-directory-p dest)))
-                            (delete-file dest))
-                          (copy-directory source dest t t))
-                      (copy-file source dest t))
-                    (emeld-refresh)
-                    (message "Copied %s" (emeld-node-name node)))
-                (error (message "Copy failed: %s" (error-message-string err)))))))))))
+          (list (cons source dst-root)))))))
+
+(defun emeld-copy ()
+  "Copy marked files/dirs to the other side (or the node at point).
+Each marked node is copied from its marked side to the opposite side (a
+node marked on both sides copies left→right); with no marks, the node at
+point is copied from the current side.  Missing parent directories are
+created on the destination.
+
+The transfer uses rsync or the built-in copy per `emeld-copy-method'.
+rsync copies run asynchronously (one node at a time) so Emacs stays
+responsive; built-in copies are synchronous.  When `emeld-copy-mirror'
+is on, rsync directory copies use `--delete' to make the destination an
+exact mirror of the source."
+  (interactive)
+  ;; Fail fast (before any prompt/copy) if rsync is required but missing.
+  (when (and (eq emeld-copy-method 'rsync)
+             (not (executable-find emeld-rsync-command)))
+    (user-error "`emeld-copy-method' is `rsync' but %s is not on `exec-path'"
+                emeld-rsync-command))
+  (let* ((use-rsync (emeld--copy-use-rsync-p))
+         (mirror (and use-rsync emeld-copy-mirror))
+         (jobs (emeld--copy-jobs))
+         (n (length jobs)))
+    (when (yes-or-no-p
+           (format "%s %d node(s) to the other side%s%s? "
+                   (if mirror "Mirror" "Copy") n
+                   (if use-rsync " via rsync" "")
+                   (if mirror " (deletes destination-only files in dirs)" "")))
+      (if use-rsync
+          (emeld--copy-async jobs)
+        (emeld--copy-sync jobs)))))
 
 (defun emeld--delete-one (path)
   "Delete the file or directory at PATH recursively, moving it to trash."
@@ -3017,6 +3184,9 @@ reflects the live scan counters without needing to be re-installed."
         '(:eval
           (concat (emeld--scan-progress-string)
                   " [" (emeld--display-state-string) "] "
+                  ;; Mirror copies can delete destination files, so flag it.
+                  (when emeld-copy-mirror
+                    (propertize "[Mirror] " 'face 'warning))
                   ;; Compact is the default, so flag only the wider layout.
                   (unless emeld-compact-tree
                     (propertize "[Wide] " 'face 'bold))))))
@@ -3296,7 +3466,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
      (lambda () (interactive) (emeld-toggle-show-files)) :transient t)
     ("T" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
      (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
-    ("c" (lambda () (if emeld-compact-tree "[x] compact" "[ ] compact"))
+    ("z" (lambda () (if emeld-compact-tree "[x] compact" "[ ] compact"))
      (lambda () (interactive) (emeld-toggle-compact-tree)) :transient t)
     ("s" (lambda () (if emeld-show-strikethrough "[x] strikethrough" "[ ] strikethrough"))
      (lambda () (interactive) (emeld-toggle-show-strikethrough)) :transient t)
@@ -3315,8 +3485,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
 (transient-define-prefix emeld-dispatch-navigate ()
   "Emeld navigation and rescanning."
   ["Navigate"
-   ("g"   "rescan"             emeld-refresh)
-   ("R"   "rescan dir at point" emeld-refresh-subdir)
+   ("g"   "rescan (C-u: dir at point)" emeld-rescan)
    ("r"   "reset layout + redraw" emeld-redraw)
    ("W"   "swap panes"         emeld-swap-panes)
    ("o"   "jump other side"    emeld-jump-other-side :transient t)
@@ -3333,6 +3502,8 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
    ("D"   "diff root (recursive)" emeld-diff-root)
    ("d"   "diff dir at point"   emeld-diff-dir)
    ("C"   "copy to other side" emeld-copy)
+   ("R" (lambda () (if emeld-copy-mirror "[x] mirror copy (--delete)" "[ ] mirror copy (--delete)"))
+    (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
    ("x"   "delete marked/at point" emeld-delete)
    ("w"   "copy path"          emeld-copy-path-at-point)
    ("P"   "format as patch"    emeld-format-patch)])
