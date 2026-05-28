@@ -9,19 +9,11 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
-** TODO r reset to compact by default
-
-** TODO rethink .dir-locals, top level not loading when local doesn't exist
-
 ** TODO [#B] preview diff before copy?
 
-** TODO fast scan to depth level scan?
-
-** TODO check multiple mark copy
+** DOING fast scan to depth level scan?
 
 ** TODO when edited file and then rescanned newly modified files didn't show
-
-** TODO stepping through modified files should expand accordingly
 
 ** TODO check re-render in window that obeys proper proportions;
 
