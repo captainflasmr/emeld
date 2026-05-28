@@ -21,6 +21,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Presets: save a directory pair and recall it later for fast repeated comparisons.
 - Side-aware navigation (~n~/~p~) and side-jumping (~o~).
 - Targeted rescan of just the directory at point (~C-u g~) when one subtree changed on disk, avoiding a full rescan.
+- Depth-limited "shallow" scan for huge trees or slow mounts (SMB/NFS): prefix ~emeld-diff~ with a depth (~C-u 2 M-x emeld-diff~) to scan only the top levels and stop; deeper directories are marked with a dim ~…~ and drilled into on demand with ~C-u g~.
 - Integration with ~ediff~.
 - Fully themeable (uses standard Emacs faces).
 
@@ -34,6 +35,8 @@ Copy the files to your load path and add the following to your init file:
 * Usage
 Run ~M-x emeld-diff~ and select the two directories you wish to compare.
 Alternatively, run ~M-x emeld-diff-dwim~ to automatically use open Dired buffers as the comparison sources.
+
+For very large trees or slow filesystems (SMB/NFS), give ~emeld-diff~ a prefix argument to limit the initial scan depth — e.g. ~C-u 2 M-x emeld-diff~ scans two directory levels, ~C-u M-x emeld-diff~ just one.  The scan stops there and shows the tree; directories below the limit (and one-sided directories) are marked with a dim ~…~.  Drill into any marked directory with ~C-u g~ (which scans it fully), and plain ~g~ re-runs the bounded scan at the same depth.  The header-line shows ~[depth N]~ while a depth limit is in effect.
 
 * Transient Menu (~?~)
 

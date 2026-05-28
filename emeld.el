@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.40.0
+;; Version: 0.41.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -203,10 +203,16 @@ presets persist across sessions when `savehist-mode' is enabled."
   parent
   children
   (expanded t)
-  (diff-status nil) ; 'same, 'different, 'left-only, 'right-only
+  (diff-status nil) ; 'same, 'different, 'left-only, 'right-only, 'unscanned
   (is-dir nil)
+  (scanned t)       ; nil for a directory left unscanned by a depth-limited scan
   (is-filtered nil))
 
+(defvar-local emeld--scan-max-depth nil
+  "Directory-depth limit for the initial scan, or nil for a full scan.
+Set from the prefix argument to `emeld-diff'; honored by `emeld-refresh'.
+When non-nil, directories below this depth are left unscanned and marked,
+to be drilled into with `\\[universal-argument] g' (`emeld-refresh-subdir').")
 (defvar-local emeld--scan-process nil
   "Currently running `make-process' for the async diff scan.")
 (defvar-local emeld--scan-diff-lines nil
@@ -1129,6 +1135,158 @@ Explicitly handles and strips single quotes added to paths by the shell environm
         (cons (clean-quotes rel) side)))
      (t nil))))
 
+(defun emeld--prefix-to-depth (arg)
+  "Convert a raw prefix ARG to a scan depth (>=1), or nil for a full scan."
+  (cond ((null arg) nil)
+        ((integerp arg) (max 1 arg))
+        (t 1)))                         ; bare C-u, `-', etc.
+
+(defun emeld--diff-level-entries (left-sub right-sub)
+  "Compare LEFT-SUB and RIGHT-SUB one level deep (non-recursive `diff -q').
+Return a list of (NAME . KIND); KIND is `different', `left-only',
+`right-only' or `common-dir'.  Honors the active filter groups and
+`.gitignore' via the same `--exclude' args as a full scan.  Subdirectories
+present on both sides are reported (as `common-dir') but not descended."
+  (let ((args (append '("-q")
+                      (emeld--diff-exclude-args)
+                      (list (expand-file-name left-sub)
+                            (expand-file-name right-sub))))
+        (left-base (directory-file-name (expand-file-name left-sub)))
+        (entries nil))
+    (with-temp-buffer
+      (apply #'call-process "diff" nil t nil args)
+      (goto-char (point-min))
+      (while (not (eobp))
+        (let ((line (buffer-substring-no-properties
+                     (line-beginning-position) (line-end-position))))
+          (cond
+           ((string-match "^Files \\(.+\\) and .+ differ$" line)
+            (push (cons (file-name-nondirectory (match-string 1 line)) 'different)
+                  entries))
+           ((string-match "^Only in \\(.+\\): \\(.+\\)$" line)
+            (let ((side (if (string-prefix-p left-base
+                                            (expand-file-name (match-string 1 line)))
+                            'left-only 'right-only)))
+              (push (cons (match-string 2 line) side) entries)))
+           ((string-match "^Common subdirectories: \\(.+\\) and .+$" line)
+            (push (cons (file-name-nondirectory (match-string 1 line)) 'common-dir)
+                  entries))))
+        (forward-line 1)))
+    (nreverse entries)))
+
+(defun emeld--scan-one-level (node depth max-depth)
+  "Scan NODE one directory level and create its children in place.
+DEPTH is NODE's depth (0 = root).  Common subdirectories are descended
+while DEPTH+1 < MAX-DEPTH; otherwise (and for one-sided directories) the
+child directory is created but left unscanned.  Return the (CHILD . NEXT-DEPTH)
+pairs that should be scanned next."
+  (let* ((rel (emeld--node-relpath node))
+         (lp (file-name-as-directory (emeld-node-left-path node)))
+         (rp (file-name-as-directory (emeld-node-right-path node)))
+         (entries (emeld--diff-level-entries lp rp))
+         (children nil)
+         (to-descend nil))
+    (dolist (e entries)
+      (let* ((name (car e)) (kind (cdr e))
+             (child-rel (if (string-empty-p rel) name (concat rel "/" name))))
+        (unless (emeld--filtered-p name child-rel)
+          (pcase kind
+            ('different
+             (push (emeld-node-create
+                    :name name :parent node :diff-status 'different
+                    :left-path (concat lp name) :right-path (concat rp name))
+                   children))
+            ((or 'left-only 'right-only)
+             (let* ((path (concat (if (eq kind 'left-only) lp rp) name))
+                    (is-dir (file-directory-p path)))
+               (push (emeld-node-create
+                      :name name :parent node :diff-status kind :is-dir is-dir
+                      :expanded nil
+                      :left-path (and (eq kind 'left-only) path)
+                      :right-path (and (eq kind 'right-only) path)
+                      ;; A one-sided directory is shown but its contents are
+                      ;; not enumerated here; mark it unscanned so it is drilled
+                      ;; with `C-u g'.
+                      :scanned (not is-dir))
+                     children)))
+            ('common-dir
+             (let ((cnode (emeld-node-create
+                           :name name :parent node :is-dir t :expanded nil
+                           :diff-status 'same
+                           :left-path (concat lp name) :right-path (concat rp name))))
+               (if (< (1+ depth) max-depth)
+                   (push (cons cnode (1+ depth)) to-descend)
+                 (setf (emeld-node-scanned cnode) nil
+                       (emeld-node-diff-status cnode) 'unscanned))
+               (push cnode children)))))))
+    (setf (emeld-node-children node)
+          (sort children
+                (lambda (a b)
+                  (let ((ad (emeld-node-is-dir a)) (bd (emeld-node-is-dir b)))
+                    (if (eq ad bd)
+                        (string< (emeld-node-name a) (emeld-node-name b))
+                      ad)))))
+    (nreverse to-descend)))
+
+(defun emeld--finalize-dir-statuses (node)
+  "Bottom-up: set each directory's status and `scanned' flag from descendants.
+A directory is `different' if any descendant is a change, else `unscanned'
+if any descendant (or itself) was left unscanned, else `same'.  One-sided
+directory statuses (`left-only'/`right-only') are preserved."
+  (when (emeld-node-is-dir node)
+    (let ((any-change nil)
+          (any-unscanned (not (emeld-node-scanned node))))
+      (dolist (c (emeld-node-children node))
+        (if (emeld-node-is-dir c)
+            (progn
+              (emeld--finalize-dir-statuses c)
+              (when (memq (emeld-node-diff-status c) '(different left-only right-only))
+                (setq any-change t))
+              (unless (emeld-node-scanned c) (setq any-unscanned t)))
+          (when (memq (emeld-node-diff-status c) '(different left-only right-only))
+            (setq any-change t))))
+      (unless (memq (emeld-node-diff-status node) '(left-only right-only))
+        (setf (emeld-node-diff-status node)
+              (cond (any-change 'different)
+                    (any-unscanned 'unscanned)
+                    (t 'same))))
+      (when any-unscanned (setf (emeld-node-scanned node) nil)))))
+
+(defun emeld--start-bounded-diff (buf depth)
+  "Build the tree for BUF by scanning only DEPTH directory levels.
+Uses non-recursive `diff -q' level by level (driven by an idle timer so
+Emacs stays responsive), leaving deeper and one-sided directories
+unscanned for drilling with `\\[universal-argument] g'.  Aborts if the
+buffer's `emeld--scan-generation' changes (a newer scan started)."
+  (with-current-buffer buf
+    (let ((gen emeld--scan-generation)
+          (root emeld--root-node)
+          (queue (list (cons emeld--root-node 0)))
+          step)
+      (setq emeld--status-phase 'building-tree)
+      (emeld--update-header-line)
+      (setq step
+            (lambda ()
+              (when (and (buffer-live-p buf)
+                         (= gen (buffer-local-value 'emeld--scan-generation buf)))
+                (with-current-buffer buf
+                  (cond
+                   ((input-pending-p) (run-with-idle-timer 0.05 nil step))
+                   ((null queue)
+                    (emeld--finalize-dir-statuses root)
+                    (setq emeld--status-phase 'done)
+                    (emeld--update-header-line)
+                    (emeld--render))
+                   (t
+                    (let* ((item (car queue))
+                           (more (emeld--scan-one-level
+                                  (car item) (cdr item) depth)))
+                      (setq queue (append (cdr queue) more))
+                      (emeld--render)
+                      (run-with-timer 0 nil step))))))))
+      (emeld--render)
+      (funcall step))))
+
 (defun emeld--seed-dir-path-hash (node prefix path-hash)
   "Record every directory descendant of NODE in PATH-HASH by relative path.
 PREFIX is NODE's own relative path (\"\" for the root).  Pre-seeding lets
@@ -1733,15 +1891,26 @@ Files larger than `emeld-max-content-size' are compared by size only."
           (right 'right-only)
           (t 'same))))
 
-(defun emeld-diff (dir1 dir2)
-  "Compare DIR1 and DIR2 side-by-side."
-  (interactive "DLeft directory: \nDRight directory: ")
-  (let ((buf (get-buffer-create (format "*emeld: %s <-> %s*" 
+(defun emeld-diff (dir1 dir2 &optional depth)
+  "Compare DIR1 and DIR2 side-by-side.
+With a prefix argument, limit the initial scan to DEPTH directory levels
+\(a bare \\[universal-argument] means depth 1) using a fast level-by-level
+scan, leaving deeper and one-sided directories unscanned and marked with a
+dim `…'.  Drill into a marked directory with `\\[universal-argument] g'
+\(`emeld-refresh-subdir').  Without a prefix, scan fully (the default).
+Useful for very large trees or slow filesystems (SMB/NFS) where a full
+recursive compare would block on deep I/O."
+  (interactive
+   (list (read-directory-name "Left directory: ")
+         (read-directory-name "Right directory: ")
+         (emeld--prefix-to-depth current-prefix-arg)))
+  (let ((buf (get-buffer-create (format "*emeld: %s <-> %s*"
                                         (file-name-nondirectory (directory-file-name dir1))
                                         (file-name-nondirectory (directory-file-name dir2))))))
     (with-current-buffer buf
       (emeld-mode)
       (setq default-directory (file-name-as-directory (expand-file-name dir1)))
+      (setq emeld--scan-max-depth depth)
       (emeld--apply-dir-locals)
       (setq emeld--active-filter-groups
             (cl-loop for g in emeld-filter-groups
@@ -1775,10 +1944,13 @@ Files larger than `emeld-max-content-size' are compared by size only."
     (delete-dups dired-dirs)))
 
 ;;;###autoload
-(defun emeld-diff-dwim ()
+(defun emeld-diff-dwim (&optional depth)
   "Start emeld-diff guessing directories from visible dired buffers.
-Prompts for confirmation or selection."
-  (interactive)
+Prompts for confirmation or selection.  A prefix argument is passed
+through to `emeld-diff' as the scan-depth limit (e.g. `C-u 2' scans two
+levels; bare `C-u' scans one), for a fast shallow scan of large or slow
+trees."
+  (interactive (list (emeld--prefix-to-depth current-prefix-arg)))
   (require 'dired-aux)
   (let* ((target-b (dired-dwim-target-directory))
          (target-a (if (eq major-mode 'dired-mode)
@@ -1800,7 +1972,7 @@ Prompts for confirmation or selection."
          (right-abs (directory-file-name (expand-file-name right))))
     (if (string= left-abs right-abs)
         (user-error "Cannot compare a directory with itself: %s" left-abs)
-      (emeld-diff left-abs right-abs))))
+      (emeld-diff left-abs right-abs depth))))
 
 ;;;; ─── Presets (saved directory pairs) ─────────────────────────────
 
@@ -2319,7 +2491,10 @@ Repeated invocations cycle TOP → DIRS → CHANGES → TOP."
       ('changes (emeld-expand-changes)   (message "Visibility: CHANGES (modified files)")))))
 
 (defun emeld--stop-scan ()
-  "Cancel the active async scan and clean up processes."
+  "Cancel the active async scan and clean up processes.
+Bumps `emeld--scan-generation' so any in-flight timer-driven work (the
+bounded scan, the identical-files merge) sees a newer generation and aborts."
+  (cl-incf emeld--scan-generation)
   (when (and emeld--scan-process
              (process-live-p emeld--scan-process))
     (delete-process emeld--scan-process))
@@ -2359,8 +2534,10 @@ or after resizing the window or frame.  For a fresh comparison use
 
 (defun emeld-refresh ()
   "Refresh the comparison asynchronously.
-Uses `make-process' to run `diff -rq' as an OS-level async process,
-so Emacs stays fully responsive during the scan."
+Uses `make-process' to run `diff -rq' as an OS-level async process, so
+Emacs stays fully responsive during the scan.  When `emeld--scan-max-depth'
+is set (a depth-limited `emeld-diff'), re-runs the bounded level-by-level
+scan instead, preserving the shallow view."
   (interactive)
   (emeld--stop-scan)
   (setq emeld--status-phase 'running-diff)
@@ -2384,7 +2561,9 @@ so Emacs stays fully responsive during the scan."
     (setf (emeld-node-children root) nil)
     (emeld--update-header-line)
     (emeld--render)
-    (emeld--start-diff buf)))
+    (if emeld--scan-max-depth
+        (emeld--start-bounded-diff buf emeld--scan-max-depth)
+      (emeld--start-diff buf))))
 
 (defun emeld--diff-subdir-entries (left-sub right-sub)
   "Diff LEFT-SUB against RIGHT-SUB, returning subdir-relative entries.
@@ -2447,6 +2626,8 @@ on a file, its containing directory is rescanned."
                 (if (cl-some (lambda (c) (not (eq (emeld-node-diff-status c) 'same)))
                              (emeld-node-children node))
                     'different 'same))
+          ;; A full recursive subdir scan clears any depth-limit boundary mark.
+          (setf (emeld-node-scanned node) t)
           (let ((emeld--saved-expanded saved)) (emeld--restore-expanded node))
           (emeld--render)
           (message "Rescanned %s — %d change%s" rel
@@ -2459,6 +2640,7 @@ on a file, its containing directory is rescanned."
               (emeld-node-left-path node) (and left-exists left-sub)
               (emeld-node-right-path node) (and right-exists right-sub)
               (emeld-node-children node) nil)
+        (setf (emeld-node-scanned node) t)
         (emeld--maybe-populate-lazy-dir node)
         (emeld--render)
         (message "Rescanned %s — only on the %s side" rel
@@ -3186,6 +3368,10 @@ reflects the live scan counters without needing to be re-installed."
         '(:eval
           (concat (emeld--scan-progress-string)
                   " [" (emeld--display-state-string) "] "
+                  ;; Flag a depth-limited (shallow) scan.
+                  (when emeld--scan-max-depth
+                    (propertize (format "[depth %d] " emeld--scan-max-depth)
+                                'face 'warning))
                   ;; Mirror copies can delete destination files, so flag it.
                   (when emeld-copy-mirror
                     (propertize "[Mirror] " 'face 'warning))
@@ -3390,7 +3576,12 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
                (dir-indicator (if (emeld-node-is-dir node)
                                   (concat (if (emeld-node-expanded node) "[-] " "[+] ")
                                           emeld-dir-prefix)
-                                "")))
+                                ""))
+               ;; Mark directories a depth-limited scan left unscanned.
+               (scan-marker (if (and (emeld-node-is-dir node)
+                                     (not (emeld-node-scanned node)))
+                                (propertize " …" 'face 'shadow)
+                              "")))
           (let* ((start (point))
                  (rel (emeld--node-relpath node))
                  (left-mark (if (emeld--marked-side-p rel 'left)
@@ -3404,7 +3595,8 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
             (if (emeld-node-left-path node)
                 (progn
                   (insert dir-indicator)
-                  (insert (propertize (emeld-node-name node) 'face name-face)))
+                  (insert (propertize (emeld-node-name node) 'face name-face))
+                  (insert scan-marker))
               (when (and emeld-show-strikethrough (eq status 'right-only))
                 (insert dir-indicator)
                 (insert (propertize (emeld-node-name node)
@@ -3424,7 +3616,8 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
                   (insert dir-indicator)
                   (insert (propertize (or (emeld-node-name-right node)
                                           (emeld-node-name node))
-                                      'face name-face)))
+                                      'face name-face))
+                  (insert scan-marker))
               (when (and emeld-show-strikethrough (eq status 'left-only))
                 (insert dir-indicator)
                 (insert (propertize (emeld-node-name node)
