@@ -654,5 +654,90 @@ a new path that is neither is treated as identical."
               (should (eq 'different (cdr (assoc "a.txt" entries)))))))
       (delete-directory dir t))))
 
+(ert-deftest emeld-git-commit-info ()
+  "`emeld--git-commit-info' parses commit metadata; non-commits return nil."
+  (skip-unless (executable-find "git"))
+  (let ((dir (make-temp-file "emeld-cm" t)))
+    (unwind-protect
+        (cl-flet ((g (&rest a) (apply #'call-process "git" nil nil nil "-C" dir a)))
+          (g "init" "-q")
+          (g "config" "user.email" "t@t.com")
+          (g "config" "user.name" "Tester")
+          (with-temp-file (expand-file-name "f.txt" dir) (insert "1\n"))
+          (g "add" "-A")
+          (g "commit" "-q" "-m" "Subject here" "-m" "Body A\nBody B")
+          (with-temp-buffer
+            (setq-local emeld--git-repo (file-name-as-directory dir))
+            (let ((info (emeld--git-commit-info "HEAD")))
+              (should (equal (plist-get info :subject) "Subject here"))
+              (should (string-match-p "Body A" (plist-get info :body)))
+              (should (string-match-p "Body B" (plist-get info :body)))
+              (should (string-match-p "Tester" (plist-get info :author)))
+              (should (stringp (plist-get info :sha)))
+              (should (> (length (plist-get info :sha)) 0)))
+            ;; The working tree and index are not commits.
+            (should-not (emeld--git-commit-info 'working))
+            (should-not (emeld--git-commit-info 'staged))))
+      (delete-directory dir t))))
+
+(ert-deftest emeld-git-history-list-and-parent ()
+  "`emeld--git-history-list' is newest-first; the root's parent is the empty tree."
+  (skip-unless (executable-find "git"))
+  (let ((dir (make-temp-file "emeld-hist" t)))
+    (unwind-protect
+        (cl-flet ((g (&rest a) (apply #'call-process "git" nil nil nil "-C" dir a)))
+          (g "init" "-q")
+          (g "config" "user.email" "t@t.com")
+          (g "config" "user.name" "T")
+          (dotimes (k 4)
+            (with-temp-file (expand-file-name "f.txt" dir) (insert (format "v%d\n" k)))
+            (g "add" "-A")
+            (g "commit" "-q" "-m" (format "c%d" k)))
+          (with-temp-buffer
+            (setq-local emeld--git-repo (file-name-as-directory dir))
+            (let ((h (emeld--git-history-list "HEAD" 100)))
+              (should (= 4 (length h)))
+              ;; Newest first: HEAD's first parent is the second entry.
+              (should (equal (emeld--git-parent-rev (nth 0 h)) (nth 1 h)))
+              ;; The root commit (last) has the empty tree as its parent.
+              (should (equal (emeld--git-parent-rev (nth 3 h)) emeld--git-empty-tree))
+              ;; The limit caps how many commits are returned.
+              (should (= 2 (length (emeld--git-history-list "HEAD" 2)))))))
+      (delete-directory dir t))))
+
+(ert-deftest emeld-git-history-apply-derives-pair ()
+  "`emeld--git-history-apply' maps the index to (parent vs commit) and clamps."
+  (let ((emeld--git-history '("aaa" "bbb" "ccc"))
+        (emeld--git-history-index 0)
+        (emeld--git-repo "/repo/")
+        (emeld--git-left-rev nil)
+        (emeld--git-right-rev nil)
+        (emeld--root-node (emeld-node-create :name "" :is-dir t)))
+    (cl-letf (((symbol-function 'emeld-refresh) (lambda () nil))
+              ((symbol-function 'emeld--git-parent-rev)
+               (lambda (_) emeld--git-empty-tree)))
+      ;; Index 0: newest commit vs its parent (the next entry).
+      (emeld--git-history-apply)
+      (should (equal emeld--git-right-rev "aaa"))
+      (should (equal emeld--git-left-rev "bbb"))
+      ;; Last index: commit vs its real parent (the empty tree here).
+      (setq emeld--git-history-index 2)
+      (emeld--git-history-apply)
+      (should (equal emeld--git-right-rev "ccc"))
+      (should (equal emeld--git-left-rev emeld--git-empty-tree))
+      ;; Out-of-range indices clamp into the list.
+      (setq emeld--git-history-index 99)
+      (emeld--git-history-apply)
+      (should (= emeld--git-history-index 2)))))
+
+(ert-deftest emeld-git-rev-label-abbreviates ()
+  "Full SHAs abbreviate; the empty tree and named revs get readable labels."
+  (should (equal (emeld--git-rev-label "0123456789abcdef0123456789abcdef01234567")
+                 "01234567"))
+  (should (equal (emeld--git-rev-label emeld--git-empty-tree) "∅ (root)"))
+  (should (equal (emeld--git-rev-label "HEAD") "HEAD"))
+  (should (equal (emeld--git-rev-label 'working) "working"))
+  (should (equal (emeld--git-rev-label 'staged) "index")))
+
 (message "Running tests...")
 (ert-run-tests-batch-and-exit)

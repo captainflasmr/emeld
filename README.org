@@ -46,10 +46,20 @@ The result is the same side-by-side tree, showing the hierarchy of added, delete
 
 - ~RET~ / ~f~ opens a file at its revision (via ~git show~; the working-tree side opens the real file), ~e~ Ediffs the two revisions, and ~=~ / ~SPC~ / ~d~ / ~D~ show a ~git diff~.
 - ~S~ (show Same) lists the left revision and merges in every unchanged file.
+- A foldable commit-context block sits between the revision header and the tree: each commit side shows its short SHA and subject line, and ~c~ (or ~RET~ on the block) unfolds the author, date and full message.
 - Header ~RET~ re-selects a revision for that side; ~W~ swaps the two revisions; ~g~ re-scans.
 - Copy (~C~), delete (~x~) and subdirectory rescan are disabled — history cannot be written to.
 
 The header line shows ~[git OLD→NEW]~ with the chosen revision labels.
+
+*** Stepping through history
+
+~M-x emeld-git-step-history~ (or ~H~ in the transient) walks the history one commit at a time.  You pick a starting revision (default ~HEAD~); the buffer shows what that commit changed — its first parent on the left, the commit on the right — and you step through:
+
+- ~,~ — move to the *older* commit (back in time)
+- ~.~ — move to the *newer* commit (forward, back toward the start)
+
+Each step re-scans and updates the commit-context block, so you can quickly skim what changed in successive commits.  The root commit is compared against the empty tree (labelled ~∅ (root)~), and the header line shows ~[hist i/N]~.  Only the first-parent chain is followed, up to ~emeld-git-history-limit~ commits (default 1000).  Pressing ~,~/~.~ in any git comparison where the right side is a commit starts a walk anchored there.
 
 * Transient Menu (~?~)
 

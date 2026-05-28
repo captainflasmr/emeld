@@ -121,6 +121,15 @@ Has no effect when `file-equal-p' is available (Emacs >= 29)."
   :type 'integer
   :group 'emeld)
 
+(defcustom emeld-git-history-limit 1000
+  "Maximum number of commits to load when stepping through git history.
+`emeld-git-step-history' walks the first-parent chain from the starting
+revision; this caps how far back it loads.  Stepping past the loaded edge
+reports the limit rather than loading more — re-run from an older commit
+to continue."
+  :type 'integer
+  :group 'emeld)
+
 (defcustom emeld-respect-gitignore t
   "When non-nil, respect `.gitignore` rules during directory comparison.
 Simple patterns from each root `.gitignore' are passed to `diff
@@ -243,6 +252,23 @@ A revision string (commit/branch/tag), or the symbol `working' (the
 working tree) or `staged' (the index).")
 (defvar-local emeld--git-right-rev nil
   "Right (new) revision in git mode.  See `emeld--git-left-rev' for the shape.")
+(defvar-local emeld--git-left-commit nil
+  "Commit metadata plist for `emeld--git-left-rev', or nil.
+See `emeld--git-commit-info' for the plist shape; nil when the rev is the
+working tree, the index, or could not be resolved to a commit.")
+(defvar-local emeld--git-right-commit nil
+  "Commit metadata plist for `emeld--git-right-rev', or nil.")
+(defvar-local emeld--git-commit-expanded nil
+  "When non-nil, the git commit-message block shows the full body.
+When nil (the default) only each commit's subject line is shown.  Toggle
+with `emeld-git-toggle-commit-message' (\\`c').")
+(defvar-local emeld--git-history nil
+  "First-parent commit SHAs (newest first) for history stepping, or nil.
+Set by `emeld-git-step-history'; `emeld--git-history-index' points at the
+current commit, which is compared against its parent.")
+(defvar-local emeld--git-history-index 0
+  "Index into `emeld--git-history' of the commit currently being viewed.
+0 is the newest (the starting revision); larger is older.")
 (defvar-local emeld--column-width nil)
 (defvar-local emeld--saved-expanded nil
   "Saved expanded directory paths to restore after refresh.")
@@ -2134,6 +2160,60 @@ delete are disabled, since history cannot be written to."
     (switch-to-buffer buf)
     (emeld-refresh)))
 
+;;;###autoload
+(defun emeld-git-step-history (repo start)
+  "Step through git history from START, one commit at a time.
+Each step compares a commit against its first parent, so the buffer shows
+what that commit changed.  Move to the older commit with \\`,'
+\(`emeld-git-history-older') and back toward START (newer) with \\`.'
+\(`emeld-git-history-newer').
+
+REPO is a git work tree; START (default HEAD) is the newest commit of the
+walk.  Only the first-parent chain is followed, and at most
+`emeld-git-history-limit' commits are loaded.  All the usual git-mode
+commands work on whichever commit is showing — view a file at its
+revision, ediff against the parent, fold the commit message, etc."
+  (interactive
+   (let* ((repo (or (emeld--git-toplevel default-directory)
+                    (user-error "Not inside a git work tree")))
+          (start (emeld--read-git-rev "Step through history from: " repo "HEAD")))
+     (list repo start)))
+  (unless (emeld--git-work-tree-p repo)
+    (user-error "Not a git work tree: %s" repo))
+  (when (memq start '(working staged)) (setq start "HEAD"))
+  (let* ((repo (file-name-as-directory (expand-file-name repo)))
+         (history (let ((emeld--git-repo repo))
+                    (emeld--git-history-list start emeld-git-history-limit))))
+    (unless history
+      (user-error "No commits found from %s" (emeld--git-rev-label start)))
+    (let ((buf (get-buffer-create
+                (format "*emeld-git-history: %s*"
+                        (file-name-nondirectory (directory-file-name repo))))))
+      (with-current-buffer buf
+        (emeld-mode)
+        (setq default-directory repo)
+        (setq emeld--scan-max-depth nil)
+        (setq emeld--git-mode t
+              emeld--git-repo repo
+              emeld--git-history history
+              emeld--git-history-index 0)
+        (emeld--apply-dir-locals)
+        (setq emeld--active-filter-groups
+              (cl-loop for g in emeld-filter-groups
+                       when (emeld--group-active-default g)
+                       collect (car g)))
+        (setq emeld--marked-paths (make-hash-table :test 'equal))
+        (setq emeld--left-root repo
+              emeld--right-root repo)
+        (setq emeld--root-node (emeld-node-create
+                                :name "" :name-right ""
+                                :left-path repo :right-path repo
+                                :is-dir t :expanded t))
+        (setf (emeld-node-children emeld--root-node) nil))
+      (switch-to-buffer buf)
+      (with-current-buffer buf
+        (emeld--git-history-apply)))))
+
 ;;;; ─── Presets (saved directory pairs) ─────────────────────────────
 
 (defun emeld--read-preset (prompt)
@@ -2198,14 +2278,46 @@ NAME is chosen from `emeld-presets' via completion."
   "Completion label standing in for the working tree (the `working' rev).")
 (defconst emeld--git-index-label "[index]"
   "Completion label standing in for the index (the `staged' rev).")
+(defconst emeld--git-empty-tree "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
+  "SHA-1 of git's canonical empty tree, used as a root commit's parent.")
 
 (defun emeld--git-rev-label (rev)
   "Return a short human label for REV.
-REV is a revision string, or the symbol `working' or `staged'."
+REV is a revision string, or the symbol `working' or `staged'.  A full
+40-char SHA is abbreviated; the empty tree shows as a root marker."
   (cond ((eq rev 'working) "working")
         ((eq rev 'staged) "index")
+        ((and (stringp rev) (string= rev emeld--git-empty-tree)) "∅ (root)")
+        ((and (stringp rev) (string-match-p "\\`[0-9a-f]\\{40\\}\\'" rev))
+         (substring rev 0 8))
         ((stringp rev) rev)
         (t (format "%s" rev))))
+
+(defun emeld--git-commit-info (rev)
+  "Return commit metadata for REV as a plist, or nil.
+The plist has :sha (abbreviated), :author, :date, :subject and :body.
+Returns nil when REV is the working tree or index, or does not resolve to
+a commit.  Reads the buffer-local `emeld--git-repo' as the work tree."
+  (when (and (stringp rev) emeld--git-repo
+             (not (string= rev emeld--git-empty-tree)))
+    (let ((default-directory emeld--git-repo))
+      (with-temp-buffer
+        (when (eq 0 (process-file "git" nil t nil "show" "-s" "--no-color"
+                                  "--date=short"
+                                  "--format=%h%n%an <%ae>%n%ad%n%s%n%b" rev))
+          (goto-char (point-min))
+          (cl-flet ((line ()
+                      (prog1 (buffer-substring-no-properties
+                              (line-beginning-position) (line-end-position))
+                        (forward-line 1))))
+            (let* ((sha (line))
+                   (author (line))
+                   (date (line))
+                   (subject (line))
+                   (body (string-trim-right
+                          (buffer-substring-no-properties (point) (point-max)))))
+              (list :sha sha :author author :date date
+                    :subject subject :body body))))))))
 
 (defun emeld--git-toplevel (dir)
   "Return the git work-tree root containing DIR (trailing slash), or nil."
@@ -2272,6 +2384,88 @@ pathspec, so it must contain only revision selectors."
                 "--find-renames" "--find-copies")
           (emeld--git-rev-args emeld--git-left-rev emeld--git-right-rev)))
 
+;;;; ─── Stepping through history ─────────────────────────────────────
+
+(defun emeld--git-history-list (start limit)
+  "Return up to LIMIT first-parent commit SHAs from START, newest first.
+Reads the buffer-local `emeld--git-repo'."
+  (let ((default-directory emeld--git-repo))
+    (with-temp-buffer
+      (when (eq 0 (process-file "git" nil t nil "rev-list" "--first-parent"
+                                (format "--max-count=%d" (max 1 limit)) start))
+        (split-string (buffer-string) "\n" t)))))
+
+(defun emeld--git-parent-rev (sha)
+  "Return SHA's first parent, or the empty-tree object when SHA is a root commit."
+  (let ((default-directory emeld--git-repo))
+    (with-temp-buffer
+      (if (eq 0 (process-file "git" nil t nil "rev-parse" "--verify" "-q"
+                              (concat sha "^")))
+          (string-trim (buffer-string))
+        emeld--git-empty-tree))))
+
+(defun emeld--git-history-apply ()
+  "Set the rev pair from `emeld--git-history-index' and re-scan.
+The indexed commit becomes the right (new) side and its parent the left
+\(old) side, so the buffer shows what that commit changed."
+  (let* ((h emeld--git-history)
+         (n (length h))
+         (i (max 0 (min emeld--git-history-index (1- n))))
+         (right (nth i h))
+         (left (if (< (1+ i) n) (nth (1+ i) h) (emeld--git-parent-rev right))))
+    (setq emeld--git-history-index i
+          emeld--git-left-rev left
+          emeld--git-right-rev right)
+    (setf (emeld-node-name emeld--root-node) (emeld--git-rev-label left)
+          (emeld-node-name-right emeld--root-node) (emeld--git-rev-label right))
+    (emeld-refresh)))
+
+(defun emeld--git-history-echo ()
+  "Echo the current history position and the commit subject."
+  (let ((subj (and emeld--git-right-commit
+                   (plist-get emeld--git-right-commit :subject))))
+    (message "Commit %d/%d  %s%s"
+             (1+ emeld--git-history-index) (length emeld--git-history)
+             (emeld--git-rev-label emeld--git-right-rev)
+             (if subj (concat "  " subj) ""))))
+
+(defun emeld--git-history-ensure ()
+  "Ensure the buffer has a history list, building one on demand.
+In git mode without an explicit history (e.g. after `emeld-git-diff'),
+anchor a fresh first-parent walk at the current right revision when it is
+a commit, otherwise at HEAD."
+  (unless emeld--git-mode
+    (user-error "Not comparing git revisions"))
+  (unless emeld--git-history
+    (let* ((anchor (if (stringp emeld--git-right-rev) emeld--git-right-rev "HEAD"))
+           (h (emeld--git-history-list anchor emeld-git-history-limit)))
+      (unless h (user-error "No commit history to step through"))
+      (setq emeld--git-history h
+            emeld--git-history-index 0))))
+
+(defun emeld-git-history-older ()
+  "Step to the previous (older) commit in the history walk.
+Builds a walk anchored at the current commit if one is not already active."
+  (interactive)
+  (emeld--git-history-ensure)
+  (if (>= (1+ emeld--git-history-index) (length emeld--git-history))
+      (message "Oldest loaded commit (%d of %d; raise `emeld-git-history-limit' \
+or re-run from an older commit)"
+               (1+ emeld--git-history-index) (length emeld--git-history))
+    (cl-incf emeld--git-history-index)
+    (emeld--git-history-apply)
+    (emeld--git-history-echo)))
+
+(defun emeld-git-history-newer ()
+  "Step to the next (newer) commit, back toward the starting revision."
+  (interactive)
+  (emeld--git-history-ensure)
+  (if (<= emeld--git-history-index 0)
+      (message "Newest commit (%s)" (emeld--git-rev-label (car emeld--git-history)))
+    (cl-decf emeld--git-history-index)
+    (emeld--git-history-apply)
+    (emeld--git-history-echo)))
+
 (defun emeld--parse-git-name-status (output)
   "Parse NUL-delimited `git diff --name-status -z' OUTPUT into entries.
 Return a list of (RELPATH . STATUS) where STATUS is `different',
@@ -2308,7 +2502,11 @@ copy adds only the new path (the source is unchanged)."
 (defun emeld--start-git-diff (buf)
   "Run `git diff --name-status' for the rev pair and build the tree in BUF."
   (with-current-buffer buf
-    (setq emeld--benchmark-start-time (float-time)))
+    (setq emeld--benchmark-start-time (float-time)
+          ;; Cheap (`git show -s'); refreshed here so a swap or header
+          ;; revision change updates the displayed commit context.
+          emeld--git-left-commit (emeld--git-commit-info emeld--git-left-rev)
+          emeld--git-right-commit (emeld--git-commit-info emeld--git-right-rev)))
   (let* ((command (with-current-buffer buf (emeld--git-diff-command)))
          (chunks nil)
          (proc (make-process
@@ -2427,6 +2625,44 @@ buffer.  WHAT labels the echo-area message."
       (display-buffer buf)
       (message "Diff of %s" what))))
 
+(defun emeld--insert-git-commit-block ()
+  "Insert the foldable git commit-message block at point (git mode only).
+Each side that resolves to a commit gets a line: a fold arrow, the rev
+label, the abbreviated SHA and the subject.  When `emeld--git-commit-expanded'
+is non-nil the author, date and full body follow.  The whole block carries
+the `emeld-git-commit' text property so RET (or `c') toggles the fold."
+  (let ((entries (delq nil
+                       (list (and emeld--git-left-commit
+                                  (cons emeld--git-left-rev emeld--git-left-commit))
+                             (and emeld--git-right-commit
+                                  (cons emeld--git-right-rev emeld--git-right-commit))))))
+    (when entries
+      (let ((start (point))
+            (arrow (if emeld--git-commit-expanded "▾ " "▸ ")))
+        (dolist (e entries)
+          (let ((label (emeld--git-rev-label (car e)))
+                (info (cdr e)))
+            (insert (propertize arrow 'face 'bold))
+            (insert (propertize (format "%-8s " label) 'face 'emeld-header-face))
+            (insert (propertize (concat (plist-get info :sha) "  ")
+                                'face 'font-lock-constant-face))
+            (insert (propertize (plist-get info :subject)
+                                'face 'emeld-git-commit-subject-face))
+            (insert "\n")
+            (when emeld--git-commit-expanded
+              (insert (propertize (format "    %s\n" (plist-get info :author))
+                                  'face 'emeld-git-commit-meta-face))
+              (insert (propertize (format "    %s\n" (plist-get info :date))
+                                  'face 'emeld-git-commit-meta-face))
+              (let ((body (plist-get info :body)))
+                (unless (string-empty-p body)
+                  (insert "\n")
+                  (dolist (bl (split-string body "\n"))
+                    (insert "    " bl "\n"))))
+              (insert "\n"))))
+        (add-text-properties start (point)
+                             '(emeld-git-commit t mouse-face highlight))))))
+
 (defface emeld-same-face
   '((t :inherit font-lock-comment-face))
   "Face for files that are the same."
@@ -2469,6 +2705,16 @@ Mimics Meld's display of missing files."
   "Face for directory names (overrides diff-status faces)."
   :group 'emeld)
 
+(defface emeld-git-commit-subject-face
+  '((t :inherit default :weight bold))
+  "Face for a commit's subject line in the git commit-message block."
+  :group 'emeld)
+
+(defface emeld-git-commit-meta-face
+  '((t :inherit font-lock-comment-face))
+  "Face for commit author/date metadata in the git commit-message block."
+  :group 'emeld)
+
 (defvar emeld-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "TAB") #'emeld-cycle-subtree)
@@ -2498,6 +2744,9 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "x")   #'emeld-delete)
     (define-key map (kbd "D")   #'emeld-diff-root)
     (define-key map (kbd "d")   #'emeld-diff-dir)
+    (define-key map (kbd "c")   #'emeld-git-toggle-commit-message)
+    (define-key map (kbd ",")   #'emeld-git-history-older)
+    (define-key map (kbd ".")   #'emeld-git-history-newer)
     (define-key map (kbd "SPC") #'emeld-soft-diff)
     (define-key map (kbd "m")   #'emeld-mark)
     (define-key map (kbd "u")   #'emeld-unmark)
@@ -3167,6 +3416,19 @@ In git mode this re-selects the revision for that side instead of a directory."
              (directory-file-name emeld--right-root)))
       (emeld-refresh)))))
 
+(defun emeld-git-toggle-commit-message ()
+  "Fold or unfold the git commit-message block (git mode only).
+Folded shows just each commit's subject line; unfolded adds the author,
+date and full body.  Also reachable with RET on the block."
+  (interactive)
+  (unless emeld--git-mode
+    (user-error "Commit messages are only shown when comparing git revisions"))
+  (unless (or emeld--git-left-commit emeld--git-right-commit)
+    (user-error "Neither side is a commit (working tree / index)"))
+  (setq emeld--git-commit-expanded (not emeld--git-commit-expanded))
+  (emeld--render)
+  (message "Commit message: %s" (if emeld--git-commit-expanded "expanded" "folded")))
+
 (defun emeld-action ()
   "Perform default action on node (ediff or view).
 
@@ -3175,8 +3437,10 @@ current side's directory with a new one via completion.
 On files, run ediff or open.  On directories, open in dired."
   (interactive)
   (let* ((node (get-text-property (point) 'emeld-node))
-         (header (get-text-property (point) 'emeld-header)))
+         (header (get-text-property (point) 'emeld-header))
+         (commit (get-text-property (point) 'emeld-git-commit)))
     (cond
+     (commit (emeld-git-toggle-commit-message))
      (header
       (let ((cur-col (current-column)))
         (emeld--read-new-root (< cur-col emeld--column-width))))
@@ -3891,6 +4155,12 @@ reflects the live scan counters without needing to be re-installed."
                                         (emeld--git-rev-label emeld--git-left-rev)
                                         (emeld--git-rev-label emeld--git-right-rev))
                                 'face 'bold))
+                  ;; History stepping position (`,'/`.').
+                  (when (and emeld--git-mode emeld--git-history)
+                    (propertize (format "[hist %d/%d] "
+                                        (1+ emeld--git-history-index)
+                                        (length emeld--git-history))
+                                'face 'warning))
                   ;; Flag a depth-limited (shallow) scan.
                   (when emeld--scan-max-depth
                     (propertize (format "[depth %d] " emeld--scan-max-depth)
@@ -3959,7 +4229,11 @@ reflects the live scan counters without needing to be re-installed."
                                                       emeld--column-width nil ?\s)
                             'face 'emeld-header-face))
         (add-text-properties header-start (point) '(emeld-header t mouse-face highlight)))
-      (insert "\n" (make-string (* 2 emeld--column-width) ?-) "\n")
+      (insert "\n")
+      ;; Git mode: a foldable block of commit context between the revision
+      ;; header and the separator.
+      (when emeld--git-mode (emeld--insert-git-commit-block))
+      (insert (make-string (* 2 emeld--column-width) ?-) "\n")
       ;; Root node (collapsible) — draws even with no children so the
       ;; directory structure stays visible for visual reference.
       (when emeld--root-node
@@ -4198,7 +4472,10 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
     ("s" (lambda () (if emeld-show-strikethrough "[x] strikethrough" "[ ] strikethrough"))
      (lambda () (interactive) (emeld-toggle-show-strikethrough)) :transient t)
     ("G" (lambda () (if emeld-respect-gitignore "[x] gitignore" "[ ] gitignore"))
-     (lambda () (interactive) (emeld-toggle-gitignore)))]
+     (lambda () (interactive) (emeld-toggle-gitignore)))
+    ("c" (lambda () (if emeld--git-commit-expanded "[x] commit msg" "[ ] commit msg"))
+     (lambda () (interactive) (emeld-git-toggle-commit-message)) :transient t
+     :if (lambda () emeld--git-mode))]
    ["Layout"
     ("[" "collapse all"  emeld-collapse-all :transient t)
     ("]" "expand all"    emeld-expand-all :transient t)
@@ -4218,7 +4495,11 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
    ("W"   "swap panes"         emeld-swap-panes)
    ("o"   "jump other side"    emeld-jump-other-side :transient t)
    ("M-n" "next change"        emeld-next-change :transient t)
-   ("M-p" "previous change"    emeld-previous-change :transient t)])
+   ("M-p" "previous change"    emeld-previous-change :transient t)
+   ("," "history: older commit" emeld-git-history-older
+    :transient t :if (lambda () emeld--git-mode))
+   ("." "history: newer commit" emeld-git-history-newer
+    :transient t :if (lambda () emeld--git-mode))])
 
 (transient-define-prefix emeld-dispatch-file ()
   "Emeld file actions."
@@ -4301,7 +4582,8 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
     ("pl" "load…"        emeld-load-preset)
     ("pd" "delete…"      emeld-delete-preset)]
    ["Compare"
-    ("G" "git revisions…" emeld-git-diff)]
+    ("G" "git revisions…"   emeld-git-diff)
+    ("H" "git history step…" emeld-git-step-history)]
    ])
 
 (define-key emeld-mode-map (kbd "?") #'emeld-dispatch)
