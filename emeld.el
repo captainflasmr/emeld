@@ -1,10 +1,13 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.41.0
+;; Version: 0.42.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
+;; `emeld-diff' compares two directories; `emeld-git-diff' compares two
+;; git revisions (or a revision against the working tree / index),
+;; showing the same hierarchical tree of added, deleted and modified files.
 
 ;;; Code:
 
@@ -228,6 +231,18 @@ to be drilled into with `\\[universal-argument] g' (`emeld-refresh-subdir').")
 (defvar-local emeld--left-root nil)
 (defvar-local emeld--right-root nil)
 (defvar-local emeld--root-node nil)
+(defvar-local emeld--git-mode nil
+  "Non-nil when this buffer compares git revisions rather than directories.
+Set by `emeld-git-diff'.  Switches the scan to `git diff --name-status'
+and reroutes file operations to git blobs instead of on-disk files.")
+(defvar-local emeld--git-repo nil
+  "Absolute path (with trailing slash) of the git work-tree root in git mode.")
+(defvar-local emeld--git-left-rev nil
+  "Left (old) revision in git mode.
+A revision string (commit/branch/tag), or the symbol `working' (the
+working tree) or `staged' (the index).")
+(defvar-local emeld--git-right-rev nil
+  "Right (new) revision in git mode.  See `emeld--git-left-rev' for the shape.")
 (defvar-local emeld--column-width nil)
 (defvar-local emeld--saved-expanded nil
   "Saved expanded directory paths to restore after refresh.")
@@ -510,7 +525,20 @@ Only sets the path for the side(s) where the file exists.
 Single-sided directories are populated and expanded eagerly so that
 all changed files are visible on initial scan."
   (let ((name (file-name-nondirectory (directory-file-name relpath))))
-    (if (memq status '(left-only right-only))
+    (cond
+     ;; Git mode: `git diff --name-status' reports only files (never bare
+     ;; directories), and the content lives in history, not on disk — so do
+     ;; not probe the filesystem.  Carry the relpath as the side "path" for
+     ;; whichever revision(s) hold the file; file operations resolve it via
+     ;; `git show'.
+     (emeld--git-mode
+      (emeld-node-create
+       :name name
+       :left-path (and (memq status '(same different left-only)) relpath)
+       :right-path (and (memq status '(same different right-only)) relpath)
+       :parent parent
+       :diff-status status))
+     ((memq status '(left-only right-only))
         (let* ((side-root (if (eq status 'left-only) emeld--left-root emeld--right-root))
                (side-path (and side-root (concat (file-name-as-directory side-root) relpath))))
           (if (and side-path (file-directory-p side-path))
@@ -530,7 +558,8 @@ all changed files are visible on initial scan."
              :left-path (and (eq status 'left-only) side-path)
              :right-path (and (eq status 'right-only) side-path)
              :parent parent
-             :diff-status status)))
+             :diff-status status))))
+     (t
       (emeld-node-create
        :name name
        :left-path (and (memq status '(same different left-only))
@@ -540,7 +569,7 @@ all changed files are visible on initial scan."
                         emeld--right-root
                         (concat (file-name-as-directory emeld--right-root) relpath))
        :parent parent
-       :diff-status status))))
+       :diff-status status)))))
 
 (defun emeld--entries-to-nodes (entries prefix parent)
   "Convert ENTRIES (alist of (REL-PATH . STATUS)) into emeld-node tree.
@@ -586,10 +615,12 @@ Directories are grouped first, followed by files, each sorted alphabetically."
              (unless (emeld--filtered-p dir-name sub-prefix)
                (let* ((dir-node (emeld-node-create
                                  :name dir-name
-                                 :left-path (and emeld--left-root
-                                                 (concat (file-name-as-directory emeld--left-root) sub-prefix))
-                                 :right-path (and emeld--right-root
-                                                  (concat (file-name-as-directory emeld--right-root) sub-prefix))
+                                 :left-path (if emeld--git-mode sub-prefix
+                                              (and emeld--left-root
+                                                   (concat (file-name-as-directory emeld--left-root) sub-prefix)))
+                                 :right-path (if emeld--git-mode sub-prefix
+                                               (and emeld--right-root
+                                                    (concat (file-name-as-directory emeld--right-root) sub-prefix)))
                                  :parent parent
                                  :is-dir t
                                  :diff-status 'same))
@@ -836,8 +867,11 @@ allowing identical/same branches to populate quietly afterward."
                 (push (emeld--make-file-node sub-rel parent status) file-nodes)))))
         (setq tail (cdr tail))))
 
-    ;; 3. Check if this is an implicit matching node branch that needs physical unrolling
-    (when (and (null files) (hash-table-empty-p dirs) (not (string-empty-p prefix)))
+    ;; 3. Check if this is an implicit matching node branch that needs physical
+    ;; unrolling.  Skipped in git mode: there is no on-disk tree to enumerate
+    ;; for a historical revision, and `git diff' already yields full paths.
+    (when (and (null files) (hash-table-empty-p dirs) (not (string-empty-p prefix))
+               (not emeld--git-mode))
       (with-current-buffer buf
         (let* ((left-root emeld--left-root)
                (right-root emeld--right-root)
@@ -882,12 +916,17 @@ allowing identical/same branches to populate quietly afterward."
                     (should-expand t)
                     (dir-node (emeld-node-create
                                :name dir-name
-                               :left-path (and emeld--left-root 
-                                               (not (string-empty-p sub-prefix))
-                                               (concat (file-name-as-directory emeld--left-root) sub-prefix))
-                               :right-path (and emeld--right-root 
-                                                (not (string-empty-p sub-prefix))
-                                                (concat (file-name-as-directory emeld--right-root) sub-prefix))
+                               ;; In git mode the side "path" is just the
+                               ;; relpath (both sides, so the dir renders on
+                               ;; both); otherwise it is the on-disk path.
+                               :left-path (and (not (string-empty-p sub-prefix))
+                                               (if emeld--git-mode sub-prefix
+                                                 (and emeld--left-root
+                                                      (concat (file-name-as-directory emeld--left-root) sub-prefix))))
+                               :right-path (and (not (string-empty-p sub-prefix))
+                                                (if emeld--git-mode sub-prefix
+                                                  (and emeld--right-root
+                                                       (concat (file-name-as-directory emeld--right-root) sub-prefix))))
                                :parent parent
                                :is-dir t
                                :expanded should-expand
@@ -1571,6 +1610,64 @@ the left root, then merges the leftover (identical) files into the tree."
                                  buf accum root left right old-gc path-hash)))))))
       (setq emeld--scan-process proc))))
 
+(defun emeld--git-ls-command (rev)
+  "Return the argv listing every tracked file at REV in the current repo.
+REV is a revision string, or the symbol `working' or `staged'."
+  (let ((repo (list "git" "-C" (directory-file-name emeld--git-repo))))
+    (cond
+     ((memq rev '(working staged)) (append repo (list "ls-files" "-z")))
+     ((stringp rev) (append repo (list "ls-tree" "-r" "--name-only" "-z" rev)))
+     (t (error "Cannot list files for revision %S" rev)))))
+
+(defun emeld--scan-same-git (buf)
+  "Merge files identical between the two revisions into the tree in BUF.
+The left revision's full file list is enumerated (`git ls-tree' or
+`git ls-files'); any path the initial `git diff' did not report as changed
+is identical in the right revision, so it is added as a `same' node via the
+shared `emeld--process-same-files-worker'."
+  (with-current-buffer buf
+    (let ((skip (make-hash-table :test 'equal))
+          (lod (make-hash-table :test 'equal)))
+      (emeld--collect-same-exclusions emeld--root-node "" skip lod)
+      (setq emeld--same-skip-files skip
+            emeld--same-left-only-dirs lod))
+    (let* ((left emeld--left-root)
+           (right emeld--right-root)
+           (root emeld--root-node)
+           (command (emeld--git-ls-command emeld--git-left-rev))
+           (chunks nil)
+           (proc (make-process
+                  :name "emeld-git-ls"
+                  :buffer (generate-new-buffer " *emeld-git-ls*")
+                  :connection-type 'pipe
+                  :noquery t
+                  :command command)))
+      (set-process-filter proc (lambda (_p output) (push output chunks)))
+      (set-process-sentinel
+       proc
+       (lambda (p event)
+         (when (emeld--sentinel-done-p event)
+           (when (buffer-live-p buf)
+             (with-current-buffer buf
+               (let ((pbuf (process-buffer p)))
+                 (when (buffer-live-p pbuf) (kill-buffer pbuf)))
+               (emeld--bench-push "same list done")
+               (let* ((raw (apply #'concat (nreverse chunks)))
+                      (paths (split-string raw "\0" t))
+                      (old-gc gc-cons-threshold)
+                      (path-hash (make-hash-table :test 'equal)))
+                 (emeld--seed-dir-path-hash root "" path-hash)
+                 (emeld--bench-push "same seeded")
+                 (setq gc-cons-threshold (* 128 1024 1024))
+                 (setq emeld--status-phase 'building-tree
+                       emeld--scan-total (length paths)
+                       emeld--scan-processed 0
+                       emeld--last-render-time nil)
+                 (emeld--update-header-line)
+                 (run-with-timer 0.001 nil #'emeld--process-same-files-worker
+                                 buf paths root left right old-gc path-hash)))))))
+      (setq emeld--scan-process proc))))
+
 (defun emeld--scan-same-async (buf)
   (with-current-buffer buf
     (emeld--stop-scan)
@@ -1584,13 +1681,16 @@ the left root, then merges the leftover (identical) files into the tree."
     (when emeld-benchmark
       (setq emeld--benchmark-data nil
             emeld--benchmark-start-time (float-time)))
-    ;; Idempotent: a no-op if the initial scan already cached these roots.
-    (emeld--prewarm-gitignore emeld--left-root buf)
-    (emeld--prewarm-gitignore emeld--right-root buf)
     (emeld--update-header-line)
-    (if (eq emeld-same-files-method 'list)
-        (emeld--scan-same-list buf)
-      (emeld--scan-same-diff buf))))
+    (cond
+     (emeld--git-mode (emeld--scan-same-git buf))
+     (t
+      ;; Idempotent: a no-op if the initial scan already cached these roots.
+      (emeld--prewarm-gitignore emeld--left-root buf)
+      (emeld--prewarm-gitignore emeld--right-root buf)
+      (if (eq emeld-same-files-method 'list)
+          (emeld--scan-same-list buf)
+        (emeld--scan-same-diff buf))))))
 
 (defun emeld--scan-same-diff (buf)
   "Find identical files by re-running `diff -rqs' (see `emeld-same-files-method')."
@@ -1979,6 +2079,61 @@ trees."
         (user-error "Cannot compare a directory with itself: %s" left-abs)
       (emeld-diff left-abs right-abs depth))))
 
+;;;###autoload
+(defun emeld-git-diff (repo left-rev right-rev)
+  "Compare two git revisions of REPO side-by-side as a tree of changes.
+REPO is a git work-tree root.  LEFT-REV and RIGHT-REV are revisions (a
+commit, branch or tag), or the symbols `working' (the working tree) or
+`staged' (the index).  Interactively, REPO is the work tree containing
+`default-directory', LEFT-REV defaults to HEAD and RIGHT-REV to the
+working tree.
+
+The hierarchy of added, deleted and modified files renders with the same
+tree as `emeld-diff'.  File content comes from `git show', so opening a
+file shows it at its revision and `e' ediffs the two revisions; copy and
+delete are disabled, since history cannot be written to."
+  (interactive
+   (let* ((repo (or (emeld--git-toplevel default-directory)
+                    (user-error "Not inside a git work tree")))
+          (left (emeld--read-git-rev "Left (old) revision: " repo "HEAD"))
+          (right (emeld--read-git-rev "Right (new) revision: " repo 'working)))
+     (list repo left right)))
+  (unless (emeld--git-work-tree-p repo)
+    (user-error "Not a git work tree: %s" repo))
+  (let* ((repo (file-name-as-directory (expand-file-name repo)))
+         (lname (emeld--git-rev-label left-rev))
+         (rname (emeld--git-rev-label right-rev))
+         (buf (get-buffer-create (format "*emeld-git: %s <-> %s*" lname rname))))
+    (with-current-buffer buf
+      (emeld-mode)
+      (setq default-directory repo)
+      (setq emeld--scan-max-depth nil)
+      (setq emeld--git-mode t
+            emeld--git-repo repo
+            emeld--git-left-rev left-rev
+            emeld--git-right-rev right-rev)
+      (emeld--apply-dir-locals)
+      (setq emeld--active-filter-groups
+            (cl-loop for g in emeld-filter-groups
+                     when (emeld--group-active-default g)
+                     collect (car g)))
+      (setq emeld--marked-paths (make-hash-table :test 'equal))
+      ;; The roots double as the repo root: harmless for any incidental path
+      ;; join, and lets directory-oriented helpers fall back gracefully.
+      (setq emeld--left-root repo
+            emeld--right-root repo)
+      (setq emeld--root-node (emeld-node-create
+                              :name lname
+                              :name-right rname
+                              :left-path repo
+                              :right-path repo
+                              :is-dir t
+                              :expanded t))
+      (setf (emeld-node-children emeld--root-node) nil)
+      (emeld--render))
+    (switch-to-buffer buf)
+    (emeld-refresh)))
+
 ;;;; ─── Presets (saved directory pairs) ─────────────────────────────
 
 (defun emeld--read-preset (prompt)
@@ -2036,6 +2191,241 @@ NAME is chosen from `emeld-presets' via completion."
   (interactive (list (emeld--read-preset "Delete preset: ")))
   (setq emeld-presets (assoc-delete-all name emeld-presets))
   (message "Deleted preset \"%s\"" name))
+
+;;;; ─── Git revision comparison ──────────────────────────────────────
+
+(defconst emeld--git-working-label "[working tree]"
+  "Completion label standing in for the working tree (the `working' rev).")
+(defconst emeld--git-index-label "[index]"
+  "Completion label standing in for the index (the `staged' rev).")
+
+(defun emeld--git-rev-label (rev)
+  "Return a short human label for REV.
+REV is a revision string, or the symbol `working' or `staged'."
+  (cond ((eq rev 'working) "working")
+        ((eq rev 'staged) "index")
+        ((stringp rev) rev)
+        (t (format "%s" rev))))
+
+(defun emeld--git-toplevel (dir)
+  "Return the git work-tree root containing DIR (trailing slash), or nil."
+  (when (and dir (emeld--git-work-tree-p dir))
+    (let ((default-directory (file-name-as-directory (expand-file-name dir))))
+      (with-temp-buffer
+        (when (eq 0 (process-file "git" nil t nil "rev-parse" "--show-toplevel"))
+          (let ((top (string-trim (buffer-string))))
+            (and (not (string-empty-p top)) (file-name-as-directory top))))))))
+
+(defun emeld--git-revisions (repo)
+  "Return candidate revision strings for REPO.
+Local/remote branches and tags first, then recent commits as
+\"SHA SUBJECT\" lines (the SHA is extracted on selection)."
+  (let ((default-directory (file-name-as-directory (expand-file-name repo)))
+        (refs nil)
+        (commits nil))
+    (with-temp-buffer
+      (when (eq 0 (process-file "git" nil t nil "for-each-ref"
+                                "--format=%(refname:short)"
+                                "refs/heads" "refs/tags" "refs/remotes"))
+        (setq refs (split-string (buffer-string) "\n" t))))
+    (with-temp-buffer
+      (when (eq 0 (process-file "git" nil t nil "log" "--oneline"
+                                "--no-color" "-n" "50"))
+        (setq commits (split-string (buffer-string) "\n" t))))
+    (append (list "HEAD") refs commits)))
+
+(defun emeld--read-git-rev (prompt repo &optional default)
+  "Read a git revision in REPO via completion, returning a rev or symbol.
+PROMPT is shown to the user; DEFAULT pre-fills the minibuffer.  Choosing
+the working-tree or index entry returns the symbol `working' or `staged';
+otherwise a revision string is returned (a \"SHA SUBJECT\" commit line is
+reduced to its SHA)."
+  (let* ((cands (append (list emeld--git-working-label emeld--git-index-label)
+                        (emeld--git-revisions repo)))
+         (default-str (cond ((eq default 'working) emeld--git-working-label)
+                            ((eq default 'staged) emeld--git-index-label)
+                            ((stringp default) default)))
+         (choice (completing-read prompt cands nil nil nil nil default-str)))
+    (cond
+     ((string= choice emeld--git-working-label) 'working)
+     ((string= choice emeld--git-index-label) 'staged)
+     ((string-match "\\`\\([0-9a-fA-F]+\\) " choice) (match-string 1 choice))
+     (t (string-trim choice)))))
+
+(defun emeld--git-rev-args (left right)
+  "Return the revision argument list for `git diff' comparing LEFT to RIGHT.
+LEFT/RIGHT are revision strings or the symbols `working'/`staged'.  The
+returned list is spliced after `git diff [--name-status]' and before any
+pathspec, so it must contain only revision selectors."
+  (cond
+   ((and (memq left '(staged working)) (eq right 'working)) nil)
+   ((and (stringp left) (eq right 'staged)) (list "--cached" left))
+   ((and (stringp left) (eq right 'working)) (list left))
+   ((and (stringp left) (stringp right)) (list left right))
+   (t (user-error "Unsupported revision combination: %s vs %s"
+                  (emeld--git-rev-label left) (emeld--git-rev-label right)))))
+
+(defun emeld--git-diff-command ()
+  "Return the async `git diff --name-status -z' argv for the buffer's rev pair."
+  (append (list "git" "-C" (directory-file-name emeld--git-repo)
+                "diff" "--name-status" "-z" "--no-color"
+                "--find-renames" "--find-copies")
+          (emeld--git-rev-args emeld--git-left-rev emeld--git-right-rev)))
+
+(defun emeld--parse-git-name-status (output)
+  "Parse NUL-delimited `git diff --name-status -z' OUTPUT into entries.
+Return a list of (RELPATH . STATUS) where STATUS is `different',
+`left-only' (deleted in RIGHT) or `right-only' (added in RIGHT).  A rename
+becomes the old path as `left-only' plus the new path as `right-only'; a
+copy adds only the new path (the source is unchanged)."
+  (let ((tokens (split-string output "\0" t))
+        (entries nil))
+    (while tokens
+      (let ((code (car tokens)))
+        (setq tokens (cdr tokens))
+        (cond
+         ((string-empty-p code) nil)
+         ((eq (aref code 0) ?R)
+          (let ((old (car tokens)) (new (cadr tokens)))
+            (setq tokens (cddr tokens))
+            (when old (push (cons old 'left-only) entries))
+            (when new (push (cons new 'right-only) entries))))
+         ((eq (aref code 0) ?C)
+          (let ((new (cadr tokens)))
+            (setq tokens (cddr tokens))
+            (when new (push (cons new 'right-only) entries))))
+         (t
+          (let ((path (car tokens)))
+            (setq tokens (cdr tokens))
+            (when path
+              (push (cons path (pcase (aref code 0)
+                                 (?A 'right-only)
+                                 (?D 'left-only)
+                                 (_  'different)))
+                    entries)))))))
+    (nreverse entries)))
+
+(defun emeld--start-git-diff (buf)
+  "Run `git diff --name-status' for the rev pair and build the tree in BUF."
+  (with-current-buffer buf
+    (setq emeld--benchmark-start-time (float-time)))
+  (let* ((command (with-current-buffer buf (emeld--git-diff-command)))
+         (chunks nil)
+         (proc (make-process
+                :name "emeld-git-diff"
+                :buffer (generate-new-buffer " *emeld-git-diff*")
+                :connection-type 'pipe
+                :command command)))
+    (set-process-filter
+     proc
+     (lambda (_p output) (push output chunks)))
+    (set-process-sentinel
+     proc
+     (lambda (p event)
+       (when (emeld--sentinel-done-p event)
+         (when (buffer-live-p buf)
+           (with-current-buffer buf
+             (let ((p-buf (process-buffer p)))
+               (when (and p-buf (buffer-live-p p-buf)) (kill-buffer p-buf)))
+             (emeld--build-git-tree buf (apply #'concat (nreverse chunks))))))))
+    (setq emeld--scan-process proc)))
+
+(defun emeld--build-git-tree (buf output)
+  "Build the node tree in BUF from git name-status OUTPUT.
+Parses OUTPUT into entries and feeds them through the shared progressive
+tree builder; the `emeld--git-mode' guards keep that builder from probing
+the filesystem for paths that exist only in history."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (let* ((root emeld--root-node)
+             (entries (emeld--parse-git-name-status output))
+             (scan-gen emeld--scan-generation)
+             (old-gc gc-cons-threshold))
+        (setq gc-cons-threshold (* 128 1024 1024))
+        (setq emeld--status-phase 'building-tree
+              emeld--scan-total (length entries)
+              emeld--scan-processed (length entries)
+              emeld--last-render-time (float-time))
+        (emeld--update-header-line)
+        (emeld--bench-push "git diff done")
+        (if (/= scan-gen emeld--scan-generation)
+            (setq gc-cons-threshold old-gc)
+          (emeld--entries-to-nodes-progressive
+           entries "" root buf
+           (lambda (top-level-children)
+             (setf (emeld-node-children root) top-level-children)
+             (emeld--render))
+           (lambda ()
+             (with-current-buffer buf
+               (setf (emeld-node-diff-status root)
+                     (if (cl-some (lambda (c) (not (eq (emeld-node-diff-status c) 'same)))
+                                  (emeld-node-children root))
+                         'different 'same))
+               (setq emeld--scan-process nil
+                     emeld--scan-buf nil)
+               (emeld--restore-expanded root)
+               (unless emeld-show-same
+                 (setq emeld--status-phase 'done))
+               (emeld--render)
+               (emeld--bench-push "tree built")
+               (emeld--bench-report)
+               (setq gc-cons-threshold old-gc)
+               (if emeld-show-same
+                   (emeld--scan-same-async buf)
+                 (emeld--update-header-line))))
+           scan-gen))))))
+
+(defun emeld--git-blob-buffer (rev relpath)
+  "Return a buffer holding RELPATH's content at REV in the current repo.
+For the `working' side the on-disk file is visited.  For a revision or the
+index (`staged') `git show' is run into a read-only buffer, with the file's
+normal major mode enabled so the content is fontified."
+  (cond
+   ((eq rev 'working)
+    (find-file-noselect (expand-file-name relpath emeld--git-repo)))
+   (t
+    (let* ((spec (if (eq rev 'staged) (concat ":" relpath)
+                   (concat rev ":" relpath)))
+           (repo emeld--git-repo)
+           (buf (get-buffer-create
+                 (format "*emeld-git %s:%s*" (emeld--git-rev-label rev) relpath))))
+      (with-current-buffer buf
+        (let ((inhibit-read-only t))
+          (erase-buffer)
+          (let ((default-directory repo))
+            (process-file "git" nil t nil "show" spec))
+          (goto-char (point-min))
+          (setq default-directory repo)
+          ;; Bind a fake file name so `set-auto-mode' picks the right mode.
+          (let ((buffer-file-name (expand-file-name relpath repo)))
+            (ignore-errors (set-auto-mode)))
+          (set-buffer-modified-p nil)
+          (setq buffer-read-only t)))
+      buf))))
+
+(defun emeld--git-diff-show (relpath what)
+  "Display a `git diff' of RELPATH (or the whole tree if RELPATH is nil).
+Uses the buffer's revision pair and shows the result in a `diff-mode'
+buffer.  WHAT labels the echo-area message."
+  (let* ((repo emeld--git-repo)
+         (revargs (emeld--git-rev-args emeld--git-left-rev emeld--git-right-rev))
+         (args (append (list "diff" "--no-color") revargs
+                       (and relpath (list "--" relpath))))
+         (buf (get-buffer-create "*emeld-git-diff*")))
+    (with-current-buffer buf
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (let ((default-directory repo))
+          (apply #'process-file "git" nil t nil args))
+        (goto-char (point-min))
+        (setq default-directory repo)
+        (diff-mode)
+        (set-buffer-modified-p nil)
+        (setq buffer-read-only t)))
+    (if (with-current-buffer buf (= (point-min) (point-max)))
+        (message "No diff for %s" what)
+      (display-buffer buf)
+      (message "Diff of %s" what))))
 
 (defface emeld-same-face
   '((t :inherit font-lock-comment-face))
@@ -2586,9 +2976,10 @@ scan instead, preserving the shallow view."
     (setf (emeld-node-children root) nil)
     (emeld--update-header-line)
     (emeld--render)
-    (if emeld--scan-max-depth
-        (emeld--start-bounded-diff buf emeld--scan-max-depth)
-      (emeld--start-diff buf))))
+    (cond
+     (emeld--git-mode (emeld--start-git-diff buf))
+     (emeld--scan-max-depth (emeld--start-bounded-diff buf emeld--scan-max-depth))
+     (t (emeld--start-diff buf)))))
 
 (defun emeld--diff-subdir-entries (left-sub right-sub)
   "Diff LEFT-SUB against RIGHT-SUB, returning subdir-relative entries.
@@ -2621,6 +3012,8 @@ subdirectory changed on disk and want to avoid a full rescan
 (\\[emeld-rescan]); the rest of the tree is left untouched.  If point is
 on a file, its containing directory is rescanned."
   (interactive)
+  (when emeld--git-mode
+    (user-error "Subdirectory rescan is not used in git mode; press `g' to rescan"))
   (unless emeld--root-node (user-error "No comparison loaded"))
   (let* ((node0 (get-text-property (point) 'emeld-node))
          (node (cond ((null node0) (user-error "No node at point"))
@@ -2732,7 +3125,21 @@ asynchronously (`emeld-refresh')."
             (emeld--entries-to-nodes entries node-rel node)))))
 
 (defun emeld--read-new-root (on-left)
-  "Prompt for a new root directory for side ON-LEFT and update the buffer."
+  "Prompt for a new root directory for side ON-LEFT and update the buffer.
+In git mode this re-selects the revision for that side instead of a directory."
+  (if emeld--git-mode
+      (let ((rev (emeld--read-git-rev
+                  (format "%s revision: " (if on-left "Left (old)" "Right (new)"))
+                  emeld--git-repo
+                  (if on-left emeld--git-left-rev emeld--git-right-rev))))
+        (if on-left
+            (setq emeld--git-left-rev rev)
+          (setq emeld--git-right-rev rev))
+        (setf (emeld-node-name emeld--root-node)
+              (emeld--git-rev-label emeld--git-left-rev)
+              (emeld-node-name-right emeld--root-node)
+              (emeld--git-rev-label emeld--git-right-rev))
+        (emeld-refresh))
   (let* ((old-root (if on-left emeld--left-root emeld--right-root))
          (side-label (if on-left "Left" "Right"))
          (new-dir (read-directory-name
@@ -2758,7 +3165,7 @@ asynchronously (`emeld-refresh')."
       (setf (emeld-node-name-right emeld--root-node)
             (file-name-nondirectory
              (directory-file-name emeld--right-root)))
-      (emeld-refresh))))
+      (emeld-refresh)))))
 
 (defun emeld-action ()
   "Perform default action on node (ediff or view).
@@ -2775,30 +3182,63 @@ On files, run ediff or open.  On directories, open in dired."
         (emeld--read-new-root (< cur-col emeld--column-width))))
      (node
       (let* ((cur-col (current-column))
-             (on-left (< cur-col emeld--column-width))
-             (left (emeld-node-left-path node))
-             (right (emeld-node-right-path node))
-             (side-path (if on-left left right)))
-        (cond ((and left right (not (emeld-node-is-dir node)))
-               (if (eq (emeld-node-diff-status node) 'same)
-                   (find-file-other-window side-path)
-                 (ediff-files left right)))
-              (side-path (find-file-other-window side-path))
-              (t (message "No file on %s side"
-                          (if on-left "left" "right")))))))))
+             (on-left (< cur-col emeld--column-width)))
+        (if emeld--git-mode
+            (emeld--git-action node on-left)
+          (let* ((left (emeld-node-left-path node))
+                 (right (emeld-node-right-path node))
+                 (side-path (if on-left left right)))
+            (cond ((and left right (not (emeld-node-is-dir node)))
+                   (if (eq (emeld-node-diff-status node) 'same)
+                       (find-file-other-window side-path)
+                     (ediff-files left right)))
+                  (side-path (find-file-other-window side-path))
+                  (t (message "No file on %s side"
+                              (if on-left "left" "right")))))))))))
+
+(defun emeld--git-action (node on-left)
+  "RET action for NODE in git mode; ON-LEFT means point is in the left column.
+Directories toggle expansion; a modified file ediffs its two revisions; an
+added/deleted/identical file is shown at the appropriate revision."
+  (cond
+   ((emeld-node-is-dir node) (emeld-toggle-expand))
+   (t
+    (let ((rel (emeld--node-relpath node))
+          (left (emeld-node-left-path node))
+          (right (emeld-node-right-path node)))
+      (cond
+       ((and left right (eq (emeld-node-diff-status node) 'different))
+        (ediff-buffers (emeld--git-blob-buffer emeld--git-left-rev rel)
+                       (emeld--git-blob-buffer emeld--git-right-rev rel)))
+       ((or left right)
+        (let ((rev (cond ((and on-left left) emeld--git-left-rev)
+                         ((and (not on-left) right) emeld--git-right-rev)
+                         (left emeld--git-left-rev)
+                         (t emeld--git-right-rev))))
+          (switch-to-buffer-other-window (emeld--git-blob-buffer rev rel))))
+       (t (message "No file on this side")))))))
 
 (defun emeld-find-file ()
-  "Open the file on the current side in another window."
+  "Open the file on the current side in another window.
+In git mode the file is shown at the current side's revision (via
+`git show'); the working-tree side opens the on-disk file."
   (interactive)
   (let* ((node (get-text-property (point) 'emeld-node))
-         (cur-col (current-column)))
+         (on-left (< (current-column) emeld--column-width)))
     (when node
-      (let ((path (if (< cur-col emeld--column-width)
-                      (emeld-node-left-path node)
-                    (emeld-node-right-path node))))
-        (if path
-            (find-file-other-window path)
-          (message "No file on %s side" (if (< cur-col emeld--column-width) "left" "right")))))))
+      (if emeld--git-mode
+          (cond
+           ((emeld-node-is-dir node)
+            (message "Cannot open a directory at a revision; use RET to expand it"))
+           ((if on-left (emeld-node-left-path node) (emeld-node-right-path node))
+            (switch-to-buffer-other-window
+             (emeld--git-blob-buffer (if on-left emeld--git-left-rev emeld--git-right-rev)
+                                     (emeld--node-relpath node))))
+           (t (message "No file on %s side" (if on-left "left" "right"))))
+        (let ((path (if on-left (emeld-node-left-path node) (emeld-node-right-path node))))
+          (if path
+              (find-file-other-window path)
+            (message "No file on %s side" (if on-left "left" "right"))))))))
 
 (defun emeld-soft-diff ()
   "Contextual \"just act\" command for SPC (and `=').
@@ -2820,6 +3260,8 @@ preview each node without leaving it."
         (message "No node at point")
       (if (emeld-node-is-dir node)
           (emeld-toggle-expand)
+        (if emeld--git-mode
+            (emeld--git-soft-diff node)
         (let ((left (emeld-node-left-path node))
               (right (emeld-node-right-path node)))
           ;; Display, never select: keep the tree window current so SPC can
@@ -2841,7 +3283,23 @@ preview each node without leaving it."
               (let* ((side (cdr (emeld--node-side-at-point)))
                      (path (if (eq side 'left) left right)))
                 (display-buffer (find-file-noselect (or path left right)))))
-             (t (message "No file at point")))))))))
+             (t (message "No file at point"))))))))))
+
+(defun emeld--git-soft-diff (node)
+  "Preview NODE in git mode for `emeld-soft-diff' (SPC) without selecting.
+A modified file shows a `git diff'; an added/deleted/identical file is
+displayed at its revision in another window."
+  (let ((rel (emeld--node-relpath node))
+        (left (emeld-node-left-path node))
+        (right (emeld-node-right-path node)))
+    (cond
+     ((and left right (eq (emeld-node-diff-status node) 'different))
+      (emeld--git-diff-show rel (emeld-node-name node)))
+     ((or left right)
+      (let ((rev (if right emeld--git-right-rev emeld--git-left-rev)))
+        (save-selected-window
+          (display-buffer (emeld--git-blob-buffer rev rel)))))
+     (t (message "No file at point")))))
 
 (defun emeld-ediff ()
   "Run Ediff on the file at point, comparing the left and right sides.
@@ -2853,6 +3311,14 @@ one side exists, report what is missing (use RET to open a directory)."
      ((null node) (message "No node at point"))
      ((emeld-node-is-dir node)
       (message "Ediff needs a file; use RET to open the directory"))
+     (emeld--git-mode
+      (let ((left (emeld-node-left-path node))
+            (right (emeld-node-right-path node))
+            (rel (emeld--node-relpath node)))
+        (if (and left right)
+            (ediff-buffers (emeld--git-blob-buffer emeld--git-left-rev rel)
+                           (emeld--git-blob-buffer emeld--git-right-rev rel))
+          (message "Ediff needs the file on both revisions"))))
      (t
       (let ((left (emeld-node-left-path node))
             (right (emeld-node-right-path node)))
@@ -2895,9 +3361,12 @@ Differences appear in a `*Diff*' buffer; filter groups and `.gitignore'
 settings are honoured, matching the comparison tree.  See also
 `emeld-diff-dir' for the directory at point."
   (interactive)
-  (unless (and emeld--left-root emeld--right-root)
-    (user-error "No comparison loaded"))
-  (emeld--diff-dirs emeld--left-root emeld--right-root "root"))
+  (if emeld--git-mode
+      (emeld--git-diff-show nil "root")
+    (progn
+      (unless (and emeld--left-root emeld--right-root)
+        (user-error "No comparison loaded"))
+      (emeld--diff-dirs emeld--left-root emeld--right-root "root"))))
 
 (defun emeld-diff-dir ()
   "Show a recursive unified `diff' of the directory at point.
@@ -2908,11 +3377,18 @@ subdirectory this falls back to the root (so it matches
   (let ((node (get-text-property (point) 'emeld-node)))
     (while (and node (not (emeld-node-is-dir node)))
       (setq node (emeld-node-parent node)))
-    (let ((dir (or node emeld--root-node)))
-      (unless dir (user-error "No comparison loaded"))
-      (emeld--diff-dirs (emeld-node-left-path dir)
-                        (emeld-node-right-path dir)
-                        (emeld-node-name dir)))))
+    (if emeld--git-mode
+        (let ((rel (and node (not (eq node emeld--root-node))
+                        (emeld--node-relpath node))))
+          (emeld--git-diff-show (and rel (not (string-empty-p rel)) rel)
+                                (if (and node (not (eq node emeld--root-node)))
+                                    (emeld-node-name node)
+                                  "root")))
+      (let ((dir (or node emeld--root-node)))
+        (unless dir (user-error "No comparison loaded"))
+        (emeld--diff-dirs (emeld-node-left-path dir)
+                          (emeld-node-right-path dir)
+                          (emeld-node-name dir))))))
 
 (defun emeld--marked-sides (rel)
   "Return the list of marked sides (subset of (left right)) for REL."
@@ -3214,6 +3690,8 @@ responsive; built-in copies are synchronous.  When `emeld-copy-mirror'
 is on, rsync directory copies use `--delete' to make the destination an
 exact mirror of the source."
   (interactive)
+  (when emeld--git-mode
+    (user-error "Copy is not available when comparing git revisions"))
   ;; Fail fast (before any prompt/copy) if rsync is required but missing.
   (when (and (eq emeld-copy-method 'rsync)
              (not (executable-find emeld-rsync-command)))
@@ -3244,6 +3722,8 @@ When marks exist, each marked node is deleted from every side it is marked
 on (a node marked on both sides is deleted from both).  Otherwise the node at
 point is deleted from the current side (the column point is in)."
   (interactive)
+  (when emeld--git-mode
+    (user-error "Delete is not available when comparing git revisions"))
   (let* ((on-left (< (current-column) emeld--column-width))
          (side (if on-left "left" "right"))
          (marked (let (paths)
@@ -3285,8 +3765,20 @@ point is deleted from the current side (the column point is in)."
             (error (message "Delete failed: %s" (error-message-string err)))))))))
 
 (defun emeld-swap-panes ()
-  "Swap the left and right comparison directories and flip all node paths."
+  "Swap the left and right comparison directories and flip all node paths.
+In git mode the two revisions are swapped and the comparison re-scanned."
   (interactive)
+  (when emeld--git-mode
+    (cl-rotatef emeld--git-left-rev emeld--git-right-rev)
+    (setf (emeld-node-name emeld--root-node)
+          (emeld--git-rev-label emeld--git-left-rev)
+          (emeld-node-name-right emeld--root-node)
+          (emeld--git-rev-label emeld--git-right-rev))
+    (emeld-refresh)
+    (message "Swapped revisions: %s <-> %s"
+             (emeld--git-rev-label emeld--git-left-rev)
+             (emeld--git-rev-label emeld--git-right-rev)))
+  (unless emeld--git-mode
   (unless (and emeld--left-root emeld--right-root)
     (user-error "No directories loaded to swap"))
 
@@ -3318,7 +3810,7 @@ point is deleted from the current side (the column point is in)."
 
   ;; 3. Redraw
   (emeld--render)
-  (message "Swapped left and right panes."))
+  (message "Swapped left and right panes.")))
 
 (defun emeld--toggle-indicator (label enabled)
   "Return a string for toggle LABEL showing ENABLED state.
@@ -3393,6 +3885,12 @@ reflects the live scan counters without needing to be re-installed."
         '(:eval
           (concat (emeld--scan-progress-string)
                   " [" (emeld--display-state-string) "] "
+                  ;; Flag a git revision comparison and which revs.
+                  (when emeld--git-mode
+                    (propertize (format "[git %s→%s] "
+                                        (emeld--git-rev-label emeld--git-left-rev)
+                                        (emeld--git-rev-label emeld--git-right-rev))
+                                'face 'bold))
                   ;; Flag a depth-limited (shallow) scan.
                   (when emeld--scan-max-depth
                     (propertize (format "[depth %d] " emeld--scan-max-depth)
@@ -3440,15 +3938,24 @@ reflects the live scan counters without needing to be re-installed."
                  (or (null emeld--root-node)
                      (null (emeld-node-children emeld--root-node))))
         (insert "\n")
-        (insert (propertize "  No differences detected between directories." 'face 'font-lock-comment-face))
+        (insert (propertize (if emeld--git-mode
+                                "  No differences between the two revisions."
+                              "  No differences detected between directories.")
+                            'face 'font-lock-comment-face))
         (insert "\n\n"))
-      
-      ;; Headers (with emeld-header property for interactive directory switching)
-      (let ((header-start (point)))
-        (insert (propertize (truncate-string-to-width (abbreviate-file-name emeld--left-root)
+
+      ;; Headers (with emeld-header property for interactive directory/revision switching)
+      (let ((header-start (point))
+            (left-label (if emeld--git-mode
+                            (emeld--git-rev-label emeld--git-left-rev)
+                          (abbreviate-file-name emeld--left-root)))
+            (right-label (if emeld--git-mode
+                             (emeld--git-rev-label emeld--git-right-rev)
+                           (abbreviate-file-name emeld--right-root))))
+        (insert (propertize (truncate-string-to-width left-label
                                                       emeld--column-width nil ?\s)
                             'face 'emeld-header-face))
-        (insert (propertize (truncate-string-to-width (abbreviate-file-name emeld--right-root)
+        (insert (propertize (truncate-string-to-width right-label
                                                       emeld--column-width nil ?\s)
                             'face 'emeld-header-face))
         (add-text-properties header-start (point) '(emeld-header t mouse-face highlight)))
@@ -3793,6 +4300,8 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
     ("ps" "save current" emeld-save-preset)
     ("pl" "load…"        emeld-load-preset)
     ("pd" "delete…"      emeld-delete-preset)]
+   ["Compare"
+    ("G" "git revisions…" emeld-git-diff)]
    ])
 
 (define-key emeld-mode-map (kbd "?") #'emeld-dispatch)

@@ -38,6 +38,19 @@ Alternatively, run ~M-x emeld-diff-dwim~ to automatically use open Dired buffers
 
 For very large trees or slow filesystems (SMB/NFS), give ~emeld-diff~ a prefix argument to limit the initial scan depth — e.g. ~C-u 2 M-x emeld-diff~ scans two directory levels, ~C-u M-x emeld-diff~ just one.  The scan stops there and shows the tree; directories below the limit (and one-sided directories) are marked with a dim ~…~.  Drill into any marked directory with ~C-u g~ (which scans it fully), and plain ~g~ re-runs the bounded scan at the same depth.  The header-line shows ~[depth N]~ while a depth limit is in effect.
 
+** Comparing git revisions
+
+From inside a git work tree, run ~M-x emeld-git-diff~ (or ~G~ in the transient menu) to compare two revisions instead of two directories.  You are prompted for a left (old) and right (new) revision; completion offers branches, tags and recent commits, plus ~[working tree]~ and ~[index]~.  The default compares ~HEAD~ against the working tree, i.e. "what have I changed since the last commit".
+
+The result is the same side-by-side tree, showing the hierarchy of added, deleted and modified files between the two revisions (renames appear as a deleted old path plus an added new path).  Because the content lives in git history rather than on disk:
+
+- ~RET~ / ~f~ opens a file at its revision (via ~git show~; the working-tree side opens the real file), ~e~ Ediffs the two revisions, and ~=~ / ~SPC~ / ~d~ / ~D~ show a ~git diff~.
+- ~S~ (show Same) lists the left revision and merges in every unchanged file.
+- Header ~RET~ re-selects a revision for that side; ~W~ swaps the two revisions; ~g~ re-scans.
+- Copy (~C~), delete (~x~) and subdirectory rescan are disabled — history cannot be written to.
+
+The header line shows ~[git OLD→NEW]~ with the chosen revision labels.
+
 * Transient Menu (~?~)
 
 The transient is a two-level hierarchy.  The top level keeps the menus you reach for most often as full columns, plus a ~Menus~ column whose entries open focused sub-menus.  Pressing ~q~ (or ~C-g~) in a sub-menu returns to the top level.

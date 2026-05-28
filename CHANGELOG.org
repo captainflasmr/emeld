@@ -1,5 +1,13 @@
 #+TITLE: Changelog for Emeld
 
+* [0.42.0] - 2026-05-28
+** Added
+- ~emeld-git-diff~: compare two git revisions side-by-side as the same hierarchical tree of added, deleted and modified files.  Pick any two revisions (commits, branches, tags) or compare a revision against the working tree or the index/staged content — interactively it defaults to ~HEAD~ vs the working tree.  The scan runs ~git diff --name-status~ asynchronously and reuses the existing tree builder and renderer; the header line shows ~[git OLD→NEW]~ and the revision labels.
+- In git mode, file content comes from git rather than disk: ~RET~/~f~ shows a file at its revision (via ~git show~, with the working-tree side opening the on-disk file), ~e~ Ediffs the two revisions of a file, and ~=~/~SPC~ / ~d~ / ~D~ show a ~git diff~.  Renames surface as a deleted old path plus an added new path.  Toggling ~Same~ (~S~) merges identical files by enumerating the left revision with ~git ls-tree~.  Header ~RET~ re-selects a revision and ~W~ swaps the two revisions and re-scans.
+- ~emeld-git-diff~ is reachable from the transient menu (~?~) under "Compare" (~G~) and is autoloaded, so it works as an entry point before any comparison is open.
+** Changed
+- Copy (~C~), delete (~x~) and subdirectory rescan (~C-u g~) are disabled in git mode (history cannot be written to), reporting a ~user-error~ rather than acting.
+
 * [0.41.0] - 2026-05-28
 ** Added
 - Depth-limited initial scan for very large trees or slow filesystems (SMB/NFS).  A prefix argument to ~emeld-diff~ / ~emeld-diff-dwim~ (~C-u 2 M-x emeld-diff~ = two levels; a bare ~C-u~ = one level) scans only that many directory levels using a fast non-recursive ~diff -q~ per level, then stops and shows the tree — avoiding the deep I/O of a full ~diff -rq~.  Directories below the limit (and one-sided directories) are left unscanned and marked with a dim ~…~; drill into any of them with ~C-u g~ (~emeld-refresh-subdir~), which scans that directory fully.  Plain ~g~ re-runs at the same depth, and the header-line shows ~[depth N]~.

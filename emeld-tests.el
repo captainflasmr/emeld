@@ -495,5 +495,164 @@ a new path that is neither is treated as identical."
       (delete-directory left t)
       (delete-directory right t))))
 
+;;;; ─── Git revision comparison ──────────────────────────────────────
+
+(ert-deftest emeld-parse-git-name-status-basic ()
+  "The name-status parser maps M/A/D and splits renames into delete+add."
+  (let* ((out (concat (string-join
+                       '("M" "mod.txt"
+                         "A" "added.txt"
+                         "D" "gone.txt"
+                         "R100" "old/name.txt" "new/name.txt"
+                         "C75" "src.txt" "copy.txt")
+                       "\0")
+                      "\0"))
+         (entries (emeld--parse-git-name-status out)))
+    (should (eq 'different  (cdr (assoc "mod.txt" entries))))
+    (should (eq 'right-only (cdr (assoc "added.txt" entries))))
+    (should (eq 'left-only  (cdr (assoc "gone.txt" entries))))
+    ;; A rename splits into the old path (deleted) plus the new path (added).
+    (should (eq 'left-only  (cdr (assoc "old/name.txt" entries))))
+    (should (eq 'right-only (cdr (assoc "new/name.txt" entries))))
+    ;; A copy leaves the source untouched; only the new path is added.
+    (should (eq 'right-only (cdr (assoc "copy.txt" entries))))
+    (should-not (assoc "src.txt" entries))))
+
+(ert-deftest emeld-git-rev-args-combos ()
+  "`emeld--git-rev-args' builds the right `git diff' revision selectors."
+  (should (equal (emeld--git-rev-args "HEAD~1" "HEAD") '("HEAD~1" "HEAD")))
+  (should (equal (emeld--git-rev-args "HEAD" 'working) '("HEAD")))
+  (should (equal (emeld--git-rev-args "HEAD" 'staged) '("--cached" "HEAD")))
+  (should (null (emeld--git-rev-args 'staged 'working)))
+  (should (null (emeld--git-rev-args 'working 'working)))
+  ;; An unsupported orientation (working tree as the OLD side) errors.
+  (should-error (emeld--git-rev-args 'working "HEAD")))
+
+(ert-deftest emeld-git-ls-command-forms ()
+  "`emeld--git-ls-command' lists a revision via ls-tree, the work tree via ls-files."
+  (let ((emeld--git-repo "/repo/"))
+    (should (equal (emeld--git-ls-command "HEAD")
+                   '("git" "-C" "/repo" "ls-tree" "-r" "--name-only" "-z" "HEAD")))
+    (should (equal (emeld--git-ls-command 'working)
+                   '("git" "-C" "/repo" "ls-files" "-z")))
+    (should (equal (emeld--git-ls-command 'staged)
+                   '("git" "-C" "/repo" "ls-files" "-z")))))
+
+(ert-deftest emeld-make-file-node-git-mode ()
+  "In git mode file nodes carry the relpath and never probe the filesystem."
+  (let ((emeld--git-mode t)
+        (emeld--left-root "/repo/")
+        (emeld--right-root "/repo/"))
+    (let ((n (emeld--make-file-node "a/b.txt" nil 'different)))
+      (should (equal (emeld-node-left-path n) "a/b.txt"))
+      (should (equal (emeld-node-right-path n) "a/b.txt"))
+      (should-not (emeld-node-is-dir n)))
+    (let ((n (emeld--make-file-node "gone.txt" nil 'left-only)))
+      (should (equal (emeld-node-left-path n) "gone.txt"))
+      (should (null (emeld-node-right-path n)))
+      (should-not (emeld-node-is-dir n)))
+    (let ((n (emeld--make-file-node "new.txt" nil 'right-only)))
+      (should (null (emeld-node-left-path n)))
+      (should (equal (emeld-node-right-path n) "new.txt")))))
+
+(ert-deftest emeld-git-tree-build ()
+  "Git entries assemble into a tree of relpath-carrying nodes (no disk probe)."
+  (let ((emeld--git-mode t)
+        (emeld-filter-groups nil)
+        (emeld--active-filter-groups nil)
+        (emeld-respect-gitignore nil)
+        (emeld--left-root "/repo/")
+        (emeld--right-root "/repo/"))
+    (let* ((root (emeld-node-create :name "root" :is-dir t))
+           (entries '(("mod.txt" . different)
+                      ("added.txt" . right-only)
+                      ("gone.txt" . left-only)
+                      ("sub/old.txt" . left-only)
+                      ("sub/new.txt" . right-only)))
+           (nodes (emeld--entries-to-nodes entries "" root))
+           (by-name (lambda (nm) (cl-find nm nodes :key #'emeld-node-name :test #'string=))))
+      (setf (emeld-node-children root) nodes)
+      (should (eq 'different  (emeld-node-diff-status (funcall by-name "mod.txt"))))
+      (should (eq 'right-only (emeld-node-diff-status (funcall by-name "added.txt"))))
+      (should (eq 'left-only  (emeld-node-diff-status (funcall by-name "gone.txt"))))
+      (let ((sub (funcall by-name "sub")))
+        (should (emeld-node-is-dir sub))
+        ;; A dir renders on both sides, carrying the relpath as its side path.
+        (should (equal (emeld-node-left-path sub) "sub"))
+        (should (equal (emeld-node-right-path sub) "sub"))
+        (let ((kids (mapcar #'emeld-node-name (emeld-node-children sub))))
+          (should (member "old.txt" kids))
+          (should (member "new.txt" kids)))))))
+
+(ert-deftest emeld-git-diff-name-status-real ()
+  "End-to-end: a real `git diff --name-status' parses to the right entries."
+  (skip-unless (executable-find "git"))
+  (let ((dir (make-temp-file "emeld-git" t)))
+    (unwind-protect
+        (cl-flet ((g (&rest a) (apply #'call-process "git" nil nil nil "-C" dir a)))
+          (g "init" "-q")
+          (g "config" "user.email" "t@t.com")
+          (g "config" "user.name" "T")
+          ;; Commit 1.
+          (with-temp-file (expand-file-name "keep.txt" dir) (insert "same\n"))
+          (with-temp-file (expand-file-name "mod.txt" dir) (insert "one\n"))
+          (with-temp-file (expand-file-name "gone.txt" dir) (insert "bye\n"))
+          (make-directory (expand-file-name "sub" dir))
+          (with-temp-file (expand-file-name "sub/old.txt" dir) (insert "rename me\n"))
+          (g "add" "-A")
+          (g "commit" "-q" "-m" "c1")
+          ;; Commit 2: modify, delete, add, and rename within sub/.
+          (with-temp-file (expand-file-name "mod.txt" dir) (insert "two\n"))
+          (delete-file (expand-file-name "gone.txt" dir))
+          (with-temp-file (expand-file-name "added.txt" dir) (insert "fresh\n"))
+          (rename-file (expand-file-name "sub/old.txt" dir)
+                       (expand-file-name "sub/new.txt" dir))
+          (g "add" "-A")
+          (g "commit" "-q" "-m" "c2")
+          (with-temp-buffer
+            (setq-local emeld--git-repo (file-name-as-directory dir)
+                        emeld--git-left-rev "HEAD~1"
+                        emeld--git-right-rev "HEAD")
+            (let* ((cmd (emeld--git-diff-command))
+                   (out (with-temp-buffer
+                          (apply #'call-process (car cmd) nil t nil (cdr cmd))
+                          (buffer-string)))
+                   (entries (emeld--parse-git-name-status out)))
+              (should (eq 'different  (cdr (assoc "mod.txt" entries))))
+              (should (eq 'right-only (cdr (assoc "added.txt" entries))))
+              (should (eq 'left-only  (cdr (assoc "gone.txt" entries))))
+              ;; Unchanged files are never reported by `diff'.
+              (should-not (assoc "keep.txt" entries))
+              ;; The rename surfaces as a deleted old path and an added new path.
+              (should (eq 'left-only  (cdr (assoc "sub/old.txt" entries))))
+              (should (eq 'right-only (cdr (assoc "sub/new.txt" entries)))))))
+      (delete-directory dir t))))
+
+(ert-deftest emeld-git-diff-vs-working-tree ()
+  "Comparing a commit to the working tree picks up uncommitted edits."
+  (skip-unless (executable-find "git"))
+  (let ((dir (make-temp-file "emeld-git" t)))
+    (unwind-protect
+        (cl-flet ((g (&rest a) (apply #'call-process "git" nil nil nil "-C" dir a)))
+          (g "init" "-q")
+          (g "config" "user.email" "t@t.com")
+          (g "config" "user.name" "T")
+          (with-temp-file (expand-file-name "a.txt" dir) (insert "v1\n"))
+          (g "add" "-A")
+          (g "commit" "-q" "-m" "c1")
+          ;; Edit a tracked file without committing.
+          (with-temp-file (expand-file-name "a.txt" dir) (insert "v2\n"))
+          (with-temp-buffer
+            (setq-local emeld--git-repo (file-name-as-directory dir)
+                        emeld--git-left-rev "HEAD"
+                        emeld--git-right-rev 'working)
+            (let* ((cmd (emeld--git-diff-command))
+                   (out (with-temp-buffer
+                          (apply #'call-process (car cmd) nil t nil (cdr cmd))
+                          (buffer-string)))
+                   (entries (emeld--parse-git-name-status out)))
+              (should (eq 'different (cdr (assoc "a.txt" entries)))))))
+      (delete-directory dir t))))
+
 (message "Running tests...")
 (ert-run-tests-batch-and-exit)
