@@ -10,7 +10,7 @@
 ** Changed
 - ~=~/~SPC~ (~emeld-soft-diff~) is now a contextual preview that keeps point in the tree: a directory folds/unfolds, a modified file shows a soft ~diff~, and a new/one-sided/identical file is displayed — all without selecting the other window.  ~RET~ (~emeld-action~) remains the focus-moving action (open/Ediff a file, open/expand a directory).
 - ~e~ now runs Ediff and ~=~ runs the soft-diff preview (previously both ran the combined ~RET~ action).
-- ~r~ (~emeld-redraw~) now also resets the layout — indentation (~emeld-indent-offset~) and pane split (~emeld-column-ratio~) — to their defaults before redrawing.
+- ~r~ (~emeld-redraw~) now also resets the layout — indentation (~emeld-indent-offset~), pane split (~emeld-column-ratio~) and the compact-tree flag (~emeld-compact-tree~) — to their defaults before redrawing.
 - ~g~ is now ~emeld-rescan~: plain ~g~ rescans the whole comparison; ~C-u g~ rescans only the directory at point (formerly the dedicated ~R~ key).
 - Keybinding moves: ~D~ diff root, ~d~ diff dir at point, ~x~ delete (was ~D~), ~M~ mark-all changed, ~M-d~ toggle modified visibility, ~z~ toggle compact indentation, ~R~ toggle mirror copy.  ~c~ is now unbound.
 

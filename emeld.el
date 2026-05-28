@@ -2338,22 +2338,24 @@ Repeated invocations cycle TOP → DIRS → CHANGES → TOP."
 
 (defun emeld-redraw ()
   "Reset the display layout to defaults and re-render, without rescanning.
-Restores the indentation (`emeld-indent-offset') and the pane/tree
-separation (`emeld-column-ratio') to their standard values, recomputes
-the column width from the current window width, and redraws — preserving
-point and expansion state.  Use this to undo layout tweaks made with
-\\[emeld-increase-indent]/\\[emeld-decrease-indent] or
-\\[emeld-grow-column]/\\[emeld-shrink-column], or after resizing the
-window or frame.  For a fresh comparison use `emeld-rescan'
-\(\\[emeld-rescan])."
+Restores the indentation (`emeld-indent-offset'), the pane/tree separation
+(`emeld-column-ratio') and the compact-tree flag (`emeld-compact-tree') to
+their standard values, recomputes the column width from the current window
+width, and redraws — preserving point and expansion state.  Use this to
+undo layout tweaks made with \\[emeld-increase-indent]/\\[emeld-decrease-indent],
+\\[emeld-grow-column]/\\[emeld-shrink-column] or \\[emeld-toggle-compact-tree],
+or after resizing the window or frame.  For a fresh comparison use
+`emeld-rescan' (\\[emeld-rescan])."
   (interactive)
   (unless emeld--root-node
     (user-error "No comparison loaded"))
   (emeld--reset-display-var 'emeld-indent-offset)
   (emeld--reset-display-var 'emeld-column-ratio)
+  (emeld--reset-display-var 'emeld-compact-tree)
   (emeld--render)
-  (message "Display reset (indent %d, columns %d/%d)"
-           emeld-indent-offset emeld-column-ratio (- 100 emeld-column-ratio)))
+  (message "Display reset (indent %d, columns %d/%d, compact %s)"
+           emeld-indent-offset emeld-column-ratio (- 100 emeld-column-ratio)
+           (if emeld-compact-tree "on" "off")))
 
 (defun emeld-refresh ()
   "Refresh the comparison asynchronously.

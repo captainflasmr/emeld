@@ -94,7 +94,7 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | W         | Swap left/right panes                              |
 | g         | Rescan whole comparison (~C-u g~: rescan dir at point) |
 | R         | Toggle mirror copy (rsync ~--delete~; shows ~[Mirror]~ in header) |
-| r         | Reset layout (indent + pane split) to defaults and redraw |
+| r         | Reset layout (indent + pane split + compact) to defaults and redraw |
 | n/p       | Navigation (Side-aware)                           |
 | M-n/M-p   | Jump to next/previous file change                 |
 | { / }     | Shrink/grow left pane width                       |
