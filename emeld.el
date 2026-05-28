@@ -722,6 +722,7 @@ stripped).  Defaults to `find', which is universal; set it to e.g.
              (total-lines (length remaining-lines))
              (entries nil)
              (processed-count 0)
+             (scan-gen emeld--scan-generation)
              (old-gc gc-cons-threshold))
         
         (setq emeld--scan-diff-lines nil)
@@ -736,7 +737,10 @@ stripped).  Defaults to `find', which is universal; set it to e.g.
         (cl-labels
             ((process-lines-chunk
                ()
-               (if (not (buffer-live-p buf))
+               (if (or (not (buffer-live-p buf))
+                       ;; A newer scan (or `emeld-stop-scan') bumped the
+                       ;; generation: abort this stale build.
+                       (/= scan-gen (buffer-local-value 'emeld--scan-generation buf)))
                    (setq gc-cons-threshold old-gc)
                  (with-current-buffer buf
                     (if (input-pending-p)
@@ -781,7 +785,8 @@ stripped).  Defaults to `find', which is universal; set it to e.g.
                                    ;; files via the fast path rather than having
                                    ;; assembled them all from diff -rqs.
                                    (emeld--scan-same-async buf)
-                                 (emeld--update-header-line))))))))))))
+                                 (emeld--update-header-line))))
+                          scan-gen))))))))
           (run-with-timer 0.001 nil #'process-lines-chunk))))))
 
 (defun emeld--entries-to-nodes-progressive (entries prefix parent buf initial-render-cb final-cb &optional gen)
@@ -2088,6 +2093,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "f")   #'emeld-find-file)
     (define-key map (kbd "v")   #'emeld-find-file)
     (define-key map (kbd "g")   #'emeld-rescan)
+    (define-key map (kbd "k")   #'emeld-stop-scan)
     (define-key map (kbd "R")   #'emeld-toggle-mirror)
     (define-key map (kbd "r")   #'emeld-redraw)
     (define-key map (kbd "W")   #'emeld-swap-panes)
@@ -2504,6 +2510,25 @@ bounded scan, the identical-files merge) sees a newer generation and aborts."
         emeld--scan-process nil
         emeld--scan-diff-lines nil
         emeld--scan-buf nil))
+
+(defun emeld-stop-scan ()
+  "Abort an in-progress scan, keeping whatever has been built so far.
+Cancels the async `diff' process and the timer-driven tree building (the
+full scan, the bounded scan and the identical-files merge all check the
+scan generation and bail).  The partial tree is left in place; rescan with
+\\[emeld-rescan] or scan a single directory with `\\[universal-argument] \
+\\[emeld-rescan]'."
+  (interactive)
+  (if (not (memq emeld--status-phase '(running-diff building-tree)))
+      (message "No scan in progress")
+    (emeld--stop-scan)
+    (when (timerp emeld--chunk-worker-timer)
+      (cancel-timer emeld--chunk-worker-timer))
+    (setq emeld--chunk-worker-timer nil
+          emeld--status-phase 'done)
+    (emeld--update-header-line)
+    (emeld--render)
+    (message "Scan stopped")))
 
 (defun emeld--reset-display-var (var)
   "Reset VAR to the standard value from its `defcustom' definition."
@@ -3681,6 +3706,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
   "Emeld navigation and rescanning."
   ["Navigate"
    ("g"   "rescan (C-u: dir at point)" emeld-rescan)
+   ("k"   "stop scan"            emeld-stop-scan)
    ("r"   "reset layout + redraw" emeld-redraw)
    ("W"   "swap panes"         emeld-swap-panes)
    ("o"   "jump other side"    emeld-jump-other-side :transient t)

@@ -2,7 +2,8 @@
 
 * [0.41.0] - 2026-05-28
 ** Added
-- Depth-limited initial scan for very large trees or slow filesystems (SMB/NFS).  A prefix argument to ~emeld-diff~ (~C-u 2 M-x emeld-diff~ = two levels; a bare ~C-u~ = one level) scans only that many directory levels using a fast non-recursive ~diff -q~ per level, then stops and shows the tree — avoiding the deep I/O of a full ~diff -rq~.  Directories below the limit (and one-sided directories) are left unscanned and marked with a dim ~…~; drill into any of them with ~C-u g~ (~emeld-refresh-subdir~), which scans that directory fully.  Plain ~g~ re-runs at the same depth, and the header-line shows ~[depth N]~.
+- Depth-limited initial scan for very large trees or slow filesystems (SMB/NFS).  A prefix argument to ~emeld-diff~ / ~emeld-diff-dwim~ (~C-u 2 M-x emeld-diff~ = two levels; a bare ~C-u~ = one level) scans only that many directory levels using a fast non-recursive ~diff -q~ per level, then stops and shows the tree — avoiding the deep I/O of a full ~diff -rq~.  Directories below the limit (and one-sided directories) are left unscanned and marked with a dim ~…~; drill into any of them with ~C-u g~ (~emeld-refresh-subdir~), which scans that directory fully.  Plain ~g~ re-runs at the same depth, and the header-line shows ~[depth N]~.
+- ~emeld-stop-scan~ (~k~): abort an in-progress scan, keeping whatever has been built so far — useful when a full compare of a huge or slow tree is taking too long.  The async ~diff~ process is killed and the timer-driven tree building (full scan, bounded scan and identical-files merge) bails on the next generation check.
 ** Changed
 - ~emeld--stop-scan~ now bumps ~emeld--scan-generation~, so in-flight timer-driven work (the new bounded scan and the identical-files merge) aborts cleanly when a newer scan starts.
 

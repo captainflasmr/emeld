@@ -52,7 +52,7 @@ Top level:
 Sub-menus (opened from the ~Menus~ column):
 
 - ~View~ (~v~) :: Two columns. ~Show~ toggles what is displayed — files (~F~ hide files, show directories only), tree-lines (~T~), compact indentation (~z~), strikethrough (~s~), ~.gitignore~ respect (~G~). ~Layout~ holds bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~\\~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), and pane resize (~{~/~}~).
-- ~Navigate~ (~n~) :: Rescan (~g~; ~C-u g~ rescans just the directory at point), redraw after a resize (~r~), swap panes (~W~), and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
+- ~Navigate~ (~n~) :: Rescan (~g~; ~C-u g~ rescans just the directory at point), stop an in-progress scan (~k~), redraw after a resize (~r~), swap panes (~W~), and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
 - ~File~ (~f~) :: Operate on files (~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree — soft diff a modified file, show a new/one-sided one, fold a directory, ~D~ diff whole root, ~d~ diff directory at point, ~C~ copy marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point, ~w~ copy path, ~P~ format patch).
 - ~Mark~ (~m~) :: Mark/unmark the file on the current side (~m~/~u~); mark all changed files (~M~); bulk-mark by status — modified (~* m~), left-only (~* l~), or the whole left→right sync set (~* c~, same set as ~M~); ~U~ unmark all.
 
@@ -96,6 +96,7 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | G         | Toggle ~.gitignore~ respect (rescans)             |
 | W         | Swap left/right panes                              |
 | g         | Rescan whole comparison (~C-u g~: rescan dir at point) |
+| k         | Stop/abort an in-progress scan (keeps the partial tree) |
 | R         | Toggle mirror copy (rsync ~--delete~; shows ~[Mirror]~ in header) |
 | r         | Reset layout (indent + pane split + compact) to defaults and redraw |
 | n/p       | Navigation (Side-aware)                           |

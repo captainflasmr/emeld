@@ -15,7 +15,7 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 ** TODO when edited file and then rescanned newly modified files didn't show
 
-** TODO check re-render in window that obeys proper proportions;
+** TODO check re-render in window that obeys proper proportions
 
 ** TODO add directory tree display for dired?
 
