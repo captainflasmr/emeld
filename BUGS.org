@@ -11,6 +11,10 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 ** TODO [#B] preview diff before copy?
 
+** TODO Maybe like magit an unfold of a soft diff?
+
+** DOING compare git version with folder
+
 ** DOING fast scan to depth level scan?
 
 ** TODO when edited file and then rescanned newly modified files didn't show
@@ -22,6 +26,4 @@ This document contains the current bugs/improvements, this is just for me mainly
 ** TODO turn to sidebar as treemacs
 
 ** TODO Scanning got stuck after copying files and then auto rescan
-
-** TODO compare git version with folder
 

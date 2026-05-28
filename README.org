@@ -46,7 +46,7 @@ The result is the same side-by-side tree, showing the hierarchy of added, delete
 
 - ~RET~ / ~f~ opens a file at its revision (via ~git show~; the working-tree side opens the real file), ~e~ Ediffs the two revisions, and ~=~ / ~SPC~ / ~d~ / ~D~ show a ~git diff~.
 - ~S~ (show Same) lists the left revision and merges in every unchanged file.
-- A foldable commit-context block sits between the revision header and the tree: each commit side shows its short SHA and subject line, and ~c~ (or ~RET~ on the block) unfolds the author, date and full message.
+- A foldable commit-context block sits between the revision header and the tree, in two columns aligned to the panes (left/old commit under the left header, right/new under the right): each shows its short SHA and subject, and ~c~ (or ~RET~ on the block) unfolds the author, date+time and full message.
 - Header ~RET~ re-selects a revision for that side; ~W~ swaps the two revisions; ~g~ re-scans.
 - Copy (~C~), delete (~x~) and subdirectory rescan are disabled — history cannot be written to.
 

@@ -2303,7 +2303,7 @@ a commit.  Reads the buffer-local `emeld--git-repo' as the work tree."
     (let ((default-directory emeld--git-repo))
       (with-temp-buffer
         (when (eq 0 (process-file "git" nil t nil "show" "-s" "--no-color"
-                                  "--date=short"
+                                  "--date=iso"
                                   "--format=%h%n%an <%ae>%n%ad%n%s%n%b" rev))
           (goto-char (point-min))
           (cl-flet ((line ()
@@ -2625,43 +2625,54 @@ buffer.  WHAT labels the echo-area message."
       (display-buffer buf)
       (message "Diff of %s" what))))
 
+(defun emeld--git-commit-cell-lines (info expanded)
+  "Return the display lines for one commit column, or nil when INFO is nil.
+The first line is the fold arrow, abbreviated SHA and subject; when EXPANDED
+the author, date and body lines follow.  Lines are propertized; the caller
+truncates/pads each to the column width."
+  (when info
+    (let ((lines (list (concat (propertize (if expanded "▾ " "▸ ") 'face 'bold)
+                               (propertize (concat (plist-get info :sha) "  ")
+                                           'face 'font-lock-constant-face)
+                               (propertize (plist-get info :subject)
+                                           'face 'emeld-git-commit-subject-face)))))
+      (when expanded
+        (push (propertize (concat "  " (plist-get info :author))
+                          'face 'emeld-git-commit-meta-face)
+              lines)
+        (push (propertize (concat "  " (plist-get info :date))
+                          'face 'emeld-git-commit-meta-face)
+              lines)
+        (let ((body (plist-get info :body)))
+          (unless (string-empty-p body)
+            (push "" lines)
+            (dolist (bl (split-string body "\n"))
+              (push (concat "  " bl) lines)))))
+      (nreverse lines))))
+
 (defun emeld--insert-git-commit-block ()
-  "Insert the foldable git commit-message block at point (git mode only).
-Each side that resolves to a commit gets a line: a fold arrow, the rev
-label, the abbreviated SHA and the subject.  When `emeld--git-commit-expanded'
-is non-nil the author, date and full body follow.  The whole block carries
-the `emeld-git-commit' text property so RET (or `c') toggles the fold."
-  (let ((entries (delq nil
-                       (list (and emeld--git-left-commit
-                                  (cons emeld--git-left-rev emeld--git-left-commit))
-                             (and emeld--git-right-commit
-                                  (cons emeld--git-right-rev emeld--git-right-commit))))))
-    (when entries
-      (let ((start (point))
-            (arrow (if emeld--git-commit-expanded "▾ " "▸ ")))
-        (dolist (e entries)
-          (let ((label (emeld--git-rev-label (car e)))
-                (info (cdr e)))
-            (insert (propertize arrow 'face 'bold))
-            (insert (propertize (format "%-8s " label) 'face 'emeld-header-face))
-            (insert (propertize (concat (plist-get info :sha) "  ")
-                                'face 'font-lock-constant-face))
-            (insert (propertize (plist-get info :subject)
-                                'face 'emeld-git-commit-subject-face))
-            (insert "\n")
-            (when emeld--git-commit-expanded
-              (insert (propertize (format "    %s\n" (plist-get info :author))
-                                  'face 'emeld-git-commit-meta-face))
-              (insert (propertize (format "    %s\n" (plist-get info :date))
-                                  'face 'emeld-git-commit-meta-face))
-              (let ((body (plist-get info :body)))
-                (unless (string-empty-p body)
-                  (insert "\n")
-                  (dolist (bl (split-string body "\n"))
-                    (insert "    " bl "\n"))))
-              (insert "\n"))))
-        (add-text-properties start (point)
-                             '(emeld-git-commit t mouse-face highlight))))))
+  "Insert the foldable git commit block at point, in two columns (git mode).
+The left commit sits under the left (old) header and the right commit under
+the right (new) header, matching the pane split.  Folded shows just each
+commit's SHA and subject; `emeld--git-commit-expanded' adds the author, date
+and full body.  The block carries the `emeld-git-commit' text property so RET
+\(or `c') toggles the fold."
+  (when (or emeld--git-left-commit emeld--git-right-commit)
+    (let* ((cw emeld--column-width)
+           (left (emeld--git-commit-cell-lines emeld--git-left-commit
+                                               emeld--git-commit-expanded))
+           (right (emeld--git-commit-cell-lines emeld--git-right-commit
+                                                emeld--git-commit-expanded))
+           (rows (max (length left) (length right)))
+           (start (point)))
+      (dotimes (i rows)
+        ;; Pad/truncate the left cell to the column width so the right cell
+        ;; always starts at the pane boundary, then drop the right cell.
+        (insert (truncate-string-to-width (or (nth i left) "") cw nil ?\s))
+        (insert (or (nth i right) ""))
+        (insert "\n"))
+      (add-text-properties start (point)
+                           '(emeld-git-commit t mouse-face highlight)))))
 
 (defface emeld-same-face
   '((t :inherit font-lock-comment-face))
