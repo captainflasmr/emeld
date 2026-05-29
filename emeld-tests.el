@@ -739,5 +739,72 @@ a new path that is neither is treated as identical."
   (should (equal (emeld--git-rev-label 'working) "working"))
   (should (equal (emeld--git-rev-label 'staged) "index")))
 
+(ert-deftest emeld-inline-diff-faceify-faces-lines ()
+  "`emeld--inline-diff-faceify' tags each diff line with the right `diff-*' face."
+  (let* ((text "diff --git a/f b/f\n@@ -1,2 +1,2 @@\n context\n-old\n+new\n")
+         (lines (emeld--inline-diff-faceify text)))
+    (should (= (length lines) 5))
+    (should (eq (get-text-property 0 'face (nth 0 lines)) 'diff-header))
+    (should (eq (get-text-property 0 'face (nth 1 lines)) 'diff-hunk-header))
+    (should (eq (get-text-property 0 'face (nth 2 lines)) 'diff-context))
+    (should (eq (get-text-property 0 'face (nth 3 lines)) 'diff-removed))
+    (should (eq (get-text-property 0 'face (nth 4 lines)) 'diff-added))))
+
+(ert-deftest emeld-inline-diff-lines-dir-mode ()
+  "Inline preview yields diff lines for a differing file and nil for identical."
+  (let* ((left (make-temp-file "emeld-l" t))
+         (right (make-temp-file "emeld-r" t)))
+    (unwind-protect
+        (progn
+          (with-temp-file (expand-file-name "f.txt" left) (insert "old\n"))
+          (with-temp-file (expand-file-name "f.txt" right) (insert "new\n"))
+          (with-temp-file (expand-file-name "same.txt" left) (insert "x\n"))
+          (with-temp-file (expand-file-name "same.txt" right) (insert "x\n"))
+          (with-temp-buffer
+            (setq-local emeld--git-mode nil)
+            (let* ((root (emeld-node-create :name "" :is-dir t :expanded t))
+                   (diff (emeld-node-create
+                          :name "f.txt"
+                          :left-path (expand-file-name "f.txt" left)
+                          :right-path (expand-file-name "f.txt" right)
+                          :diff-status 'different :parent root))
+                   (same (emeld-node-create
+                          :name "same.txt"
+                          :left-path (expand-file-name "same.txt" left)
+                          :right-path (expand-file-name "same.txt" right)
+                          :diff-status 'same :parent root)))
+              (let ((lines (emeld--inline-diff-lines diff)))
+                (should lines)
+                (should (cl-some (lambda (l) (string-match-p "new" l)) lines))
+                (should (cl-some (lambda (l) (string-match-p "old" l)) lines)))
+              ;; An identical file has nothing to preview.
+              (should-not (emeld--inline-diff-lines same)))))
+      (delete-directory left t)
+      (delete-directory right t))))
+
+(ert-deftest emeld-git-history-working-tree-slot ()
+  "Index -1 is the working-tree slot: newest commit on the left, working right."
+  (with-temp-buffer
+    (setq emeld--git-mode t
+          emeld--git-repo "/tmp/repo/"
+          emeld--git-history '("aaa" "bbb" "ccc")
+          emeld--root-node (emeld-node-create :name "" :name-right "" :is-dir t))
+    (cl-letf (((symbol-function 'emeld-refresh) #'ignore))
+      (setq emeld--git-history-index -1)
+      (emeld--git-history-apply)
+      (should (eq emeld--git-right-rev 'working))
+      (should (equal emeld--git-left-rev "aaa"))
+      (should (= emeld--git-history-index -1)))))
+
+(ert-deftest emeld-git-rev-label-head ()
+  "A SHA that equals the cached HEAD is labelled HEAD (SHA)."
+  (with-temp-buffer
+    (setq emeld--git-head-sha "0123456789abcdef0123456789abcdef01234567")
+    (should (equal (emeld--git-rev-label emeld--git-head-sha)
+                   "HEAD (01234567)"))
+    ;; A different SHA is still just abbreviated.
+    (should (equal (emeld--git-rev-label "fedcba9876543210fedcba9876543210fedcba98")
+                   "fedcba98"))))
+
 (message "Running tests...")
 (ert-run-tests-batch-and-exit)

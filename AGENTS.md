@@ -28,6 +28,7 @@ emacs -Q -L . -l emeld.el --eval '(emeld-git-diff default-directory "HEAD~3" "HE
 - History stepping (`emeld-git-step-history`): `emeld--git-history` (first-parent SHA chain) + `emeld--git-history-index` track position; `,`/`.` (`emeld-git-history-older`/`-newer`) step, each comparing `history[i]` against its parent via `emeld--git-history-apply`. Root commits compare against `emeld--git-empty-tree`. Stepping `.` past the newest commit (when it is HEAD) reaches the virtual index `-1`, the working-tree slot: newest commit vs the working tree (uncommitted changes).
 - Glob filter: `"*.elc"` matches filenames; `"tmp/*"` matches relative paths (contains `/`).
 - `emeld-node` struct stores the entire tree; properties attached via text-property `'emeld-node`.
+- Inline diff peek: `TAB` on a file (`emeld-cycle-subtree` → `emeld-toggle-inline-diff`) caches propertized `diff-*`-faced lines in the node's `inline-diff` slot; `emeld--render-nodes` draws them under the row. `emeld--inline-diff-text` uses `git diff` (git mode) or `emeld--write-patch-hunk` (dir mode) — capture buffer-local repo/revs before `with-temp-buffer`.
 - Buffer-local vars (`emeld-show-*`) must be `make-local-variable`'d in mode body.
 - Node rendering uses standard Emacs `diff-*` faces for theming.
 - Use `car`/`cdr` instead of `pop` in `lexical-binding: t` threads (gv-let-place compatibility).

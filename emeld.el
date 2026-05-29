@@ -1,7 +1,7 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.42.0
+;; Version: 0.43.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -15,6 +15,7 @@
 (require 'dired)
 (require 'subr-x)
 (require 'transient)
+(require 'diff-mode)  ; diff-* faces for the inline diff preview
 
 (declare-function find-library-name "find-func" (library))
 (defvar savehist-additional-variables)
@@ -218,7 +219,8 @@ presets persist across sessions when `savehist-mode' is enabled."
   (diff-status nil) ; 'same, 'different, 'left-only, 'right-only, 'unscanned
   (is-dir nil)
   (scanned t)       ; nil for a directory left unscanned by a depth-limited scan
-  (is-filtered nil))
+  (is-filtered nil)
+  (inline-diff nil)) ; cached propertized diff lines when expanded inline (TAB on a file)
 
 (defvar-local emeld--scan-max-depth nil
   "Directory-depth limit for the initial scan, or nil for a full scan.
@@ -3137,6 +3139,9 @@ the view after \\[emeld-collapse-all], or after toggling same files on."
 (defun emeld-cycle-subtree ()
   "Cycle the subtree at point through FOLDED → DIRS → SUBTREE, org-mode style.
 
+On a file, TAB instead toggles an inline diff preview beneath the row
+\(`emeld-toggle-inline-diff'), a Magit-style quick peek.
+
 If point is on a directory:
 - FOLDED: just this directory collapsed.
 - DIRS: this directory expanded; intermediate sub-dirs expanded; leaf
@@ -3150,8 +3155,11 @@ naturally."
   (interactive)
   (let ((node (get-text-property (point) 'emeld-node)))
     (cond
-     ((not (and node (emeld-node-is-dir node)))
-      (user-error "Not on a directory"))
+     ((null node)
+      (user-error "No node at point"))
+     ;; On a file, TAB peeks an inline diff (Magit-style) instead of cycling.
+     ((not (emeld-node-is-dir node))
+      (emeld-toggle-inline-diff))
      ((not (emeld-node-expanded node))
       ;; FOLDED → DIRS
       (emeld--maybe-populate-lazy-dir node)
@@ -3609,6 +3617,73 @@ preview each node without leaving it."
                      (path (if (eq side 'left) left right)))
                 (display-buffer (find-file-noselect (or path left right)))))
              (t (message "No file at point"))))))))))
+
+(defun emeld--inline-diff-text (node)
+  "Return the raw unified-diff text for file NODE, or nil when there is none.
+In git mode the diff comes from `git diff' between the two revisions; in
+directory mode from `diff -u' (left→right), reusing `emeld--write-patch-hunk'.
+Identical files have no diff."
+  (cond
+   (emeld--git-mode
+    ;; Capture the buffer-local repo/revs *before* `with-temp-buffer', where
+    ;; those locals would read as nil.
+    (let* ((repo emeld--git-repo)
+           (rel (emeld--node-relpath node))
+           (revargs (emeld--git-rev-args emeld--git-left-rev emeld--git-right-rev))
+           (args (append (list "diff" "--no-color") revargs (list "--" rel))))
+      (with-temp-buffer
+        (let ((default-directory repo))
+          (apply #'process-file "git" nil t nil args))
+        (buffer-string))))
+   ((eq (emeld-node-diff-status node) 'same) nil)
+   (t (emeld--write-patch-hunk node))))
+
+(defun emeld--inline-diff-faceify (text)
+  "Split unified-diff TEXT into a list of propertized lines for inline display.
+Each line gets the appropriate `diff-*' face so themes apply automatically."
+  (mapcar
+   (lambda (line)
+     (let ((face (cond
+                  ((string-prefix-p "@@" line) 'diff-hunk-header)
+                  ((string-prefix-p "+++" line) 'diff-file-header)
+                  ((string-prefix-p "---" line) 'diff-file-header)
+                  ((string-prefix-p "diff " line) 'diff-header)
+                  ((string-prefix-p "index " line) 'diff-header)
+                  ((string-prefix-p "new file" line) 'diff-header)
+                  ((string-prefix-p "deleted file" line) 'diff-header)
+                  ((string-prefix-p "+" line) 'diff-added)
+                  ((string-prefix-p "-" line) 'diff-removed)
+                  (t 'diff-context))))
+       (propertize line 'face face)))
+   (split-string (string-trim-right text "[\n\r]+") "\n")))
+
+(defun emeld--inline-diff-lines (node)
+  "Return propertized diff lines for file NODE, or nil when there is nothing."
+  (let ((text (emeld--inline-diff-text node)))
+    (and text
+         (not (string-empty-p (string-trim text)))
+         (emeld--inline-diff-faceify text))))
+
+(defun emeld-toggle-inline-diff ()
+  "Toggle an inline diff preview of the file node at point.
+On a file that differs (or exists on only one side), expand a quick diff
+beneath the row — a Magit-style peek that keeps point in the tree; invoke
+again to collapse.  Reports a message on a directory or an identical file."
+  (interactive)
+  (let ((node (get-text-property (point) 'emeld-node)))
+    (cond
+     ((null node) (message "No node at point"))
+     ((emeld-node-is-dir node)
+      (message "Inline diff needs a file; TAB cycles a directory"))
+     ((emeld-node-inline-diff node)
+      (setf (emeld-node-inline-diff node) nil)
+      (let ((pos (point))) (emeld--render) (goto-char pos)))
+     (t
+      (let ((lines (emeld--inline-diff-lines node)))
+        (if (null lines)
+            (message "Nothing to preview (identical?)")
+          (setf (emeld-node-inline-diff node) lines)
+          (let ((pos (point))) (emeld--render) (goto-char pos))))))))
 
 (defun emeld--git-soft-diff (node)
   "Preview NODE in git mode for `emeld-soft-diff' (SPC) without selecting.
@@ -4495,7 +4570,20 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
             
             (add-text-properties start (point) `(emeld-node ,node mouse-face highlight))
             (insert "\n")
-            
+
+            ;; Inline diff preview (TAB on a file): a Magit-style quick peek
+            ;; rendered full-width beneath the row, indented under the name.
+            ;; Lines carry the same `emeld-node' so TAB/SPC/= and navigation
+            ;; act on the file, and TAB again collapses the preview.
+            (when (and (not (emeld-node-is-dir node)) (emeld-node-inline-diff node))
+              (let ((diff-prefix (concat indent-prefix
+                                         (make-string (+ emeld-indent-offset 2) ?\s))))
+                (dolist (dl (emeld-node-inline-diff node))
+                  (let ((dstart (point)))
+                    (insert diff-prefix dl "\n")
+                    (add-text-properties dstart (point)
+                                         `(emeld-node ,node emeld-inline-diff t))))))
+
             ;; Recurse.  By default the continuation indent is one space wider
             ;; than the branch dashes (offset spaces vs offset-1 dashes), so a
             ;; child's connector hangs one column past the parent's content
@@ -4572,6 +4660,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
    ("e"   "ediff"              emeld-ediff)
    ("="   "diff / open / fold" emeld-soft-diff)
    ("SPC" "diff / open / fold" emeld-soft-diff)
+   ("TAB" "peek inline diff (file)" emeld-toggle-inline-diff :transient t)
    ("D"   "diff root (recursive)" emeld-diff-root)
    ("d"   "diff dir at point"   emeld-diff-dir)
    ("C"   "copy to other side" emeld-copy)

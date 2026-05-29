@@ -13,7 +13,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Orphan files shown with strikethrough on the missing side (Meld-style, toggle ~s~).
 - Dired-style, per-side marking (~m~/~u~/~U~): the ~*~ sits in the column of the side you mark, and a node can be marked left, right, or both.  Bulk copy (~C~) copies each marked node from its marked side; bulk delete (~x~) deletes from every marked side; mark all changed files (~M~), or bulk-mark by status (~* m~ modified, ~* l~ left-only, ~* c~ the left→right sync set).
 - Filter groups toggleable from the transient menu.
-- Org-mode-style visibility cycling: ~S-TAB~ cycles the whole tree (TOP → DIRS → CHANGES), ~TAB~ does the equivalent for the subtree at point.
+- Org-mode-style visibility cycling: ~S-TAB~ cycles the whole tree (TOP → DIRS → CHANGES), ~TAB~ does the equivalent for the subtree at point.  On a file, ~TAB~ instead peeks an inline diff underneath the row (Magit-style), expandable and collapsible without leaving the tree.
 - Bulk expand/collapse: ~[~ collapse all, ~]~ expand all, ~\\~ expand only paths leading to changes.
 - File copying between directories (~C~), via rsync when available — asynchronous and delta-efficient, with an optional exact-mirror (~--delete~) mode toggled with ~R~.
 - Recursive ~diff~ buffers for the whole root (~D~) or the directory at point (~d~), and a non-intrusive preview (~=~/~SPC~) that diffs/opens the node at point while keeping point in the tree.
@@ -44,13 +44,13 @@ From inside a git work tree, run ~M-x emeld-git-diff~ (or ~G~ in the transient m
 
 The result is the same side-by-side tree, showing the hierarchy of added, deleted and modified files between the two revisions (renames appear as a deleted old path plus an added new path).  Because the content lives in git history rather than on disk:
 
-- ~RET~ / ~f~ opens a file at its revision (via ~git show~; the working-tree side opens the real file), ~e~ Ediffs the two revisions, and ~=~ / ~SPC~ / ~d~ / ~D~ show a ~git diff~.
+- ~RET~ / ~f~ opens a file at its revision (via ~git show~; the working-tree side opens the real file), ~e~ Ediffs the two revisions, ~=~ / ~SPC~ / ~d~ / ~D~ show a ~git diff~, and ~TAB~ peeks an inline diff of a file underneath its row.
 - ~S~ (show Same) lists the left revision and merges in every unchanged file.
 - A foldable commit-context block sits between the revision header and the tree, in two columns aligned to the panes (left/old commit under the left header, right/new under the right): each shows its short SHA and subject, and ~c~ (or ~RET~ on the block) unfolds the author, date+time and full message.
 - Header ~RET~ re-selects a revision for that side; ~W~ swaps the two revisions; ~g~ re-scans.
 - Copy (~C~), delete (~x~) and subdirectory rescan are disabled — history cannot be written to.
 
-The header line shows ~[git OLD→NEW]~ with the chosen revision labels.
+The header line shows ~[git OLD→NEW]~ with the chosen revision labels; a revision that points at the current ~HEAD~ is shown as ~HEAD (SHA)~.
 
 *** Stepping through history
 
@@ -85,7 +85,7 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | Key       | Action                                            |
 |-----------+---------------------------------------------------|
 | ?         | Transient menu                                    |
-| TAB       | Cycle subtree at point: FOLDED → DIRS → SUBTREE   |
+| TAB       | Dir: cycle subtree (FOLDED → DIRS → SUBTREE); File: peek inline diff |
 | S-TAB     | Cycle whole tree: TOP → DIRS → CHANGES            |
 | [         | Collapse all                                      |
 | ]         | Expand all                                        |
