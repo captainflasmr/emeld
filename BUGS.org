@@ -9,21 +9,13 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
-** TODO [#B] preview diff before copy?
-
-** TODO Maybe like magit an unfold of a soft diff?
-
-** DOING compare git version with folder
-
-** DOING fast scan to depth level scan?
+** DOING turn to sidebar as treemacs
 
 ** TODO when edited file and then rescanned newly modified files didn't show
 
 ** TODO check re-render in window that obeys proper proportions
 
 ** TODO add directory tree display for dired?
-
-** TODO turn to sidebar as treemacs
 
 ** TODO Scanning got stuck after copying files and then auto rescan
 
