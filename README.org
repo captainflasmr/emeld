@@ -59,7 +59,7 @@ The header line shows ~[git OLD→NEW]~ with the chosen revision labels.
 - ~,~ — move to the *older* commit (back in time)
 - ~.~ — move to the *newer* commit (forward, back toward the start)
 
-Each step re-scans and updates the commit-context block, so you can quickly skim what changed in successive commits.  The root commit is compared against the empty tree (labelled ~∅ (root)~), and the header line shows ~[hist i/N]~.  Only the first-parent chain is followed, up to ~emeld-git-history-limit~ commits (default 1000).  Pressing ~,~/~.~ in any git comparison where the right side is a commit starts a walk anchored there.
+Each step re-scans and updates the commit-context block, so you can quickly skim what changed in successive commits.  The root commit is compared against the empty tree (labelled ~∅ (root)~), and the header line shows ~[hist i/N]~.  When the newest commit is ~HEAD~, pressing ~.~ once more steps all the way to the *working tree* — the newest commit on the left, your uncommitted changes on the right (header line ~[hist WT/N]~) — so a single walk runs from any point in history right up to what you have not yet committed.  Only the first-parent chain is followed, up to ~emeld-git-history-limit~ commits (default 1000).  Pressing ~,~/~.~ in any git comparison where the right side is a commit starts a walk anchored there.
 
 * Transient Menu (~?~)
 

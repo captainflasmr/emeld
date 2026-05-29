@@ -269,6 +269,10 @@ current commit, which is compared against its parent.")
 (defvar-local emeld--git-history-index 0
   "Index into `emeld--git-history' of the commit currently being viewed.
 0 is the newest (the starting revision); larger is older.")
+(defvar-local emeld--git-head-sha nil
+  "Resolved SHA of the repo's HEAD, cached for labelling.
+Refreshed on each git scan so `emeld--git-rev-label' can show a revision
+that points at HEAD as \"HEAD\" rather than a bare abbreviated SHA.")
 (defvar-local emeld--column-width nil)
 (defvar-local emeld--saved-expanded nil
   "Saved expanded directory paths to restore after refresh.")
@@ -2284,12 +2288,15 @@ NAME is chosen from `emeld-presets' via completion."
 (defun emeld--git-rev-label (rev)
   "Return a short human label for REV.
 REV is a revision string, or the symbol `working' or `staged'.  A full
-40-char SHA is abbreviated; the empty tree shows as a root marker."
+40-char SHA is abbreviated; a SHA that points at HEAD is shown as
+\"HEAD (SHA)\"; the empty tree shows as a root marker."
   (cond ((eq rev 'working) "working")
         ((eq rev 'staged) "index")
         ((and (stringp rev) (string= rev emeld--git-empty-tree)) "∅ (root)")
         ((and (stringp rev) (string-match-p "\\`[0-9a-f]\\{40\\}\\'" rev))
-         (substring rev 0 8))
+         (if (and emeld--git-head-sha (string= rev emeld--git-head-sha))
+             (format "HEAD (%s)" (substring rev 0 8))
+           (substring rev 0 8)))
         ((stringp rev) rev)
         (t (format "%s" rev))))
 
@@ -2404,15 +2411,38 @@ Reads the buffer-local `emeld--git-repo'."
           (string-trim (buffer-string))
         emeld--git-empty-tree))))
 
+(defun emeld--git-resolve-head ()
+  "Return the full SHA the repo's HEAD points at, or nil.
+Reads the buffer-local `emeld--git-repo'."
+  (when emeld--git-repo
+    (let ((default-directory emeld--git-repo))
+      (with-temp-buffer
+        (and (eq 0 (process-file "git" nil t nil
+                                 "rev-parse" "--verify" "-q" "HEAD"))
+             (let ((s (string-trim (buffer-string))))
+               (and (not (string-empty-p s)) s)))))))
+
+(defun emeld--git-history-head-p ()
+  "Return non-nil when the newest commit in the walk is the current HEAD.
+Only then does a working-tree slot make sense above it, since otherwise
+the working tree would be compared against an arbitrary older commit."
+  (let ((head (car emeld--git-history)))
+    (and head (equal head (emeld--git-resolve-head)))))
+
 (defun emeld--git-history-apply ()
   "Set the rev pair from `emeld--git-history-index' and re-scan.
 The indexed commit becomes the right (new) side and its parent the left
-\(old) side, so the buffer shows what that commit changed."
+\(old) side, so the buffer shows what that commit changed.  The virtual
+index -1 is the working-tree slot: the newest commit on the left and the
+working tree on the right, showing the uncommitted changes on top of it."
   (let* ((h emeld--git-history)
          (n (length h))
-         (i (max 0 (min emeld--git-history-index (1- n))))
-         (right (nth i h))
-         (left (if (< (1+ i) n) (nth (1+ i) h) (emeld--git-parent-rev right))))
+         (i (max -1 (min emeld--git-history-index (1- n))))
+         (working (< i 0))
+         (right (if working 'working (nth i h)))
+         (left (cond (working (car h))
+                     ((< (1+ i) n) (nth (1+ i) h))
+                     (t (emeld--git-parent-rev right)))))
     (setq emeld--git-history-index i
           emeld--git-left-rev left
           emeld--git-right-rev right)
@@ -2422,12 +2452,15 @@ The indexed commit becomes the right (new) side and its parent the left
 
 (defun emeld--git-history-echo ()
   "Echo the current history position and the commit subject."
-  (let ((subj (and emeld--git-right-commit
-                   (plist-get emeld--git-right-commit :subject))))
-    (message "Commit %d/%d  %s%s"
-             (1+ emeld--git-history-index) (length emeld--git-history)
-             (emeld--git-rev-label emeld--git-right-rev)
-             (if subj (concat "  " subj) ""))))
+  (if (< emeld--git-history-index 0)
+      (message "Working tree  (uncommitted changes vs %s)"
+               (emeld--git-rev-label (car emeld--git-history)))
+    (let ((subj (and emeld--git-right-commit
+                     (plist-get emeld--git-right-commit :subject))))
+      (message "Commit %d/%d  %s%s"
+               (1+ emeld--git-history-index) (length emeld--git-history)
+               (emeld--git-rev-label emeld--git-right-rev)
+               (if subj (concat "  " subj) "")))))
 
 (defun emeld--git-history-ensure ()
   "Ensure the buffer has a history list, building one on demand.
@@ -2457,14 +2490,21 @@ or re-run from an older commit)"
     (emeld--git-history-echo)))
 
 (defun emeld-git-history-newer ()
-  "Step to the next (newer) commit, back toward the starting revision."
+  "Step to the next (newer) commit, back toward the starting revision.
+Stepping newer once past the newest commit reaches the working-tree slot
+\(uncommitted changes), available only when that commit is the current HEAD."
   (interactive)
   (emeld--git-history-ensure)
-  (if (<= emeld--git-history-index 0)
-      (message "Newest commit (%s)" (emeld--git-rev-label (car emeld--git-history)))
+  (cond
+   ((< emeld--git-history-index 0)
+    (message "Working tree (newest)"))
+   ((and (= emeld--git-history-index 0)
+         (not (emeld--git-history-head-p)))
+    (message "Newest commit (%s)" (emeld--git-rev-label (car emeld--git-history))))
+   (t
     (cl-decf emeld--git-history-index)
     (emeld--git-history-apply)
-    (emeld--git-history-echo)))
+    (emeld--git-history-echo))))
 
 (defun emeld--parse-git-name-status (output)
   "Parse NUL-delimited `git diff --name-status -z' OUTPUT into entries.
@@ -2506,7 +2546,17 @@ copy adds only the new path (the source is unchanged)."
           ;; Cheap (`git show -s'); refreshed here so a swap or header
           ;; revision change updates the displayed commit context.
           emeld--git-left-commit (emeld--git-commit-info emeld--git-left-rev)
-          emeld--git-right-commit (emeld--git-commit-info emeld--git-right-rev)))
+          emeld--git-right-commit (emeld--git-commit-info emeld--git-right-rev)
+          ;; Cache HEAD so `emeld--git-rev-label' can mark a rev as HEAD
+          ;; without a git call on every header-line redisplay.
+          emeld--git-head-sha (emeld--git-resolve-head))
+    ;; Refresh the pane-header labels now HEAD is known, so a rev that is
+    ;; HEAD shows as "HEAD (SHA)" even when set by a caller before this scan.
+    (when emeld--root-node
+      (setf (emeld-node-name emeld--root-node)
+            (emeld--git-rev-label emeld--git-left-rev)
+            (emeld-node-name-right emeld--root-node)
+            (emeld--git-rev-label emeld--git-right-rev))))
   (let* ((command (with-current-buffer buf (emeld--git-diff-command)))
          (chunks nil)
          (proc (make-process
@@ -4168,9 +4218,12 @@ reflects the live scan counters without needing to be re-installed."
                                 'face 'bold))
                   ;; History stepping position (`,'/`.').
                   (when (and emeld--git-mode emeld--git-history)
-                    (propertize (format "[hist %d/%d] "
-                                        (1+ emeld--git-history-index)
-                                        (length emeld--git-history))
+                    (propertize (if (< emeld--git-history-index 0)
+                                    (format "[hist WT/%d] "
+                                            (length emeld--git-history))
+                                  (format "[hist %d/%d] "
+                                          (1+ emeld--git-history-index)
+                                          (length emeld--git-history)))
                                 'face 'warning))
                   ;; Flag a depth-limited (shallow) scan.
                   (when emeld--scan-max-depth
