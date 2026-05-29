@@ -20,6 +20,16 @@ to continue."
   :type 'integer
   :group 'emeld)
 
+(defcustom emeld-git-history-auto-expand t
+  "When non-nil, auto-expand changed directories after a history step.
+Each step of `emeld-git-history-older' / `emeld-git-history-newer'
+rebuilds the tree, then expands the directories leading to a change (as
+`emeld-expand-changes' does) so the whole commit's hierarchy is opened
+out without a manual expand.  Set to nil to keep the saved expansion
+state across steps instead."
+  :type 'boolean
+  :group 'emeld)
+
 ;;;###autoload
 (defun emeld-git-diff (repo left-rev right-rev)
   "Compare two git revisions of REPO side-by-side as a tree of changes.
@@ -254,7 +264,8 @@ working tree on the right, showing the uncommitted changes on top of it."
                      (t (emeld--git-parent-rev right)))))
     (setq emeld--git-history-index i
           emeld--git-left-rev left
-          emeld--git-right-rev right)
+          emeld--git-right-rev right
+          emeld--git-expand-changes-pending emeld-git-history-auto-expand)
     (setf (emeld-node-name emeld--root-node) (emeld--git-rev-label left)
           (emeld-node-name-right emeld--root-node) (emeld--git-rev-label right))
     (emeld-refresh)))
@@ -420,7 +431,11 @@ the filesystem for paths that exist only in history."
                          'different 'same))
                (setq emeld--scan-process nil
                      emeld--scan-buf nil)
-               (emeld--restore-expanded root)
+               (if emeld--git-expand-changes-pending
+                   (progn
+                     (emeld--set-expanded-changes)
+                     (setq emeld--git-expand-changes-pending nil))
+                 (emeld--restore-expanded root))
                (unless emeld-show-same
                  (setq emeld--status-phase 'done))
                (emeld--render)

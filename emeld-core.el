@@ -277,6 +277,11 @@ current commit, which is compared against its parent.")
 (defvar-local emeld--git-history-index 0
   "Index into `emeld--git-history' of the commit currently being viewed.
 0 is the newest (the starting revision); larger is older.")
+(defvar-local emeld--git-expand-changes-pending nil
+  "One-shot flag: expand changed dirs once the next git tree finishes.
+Set by `emeld--git-history-apply' when `emeld-git-history-auto-expand' is
+non-nil; consumed in the `emeld--build-git-tree' completion callback,
+overriding the restored expansion state for that scan only.")
 (defvar-local emeld--git-head-sha nil
   "Resolved SHA of the repo's HEAD, cached for labelling.
 Refreshed on each git scan so `emeld--git-rev-label' can show a revision
@@ -2316,7 +2321,10 @@ If the current side is empty but the other has a file, snap to it."
     (forward-line 1)
     (while (and (not found) (not (eobp)))
       (let ((node (get-text-property (point) 'emeld-node)))
-        (if (and node (emeld--change-status-p node) (not (emeld-node-is-dir node)))
+        (if (and node (emeld--change-status-p node) (not (emeld-node-is-dir node))
+                 ;; Skip inline-diff body lines: they share the file's node, so
+                 ;; landing on them would stall on the file we started from.
+                 (not (get-text-property (point) 'emeld-inline-diff)))
             (setq found t)
           (forward-line 1))))
     (if found
@@ -2334,7 +2342,10 @@ If the current side is empty but the other has a file, snap to it."
     (forward-line -1)
     (while (and (not found) (not (bobp)))
       (let ((node (get-text-property (point) 'emeld-node)))
-        (if (and node (emeld--change-status-p node) (not (emeld-node-is-dir node)))
+        (if (and node (emeld--change-status-p node) (not (emeld-node-is-dir node))
+                 ;; Skip inline-diff body lines: they share the file's node, so
+                 ;; landing on them would stall on the file we started from.
+                 (not (get-text-property (point) 'emeld-inline-diff)))
             (setq found t)
           (forward-line -1))))
     (if found
@@ -2538,12 +2549,11 @@ A directory is considered a leaf when none of its children are dirs."
       (emeld--walk-set-dirs-only child))
     (emeld--render)))
 
-(defun emeld-expand-changes ()
-  "Expand directories that lead to a change, collapse those that don't.
-A directory is expanded when its `diff-status' is not `same' — i.e. it
-contains a modified, added, or removed descendant.  Useful for focusing
-the view after \\[emeld-collapse-all], or after toggling same files on."
-  (interactive)
+(defun emeld--set-expanded-changes ()
+  "Expand directories leading to a change, collapse those that don't.
+Mutates the `:expanded' slots under `emeld--root-node' without rendering;
+callers redisplay.  A directory is expanded when its `diff-status' is not
+`same' — i.e. it contains a modified, added, or removed descendant."
   (when emeld--root-node
     (cl-labels ((walk (node)
                   (when (emeld-node-is-dir node)
@@ -2552,8 +2562,17 @@ the view after \\[emeld-collapse-all], or after toggling same files on."
                     (dolist (child (emeld-node-children node))
                       (walk child)))))
       (dolist (child (emeld-node-children emeld--root-node))
-        (walk child))
-      (emeld--render))))
+        (walk child)))))
+
+(defun emeld-expand-changes ()
+  "Expand directories that lead to a change, collapse those that don't.
+A directory is expanded when its `diff-status' is not `same' — i.e. it
+contains a modified, added, or removed descendant.  Useful for focusing
+the view after \\[emeld-collapse-all], or after toggling same files on."
+  (interactive)
+  (when emeld--root-node
+    (emeld--set-expanded-changes)
+    (emeld--render)))
 
 (defun emeld-cycle-subtree ()
   "Cycle the subtree at point through FOLDED → DIRS → SUBTREE, org-mode style.
