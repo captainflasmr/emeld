@@ -503,7 +503,7 @@ buffer.  WHAT labels the echo-area message."
   "Return the display lines for one commit column, or nil when INFO is nil.
 The first line is the fold arrow, abbreviated SHA and subject; when EXPANDED
 the author, date and body lines follow.  Lines are propertized; the caller
-truncates/pads each to the column width."
+word-wraps each to the column width."
   (when info
     (let ((lines (list (concat (propertize (if expanded "▾ " "▸ ") 'face 'bold)
                                (propertize (concat (plist-get info :sha) "  ")
@@ -524,6 +524,42 @@ truncates/pads each to the column width."
               (push (concat "  " bl) lines)))))
       (nreverse lines))))
 
+(defun emeld--git-wrap-line (str width indent)
+  "Word-wrap STR to WIDTH display columns, returning a list of physical lines.
+Continuation lines (after the first) carry INDENT leading spaces.  Wraps on
+whitespace where possible, hard-breaking words longer than the available
+width.  Text properties on STR are preserved."
+  (if (or (<= width 0) (<= (string-width str) width))
+      (list str)
+    (let* ((pad (make-string indent ?\s))
+           (lines nil)
+           (i 0)
+           (n (length str))
+           (seg-start 0)
+           (cur-width 0)
+           (limit width)
+           (last-space -1))
+      (while (< i n)
+        (let* ((ch (aref str i))
+               (cw (char-width ch)))
+          (when (eq ch ?\s)
+            (setq last-space i))
+          (if (and (> (+ cur-width cw) limit) (> i seg-start))
+              (let ((break (if (> last-space seg-start) last-space i)))
+                (push (concat (and lines pad) (substring str seg-start break)) lines)
+                (setq seg-start (if (and (> last-space seg-start)
+                                         (eq (aref str last-space) ?\s))
+                                    (1+ break) break)
+                      i seg-start
+                      cur-width 0
+                      last-space -1
+                      limit (- width indent)))
+            (setq cur-width (+ cur-width cw)
+                  i (1+ i)))))
+      (when (< seg-start n)
+        (push (concat (and lines pad) (substring str seg-start n)) lines))
+      (nreverse lines))))
+
 (defun emeld--insert-git-commit-block ()
   "Insert the foldable git commit block at point, in two columns (git mode).
 The left commit sits under the left (old) header and the right commit under
@@ -540,11 +576,18 @@ and full body.  The block carries the `emeld-git-commit' text property so RET
            (rows (max (length left) (length right)))
            (start (point)))
       (dotimes (i rows)
-        ;; Pad/truncate the left cell to the column width so the right cell
-        ;; always starts at the pane boundary, then drop the right cell.
-        (insert (truncate-string-to-width (or (nth i left) "") cw nil ?\s))
-        (insert (or (nth i right) ""))
-        (insert "\n"))
+        ;; Word-wrap each cell to the column width so nothing is clipped, then
+        ;; emit the wrapped sub-lines side by side.  Wrapping both columns per
+        ;; logical line keeps each commit's line vertically grouped with its
+        ;; counterpart; the left cell is padded to the column width so the
+        ;; right cell always starts at the pane boundary.
+        (let* ((lw (emeld--git-wrap-line (or (nth i left) "") cw 2))
+               (rw (emeld--git-wrap-line (or (nth i right) "") cw 2))
+               (sub (max (length lw) (length rw))))
+          (dotimes (j sub)
+            (insert (truncate-string-to-width (or (nth j lw) "") cw nil ?\s))
+            (insert (or (nth j rw) ""))
+            (insert "\n"))))
       (add-text-properties start (point)
                            '(emeld-git-commit t mouse-face highlight)))))
 

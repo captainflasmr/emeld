@@ -3954,8 +3954,12 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
             ;; Lines carry the same `emeld-node' so TAB/SPC/= and navigation
             ;; act on the file, and TAB again collapses the preview.
             (when (and (not (emeld-node-is-dir node)) (emeld-node-inline-diff node))
-              (let ((diff-prefix (concat indent-prefix
-                                         (make-string (+ emeld-indent-offset 2) ?\s))))
+              ;; The two leading spaces stand in for the mark column that
+              ;; precedes `indent-prefix' on every tree row, so the tree guides
+              ;; in `indent-prefix' line up vertically with the rows above; the
+              ;; remaining offset spaces indent the diff text under the name.
+              (let ((diff-prefix (concat "  " indent-prefix
+                                         (make-string emeld-indent-offset ?\s))))
                 (dolist (dl (emeld-node-inline-diff node))
                   (let ((dstart (point)))
                     (insert diff-prefix dl "\n")
