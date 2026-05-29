@@ -806,5 +806,70 @@ a new path that is neither is treated as identical."
     (should (equal (emeld--git-rev-label "fedcba9876543210fedcba9876543210fedcba98")
                    "fedcba98"))))
 
+(ert-deftest emeld-sidebar-build-and-visible ()
+  "The sidebar builds a lazy tree, hides dotfiles, sorts dirs before files."
+  (let ((dir (make-temp-file "emeld-sb" t)))
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name "sub" dir))
+          (with-temp-file (expand-file-name "b.txt" dir) (insert "b"))
+          (with-temp-file (expand-file-name "a.txt" dir) (insert "a"))
+          (with-temp-file (expand-file-name ".hidden" dir) (insert "x"))
+          (with-temp-file (expand-file-name "sub/deep.txt" dir) (insert "d"))
+          (with-temp-buffer
+            (setq-local emeld--sidebar-root (file-name-as-directory dir)
+                        emeld-sidebar-show-hidden nil)
+            (emeld--sidebar-build)
+            (let ((kids (emeld-node-children emeld--root-node)))
+              ;; dir first, then files alphabetically; .hidden excluded
+              (should (equal (mapcar #'emeld-node-name kids)
+                             '("sub" "a.txt" "b.txt")))
+              ;; lazy: the subdir is not yet populated
+              (should-not (emeld-node-scanned (car kids)))
+              (emeld--sidebar-populate (car kids))
+              (should (emeld-node-scanned (car kids)))
+              (should (equal (mapcar #'emeld-node-name
+                                     (emeld-node-children (car kids)))
+                             '("deep.txt"))))
+            ;; show-hidden reveals the dotfile
+            (setq-local emeld-sidebar-show-hidden t)
+            (emeld--sidebar-build)
+            (should (member ".hidden"
+                            (mapcar #'emeld-node-name
+                                    (emeld-node-children emeld--root-node))))))
+      (delete-directory dir t))))
+
+(ert-deftest emeld-sidebar-reveal-expands-ancestors ()
+  "Revealing a nested file expands its ancestor dirs and lands point on it."
+  (let ((dir (make-temp-file "emeld-sb" t)))
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name "a/b" dir) t)
+          (with-temp-file (expand-file-name "a/b/f.txt" dir) (insert "x"))
+          (with-temp-buffer
+            (emeld-sidebar-mode)
+            (setq emeld--sidebar-root (file-name-as-directory dir))
+            (emeld--sidebar-build)
+            (let ((f (expand-file-name "a/b/f.txt" dir)))
+              (emeld--sidebar-reveal f)
+              (should (equal emeld--sidebar-current f))
+              ;; ancestor dirs are expanded
+              (let* ((a (cl-find "a" (emeld-node-children emeld--root-node)
+                                 :key #'emeld-node-name :test #'string=))
+                     (b (cl-find "b" (emeld-node-children a)
+                                 :key #'emeld-node-name :test #'string=)))
+                (should (emeld-node-expanded a))
+                (should (emeld-node-expanded b)))
+              ;; point sits on the revealed file
+              (should (equal (emeld--sidebar-path-at-point) f))
+              ;; and the current-file highlight overlay is on its line
+              (should (overlayp emeld--sidebar-hl-overlay))
+              (should (eq (overlay-get emeld--sidebar-hl-overlay 'face)
+                          'emeld-sidebar-highlight-face))
+              (save-excursion
+                (goto-char (overlay-start emeld--sidebar-hl-overlay))
+                (should (equal (emeld--sidebar-path-at-point) f))))))
+      (delete-directory dir t))))
+
 (message "Running tests...")
 (ert-run-tests-batch-and-exit)

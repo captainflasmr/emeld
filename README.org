@@ -23,6 +23,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Targeted rescan of just the directory at point (~C-u g~) when one subtree changed on disk, avoiding a full rescan.
 - Depth-limited "shallow" scan for huge trees or slow mounts (SMB/NFS): prefix ~emeld-diff~ with a depth (~C-u 2 M-x emeld-diff~) to scan only the top levels and stop; deeper directories are marked with a dim ~…~ and drilled into on demand with ~C-u g~.
 - Integration with ~ediff~.
+- A treemacs-style file-tree sidebar (~M-x emeld-sidebar~) that follows and highlights the active file — built on the same tree machinery (see below).
 - Fully themeable (uses standard Emacs faces).
 
 * Installation
@@ -60,6 +61,29 @@ The header line shows ~[git OLD→NEW]~ with the chosen revision labels; a revis
 - ~.~ — move to the *newer* commit (forward, back toward the start)
 
 Each step re-scans and updates the commit-context block, so you can quickly skim what changed in successive commits.  The root commit is compared against the empty tree (labelled ~∅ (root)~), and the header line shows ~[hist i/N]~.  When the newest commit is ~HEAD~, pressing ~.~ once more steps all the way to the *working tree* — the newest commit on the left, your uncommitted changes on the right (header line ~[hist WT/N]~) — so a single walk runs from any point in history right up to what you have not yet committed.  Only the first-parent chain is followed, up to ~emeld-git-history-limit~ commits (default 1000).  Pressing ~,~/~.~ in any git comparison where the right side is a commit starts a walk anchored there.
+
+* File-Tree Sidebar (treemacs-style)
+
+~M-x emeld-sidebar~ docks a dedicated side window showing a single directory tree — not a diff — built with the same tree machinery as the comparison view.  It roots at the current file's project (git toplevel, then ~project.el~, then the file's own directory; a prefix arg ~C-u M-x emeld-sidebar~ prompts for the root), and run again it closes the window.
+
+Children load lazily as you open directories.  Dotfiles are hidden by default (toggle with ~h~), and filter groups that are active by default (e.g. version-control noise) are honoured.
+
+The active file is revealed — its ancestor directories expanded — and highlighted; with ~emeld-sidebar-follow-mode~ (a global minor mode, enabled alongside the sidebar when ~emeld-sidebar-follow~ is non-nil) it keeps up automatically as you switch buffers.
+
+| Key       | Action                                          |
+|-----------+-------------------------------------------------|
+| RET / f / v | Open file in the main window (or toggle a dir) |
+| TAB       | Expand / collapse the directory at point        |
+| o         | Open file without leaving the sidebar           |
+| n / p     | Next / previous line                            |
+| g         | Refresh from disk (keeps expansion and point)   |
+| [         | Collapse all                                    |
+| .         | Reveal the main window's file                   |
+| h         | Toggle hidden (dot) files                       |
+| F         | Toggle follow-mode                              |
+| q         | Close the sidebar                               |
+
+Customize ~emeld-sidebar-position~ (~left~/~right~), ~emeld-sidebar-width~, ~emeld-sidebar-show-hidden~ and ~emeld-sidebar-follow~.
 
 * Transient Menu (~?~)
 

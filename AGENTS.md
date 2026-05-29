@@ -15,7 +15,7 @@ emacs -Q -L . -l emeld.el --eval '(emeld-git-diff default-directory "HEAD~3" "HE
 
 ## Structure
 
-- `emeld.el` — the package. `M-x emeld-diff` (pick two dirs), `M-x emeld-diff-dwim` (guesses from Dired buffers), `M-x emeld-git-diff` (compare two git revisions, or a rev vs the working tree / index — same tree, content from `git show`), or `M-x emeld-git-step-history` (step commit-by-commit through history, `,` older / `.` newer).
+- `emeld.el` — the package. `M-x emeld-diff` (pick two dirs), `M-x emeld-diff-dwim` (guesses from Dired buffers), `M-x emeld-git-diff` (compare two git revisions, or a rev vs the working tree / index — same tree, content from `git show`), `M-x emeld-git-step-history` (step commit-by-commit through history, `,` older / `.` newer), or `M-x emeld-sidebar` (treemacs-style single-tree file explorer; see below).
 - `emeld-tests.el` — `ert` tests. Loads `emeld.el` via `(load-file "emeld.el")` — run from repo root.
 - No Makefile, no CI, no package manager config.
 
@@ -29,6 +29,7 @@ emacs -Q -L . -l emeld.el --eval '(emeld-git-diff default-directory "HEAD~3" "HE
 - Glob filter: `"*.elc"` matches filenames; `"tmp/*"` matches relative paths (contains `/`).
 - `emeld-node` struct stores the entire tree; properties attached via text-property `'emeld-node`.
 - Inline diff peek: `TAB` on a file (`emeld-cycle-subtree` → `emeld-toggle-inline-diff`) caches propertized `diff-*`-faced lines in the node's `inline-diff` slot; `emeld--render-nodes` draws them under the row. `emeld--inline-diff-text` uses `git diff` (git mode) or `emeld--write-patch-hunk` (dir mode) — capture buffer-local repo/revs before `with-temp-buffer`.
+- Sidebar (`emeld-sidebar`): treemacs-style single-tree explorer, own mode/render (`emeld-sidebar-mode`, `emeld--sidebar-render`), reuses `emeld-node` + `emeld--root-node`. Lazy per-dir load (node `scanned` slot = "loaded?"); root via `emeld--sidebar-project-root` (git → project.el → dir). `emeld-sidebar-follow-mode` (global) hooks both `window-selection-change-functions` and `window-buffer-change-functions` to reveal the active file (the latter is needed to catch opening a file in the current window); the current file is marked with an explicit overlay (not `hl-line-mode`, which only tracks the selected window) and `set-window-point` scrolls the unselected sidebar. Don't entangle it with the diff renderer.
 - Buffer-local vars (`emeld-show-*`) must be `make-local-variable`'d in mode body.
 - Node rendering uses standard Emacs `diff-*` faces for theming.
 - Use `car`/`cdr` instead of `pop` in `lexical-binding: t` threads (gv-let-place compatibility).

@@ -9,8 +9,6 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
-** DOING turn to sidebar as treemacs
-
 ** TODO when edited file and then rescanned newly modified files didn't show
 
 ** TODO check re-render in window that obeys proper proportions
