@@ -1,23 +1,31 @@
 # AGENTS.md — emeld
 
-Single-file Emacs Lisp package (Meld-Inspired Local Diff).
+Multi-file Emacs Lisp package (Meld-Inspired Local Diff).
 
 ## Commands
 
 ```sh
-# Run all tests
+# Run all tests (requires the repo root on load-path; the test file adds it)
 emacs --batch -l emeld-tests.el
 
-# Interactive usage
+# Byte-compile all modules (must be warning-free)
+emacs --batch -L . -f batch-byte-compile emeld-core.el emeld-git.el emeld-sidebar.el emeld.el
+
+# Interactive usage (-L . so the parts resolve)
 emacs -Q -L . -l emeld.el --eval '(emeld-diff "dir1" "dir2")'
 emacs -Q -L . -l emeld.el --eval '(emeld-git-diff default-directory "HEAD~3" "HEAD")'
 ```
 
 ## Structure
 
-- `emeld.el` — the package. `M-x emeld-diff` (pick two dirs), `M-x emeld-diff-dwim` (guesses from Dired buffers), `M-x emeld-git-diff` (compare two git revisions, or a rev vs the working tree / index — same tree, content from `git show`), `M-x emeld-git-step-history` (step commit-by-commit through history, `,` older / `.` newer), or `M-x emeld-sidebar` (treemacs-style single-tree file explorer; see below).
-- `emeld-tests.el` — `ert` tests. Loads `emeld.el` via `(load-file "emeld.el")` — run from repo root.
+- `emeld.el` — thin umbrella: `(require 'emeld-core/-git/-sidebar)`, `(provide 'emeld)`. `(require 'emeld)` loads the whole package.
+- `emeld-core.el` — the shared core: `emeld-node` struct, buffer-local state (incl. `emeld--git-*` mode vars), faces, async scan, filtering/gitignore, render, navigation, `emeld-mode`, file ops, presets, benchmarking, transient, and git *utilities* shared by the others (`emeld--git-rev-label`, `emeld--git-toplevel`, `emeld--git-work-tree-p`, `emeld--git-rev-args`). `(provide 'emeld-core)`.
+- `emeld-git.el` — `(require 'emeld-core)`. Git-diff feature: `M-x emeld-git-diff` (two revisions, or a rev vs working tree / index), `M-x emeld-git-step-history` (`,` older / `.` newer), history/commit/blob helpers, `emeld--git-action`/`-soft-diff`. `(provide 'emeld-git)`.
+- `emeld-sidebar.el` — `(require 'emeld-core)`. `M-x emeld-sidebar` (treemacs-style single-tree explorer; see below). `(provide 'emeld-sidebar)`.
+- `emeld-tests.el` — `ert` tests. Adds the repo root to `load-path` and `(require 'emeld)` — run from repo root.
 - No Makefile, no CI, no package manager config.
+
+**Dependency rule:** core depends on nothing in the package; feature files require core. Core's dispatch into git (from `emeld-refresh`, file ops, render, keymap/transient) is covered by a `declare-function` block at the top of `emeld-core.el` — extend it when core must call a new git function.
 
 ## Key conventions
 

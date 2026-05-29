@@ -6,6 +6,10 @@
 - Inline diff peek: ~TAB~ on a file expands a quick unified diff underneath the row (Magit-style), keeping point in the tree; ~TAB~ again collapses it.  Works in both directory and git mode (the git diff between the two revisions), faced with the standard ~diff-*~ faces.  ~TAB~ on a directory still cycles its subtree.
 - Git history stepping reaches the working tree: when the newest commit in the walk is ~HEAD~, pressing ~.~ once past it compares that commit against the working tree (uncommitted changes).  The header line shows ~[hist WT/N]~, so a single walk spans from any commit up to your uncommitted work.
 - A revision that points at the current ~HEAD~ is labelled ~HEAD (SHA)~ rather than a bare abbreviated SHA, in the pane headers and the ~[git OLD→NEW]~ header line (HEAD is resolved once per scan and cached).
+** Changed
+- The package is now split across files instead of one large ~emeld.el~: ~emeld-core.el~ (shared core), ~emeld-git.el~ (git revision comparison + history) and ~emeld-sidebar.el~ (file-tree sidebar), with ~emeld.el~ a thin umbrella that ~require~s them all.  ~(require 'emeld)~ still loads everything, so user configs are unaffected — just keep all the ~.el~ files on the load path.
+** Removed
+- Internal cleanup: removed dead legacy code left over from before the async ~diff -rq~ scan (a pure-Elisp file-comparison path and a duplicate relative-path helper).  The ~emeld-max-content-size~ defcustom went with it — it had no effect since content comparison moved to external ~diff~.  No user-visible behaviour changes; the byte-compile is now warning-free.
 
 * [0.42.0] - 2026-05-28
 ** Added

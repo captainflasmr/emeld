@@ -1,6 +1,10 @@
 ;;; emeld-tests.el --- Tests for emeld.el -*- lexical-binding: t; -*-
 
-(load-file "emeld.el")
+;; The package is now multi-file (emeld-core/-git/-sidebar, umbrella emeld.el).
+;; Put the repo root on `load-path' so the parts resolve, then load the whole.
+(add-to-list 'load-path (file-name-directory (or load-file-name buffer-file-name
+                                                  default-directory)))
+(require 'emeld)
 (require 'ert)
 
 (ert-deftest emeld-glob-matching ()
