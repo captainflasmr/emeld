@@ -144,6 +144,28 @@ Requires the `git' executable; has no effect outside a work tree."
   :type 'boolean
   :group 'emeld)
 
+(defcustom emeld-ignore-whitespace nil
+  "How `diff'/`git diff' should treat whitespace when comparing file content.
+nil       compare exactly (default);
+`change'  ignore changes in the amount of whitespace (`diff -b');
+`all'     ignore all whitespace (`diff -w').
+Applies to the difference scan, the identical-file merge, the quick and
+inline diffs, and (in git mode) `git diff' — both tools accept these
+flags.  Because it changes which files count as differing, toggling it
+re-runs the comparison rather than just re-rendering."
+  :type '(choice (const :tag "Compare exactly" nil)
+                 (const :tag "Ignore whitespace amount (-b)" change)
+                 (const :tag "Ignore all whitespace (-w)" all))
+  :group 'emeld)
+
+(defun emeld--whitespace-args ()
+  "Return the whitespace diff flags for `emeld-ignore-whitespace'.
+The returned list is valid for both `diff' and `git diff'."
+  (pcase emeld-ignore-whitespace
+    ('change '("-b"))
+    ('all '("-w"))
+    (_ nil)))
+
 (defcustom emeld-copy-method 'auto
   "How `emeld-copy' transfers files and directories between the two sides.
 - `auto'    : use rsync when `emeld-rsync-command' is found on `exec-path',
@@ -1121,6 +1143,7 @@ Uses a process filter to stream-parse output incrementally."
          ;; `diff -rqs' report — and `emeld--entries-to-nodes-progressive'
          ;; assemble — every identical file up front.
          (command `("diff" "-rq"
+                    ,@(emeld--whitespace-args)
                     ,@excludes
                     ,(expand-file-name emeld--left-root)
                     ,(expand-file-name emeld--right-root)))
@@ -1205,6 +1228,7 @@ Return a list of (NAME . KIND); KIND is `different', `left-only',
 `.gitignore' via the same `--exclude' args as a full scan.  Subdirectories
 present on both sides are reported (as `common-dir') but not descended."
   (let ((args (append '("-q")
+                      (emeld--whitespace-args)
                       (emeld--diff-exclude-args)
                       (list (expand-file-name left-sub)
                             (expand-file-name right-sub))))
@@ -1712,7 +1736,7 @@ shared `emeld--process-same-files-worker'."
            (left emeld--left-root)
            (right emeld--right-root)
            (root emeld--root-node)
-           (command `("diff" "-rqs" ,@excludes
+           (command `("diff" "-rqs" ,@(emeld--whitespace-args) ,@excludes
                       ,(expand-file-name left)
                       ,(expand-file-name right)))
            (proc (make-process
@@ -2242,6 +2266,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "z")   #'emeld-toggle-compact-tree)
     (define-key map (kbd "s")   #'emeld-toggle-show-strikethrough)
     (define-key map (kbd "G")   #'emeld-toggle-gitignore)
+    (define-key map (kbd "i")   #'emeld-toggle-ignore-whitespace)
     (define-key map (kbd "F")   #'emeld-toggle-show-files)
     (define-key map (kbd ">")   #'emeld-increase-indent)
     (define-key map (kbd "<")   #'emeld-decrease-indent)
@@ -2261,6 +2286,7 @@ Mimics Meld's display of missing files."
   (make-local-variable 'emeld-show-strikethrough)
   (make-local-variable 'emeld-show-files)
   (make-local-variable 'emeld-respect-gitignore)
+  (make-local-variable 'emeld-ignore-whitespace)
   (setq-local revert-buffer-function #'emeld-refresh)
   (add-hook 'kill-buffer-hook #'emeld--stop-scan nil t)
   (emeld--update-header-line))
@@ -2483,6 +2509,23 @@ re-runs the comparison rather than just re-rendering."
   (interactive)
   (setq emeld-respect-gitignore (not emeld-respect-gitignore))
   (message "Respect .gitignore: %s" (if emeld-respect-gitignore "on" "off"))
+  (emeld-refresh))
+
+(defun emeld-toggle-ignore-whitespace ()
+  "Cycle `emeld-ignore-whitespace' (off → amount → all → off), then rescan.
+Like `emeld-toggle-gitignore' this changes which files count as differing,
+so it re-runs the comparison rather than just re-rendering."
+  (interactive)
+  (setq emeld-ignore-whitespace
+        (pcase emeld-ignore-whitespace
+          ('nil 'change)
+          ('change 'all)
+          (_ nil)))
+  (message "Ignore whitespace: %s"
+           (pcase emeld-ignore-whitespace
+             ('change "amount (-b)")
+             ('all "all (-w)")
+             (_ "off")))
   (emeld-refresh))
 
 (defun emeld-toggle-expand ()
@@ -2746,6 +2789,7 @@ same `--exclude' args as a full scan.  Runs `diff -rqs' when
 `emeld-show-same' is on so identical files are included, else `diff -rq'.
 Synchronous: the diff is scoped to one subtree, so it is bounded."
   (let ((args (append (list (if emeld-show-same "-rqs" "-rq"))
+                      (emeld--whitespace-args)
                       (emeld--diff-exclude-args)
                       (list (expand-file-name left-sub)
                             (expand-file-name right-sub))))
@@ -3034,7 +3078,8 @@ Identical files have no diff."
     (let* ((repo emeld--git-repo)
            (rel (emeld--node-relpath node))
            (revargs (emeld--git-rev-args emeld--git-left-rev emeld--git-right-rev))
-           (args (append (list "diff" "--no-color") revargs (list "--" rel))))
+           (args (append (list "diff" "--no-color") (emeld--whitespace-args)
+                         revargs (list "--" rel))))
       (with-temp-buffer
         (let ((default-directory repo))
           (apply #'process-file "git" nil t nil args))
@@ -3630,6 +3675,8 @@ empty and be mistaken for \"no differences\"."
    (emeld--toggle-indicator "T" emeld-show-tree-lines)
    (emeld--toggle-indicator "s" emeld-show-strikethrough)
    (emeld--toggle-indicator "G" emeld-respect-gitignore)
+   (when emeld-ignore-whitespace
+     (if (eq emeld-ignore-whitespace 'all) " -w" " -b"))
    (unless emeld-show-files
      (propertize " ⚠ files hidden" 'face 'warning))))
 
@@ -3845,13 +3892,14 @@ makes it match the left."
          (status (emeld-node-diff-status node))
          (rel (emeld--node-relpath node)))
     (with-temp-buffer
-      (cond
-       ((eq status 'different)
-        (call-process "diff" nil t nil "-u" right left))
-       ((eq status 'left-only)
-        (call-process "diff" nil t nil "-u" "/dev/null" left))
-       ((eq status 'right-only)
-        (call-process "diff" nil t nil "-u" right "/dev/null")))
+      (let ((ws (emeld--whitespace-args)))
+        (cond
+         ((eq status 'different)
+          (apply #'call-process "diff" nil t nil "-u" (append ws (list right left))))
+         ((eq status 'left-only)
+          (apply #'call-process "diff" nil t nil "-u" (append ws (list "/dev/null" left))))
+         ((eq status 'right-only)
+          (apply #'call-process "diff" nil t nil "-u" (append ws (list right "/dev/null"))))))
       (goto-char (point-min))
       (when (re-search-forward "^--- .*" nil t)
         (replace-match (concat "--- a/" rel)))
@@ -4007,6 +4055,12 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
      (lambda () (interactive) (emeld-toggle-show-strikethrough)) :transient t)
     ("G" (lambda () (if emeld-respect-gitignore "[x] gitignore" "[ ] gitignore"))
      (lambda () (interactive) (emeld-toggle-gitignore)))
+    ("i" (lambda ()
+           (pcase emeld-ignore-whitespace
+             ('change "[-b] ignore ws (amount)")
+             ('all "[-w] ignore ws (all)")
+             (_ "[ ] ignore ws")))
+     (lambda () (interactive) (emeld-toggle-ignore-whitespace)))
     ("c" (lambda () (if emeld--git-commit-expanded "[x] commit msg" "[ ] commit msg"))
      (lambda () (interactive) (emeld-git-toggle-commit-message)) :transient t
      :if (lambda () emeld--git-mode))]

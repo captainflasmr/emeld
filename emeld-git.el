@@ -210,6 +210,7 @@ reduced to its SHA)."
   (append (list "git" "-C" (directory-file-name emeld--git-repo)
                 "diff" "--name-status" "-z" "--no-color"
                 "--find-renames" "--find-copies")
+          (emeld--whitespace-args)
           (emeld--git-rev-args emeld--git-left-rev emeld--git-right-rev)))
 
 (defun emeld--git-history-list (start limit)
@@ -481,7 +482,7 @@ Uses the buffer's revision pair and shows the result in a `diff-mode'
 buffer.  WHAT labels the echo-area message."
   (let* ((repo emeld--git-repo)
          (revargs (emeld--git-rev-args emeld--git-left-rev emeld--git-right-rev))
-         (args (append (list "diff" "--no-color") revargs
+         (args (append (list "diff" "--no-color") (emeld--whitespace-args) revargs
                        (and relpath (list "--" relpath))))
          (buf (get-buffer-create "*emeld-git-diff*")))
     (with-current-buffer buf
