@@ -1,7 +1,7 @@
 ;;; emeld-core.el --- Meld-Inspired Local Diff: shared core -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.43.0
+;; Version: 0.44.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -1995,6 +1995,7 @@ GROUP is the name of a group defined in `emeld-filter-groups'."
         (goto-char (point-min))))
     (pop-to-buffer "*emeld filter groups*")))
 
+;;;###autoload
 (defun emeld-diff (dir1 dir2 &optional depth)
   "Compare DIR1 and DIR2 side-by-side.
 With a prefix argument, limit the initial scan to DEPTH directory levels
@@ -2287,6 +2288,13 @@ Mimics Meld's display of missing files."
   (make-local-variable 'emeld-show-files)
   (make-local-variable 'emeld-respect-gitignore)
   (make-local-variable 'emeld-ignore-whitespace)
+  ;; Layout tweaks are per-comparison too, so adjusting tree-lines, the
+  ;; compact layout, indentation or the column split in one buffer does not
+  ;; leak into other emeld buffers or the global defaults.
+  (make-local-variable 'emeld-show-tree-lines)
+  (make-local-variable 'emeld-compact-tree)
+  (make-local-variable 'emeld-indent-offset)
+  (make-local-variable 'emeld-column-ratio)
   (setq-local revert-buffer-function #'emeld-refresh)
   (add-hook 'kill-buffer-hook #'emeld--stop-scan nil t)
   (emeld--update-header-line))
@@ -2747,12 +2755,15 @@ or after resizing the window or frame.  For a fresh comparison use
            emeld-indent-offset emeld-column-ratio (- 100 emeld-column-ratio)
            (if emeld-compact-tree "on" "off")))
 
-(defun emeld-refresh ()
+(defun emeld-refresh (&optional _ignore-auto _noconfirm)
   "Refresh the comparison asynchronously.
 Uses `make-process' to run `diff -rq' as an OS-level async process, so
 Emacs stays fully responsive during the scan.  When `emeld--scan-max-depth'
 is set (a depth-limited `emeld-diff'), re-runs the bounded level-by-level
-scan instead, preserving the shallow view."
+scan instead, preserving the shallow view.
+
+The optional arguments are ignored; they exist so this can serve as the
+buffer's `revert-buffer-function', which is called with two arguments."
   (interactive)
   (emeld--stop-scan)
   (setq emeld--status-phase 'running-diff)

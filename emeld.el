@@ -1,7 +1,12 @@
 ;;; emeld.el --- Meld-Inspired Local Diff -*- lexical-binding: t; -*-
 
+;; Author: James Dyer <captainflasmr@gmail.com>
+;; Maintainer: James Dyer <captainflasmr@gmail.com>
 ;; Keywords: files, tools
-;; Version: 0.43.0
+;; Version: 0.44.0
+;; Package-Version: 0.44.0
+;; Package-Requires: ((emacs "27.1") (transient "0.3.0"))
+;; URL: https://github.com/captainflasmr/emeld
 
 ;;; Commentary:
 ;; A side-by-side directory comparison tool inspired by Meld.

@@ -1,5 +1,12 @@
 #+TITLE: Changelog for Emeld
 
+* [0.44.0] - 2026-06-02
+** Fixed
+- ~revert-buffer~ (and ~auto-revert~) in an emeld comparison buffer no longer errors with "Wrong number of arguments".  ~emeld-refresh~, which serves as the buffer's ~revert-buffer-function~, now accepts the two arguments ~revert-buffer~ passes it (they are ignored); plain ~g~ / ~M-x emeld-rescan~ are unaffected.
+** Changed
+- Layout options are now buffer-local: ~emeld-show-tree-lines~, ~emeld-compact-tree~, ~emeld-indent-offset~ and ~emeld-column-ratio~ are made buffer-local in ~emeld-mode~ alongside the other view toggles.  Tweaking tree-lines, the compact layout, indentation (~>~/~<~) or the column split (~}~/~{~) in one comparison no longer leaks into other emeld buffers or the global defaults.
+- Packaging: ~emeld-diff~ is now autoloaded (matching ~emeld-git-diff~, ~emeld-diff-dwim~, ~emeld-load-preset~ and ~emeld-sidebar~), and ~emeld.el~ now declares full package metadata — ~Package-Requires~ (~(emacs "27.1") (transient "0.3.0")~), ~Author~, ~Maintainer~, ~URL~ and ~Package-Version~ — so the package installs cleanly via ~package.el~/MELPA and the external ~transient~ dependency is recorded.
+
 * [0.43.0] - 2026-05-29
 ** Added
 - ~emeld-sidebar~: a treemacs-style file-tree sidebar.  It docks a dedicated side window (~emeld-sidebar-position~, ~emeld-sidebar-width~) showing a single directory tree rooted at the current file's project (git toplevel → ~project.el~ → the file's directory; a prefix arg prompts for the root), reusing the same node model, expand/collapse and tree rendering as the diff view.  Children load lazily per directory; dotfiles are hidden (toggle with ~h~), and filter groups active by default are honoured.  ~RET~ / ~f~ / ~v~ open a file (or toggle a directory) in the main window, ~TAB~ expands/collapses, ~o~ opens without leaving the sidebar, ~g~ refreshes, ~[~ collapses all, ~.~ reveals the main window's file, ~F~ toggles follow-mode, ~q~ closes it.  ~emeld-sidebar-follow-mode~ (a global minor mode, enabled with the sidebar when ~emeld-sidebar-follow~ is non-nil) reveals and highlights the active file as you switch buffers.
