@@ -253,6 +253,8 @@ When non-nil, directories below this depth are left unscanned and marked,
 to be drilled into with `\\[universal-argument] g' (`emeld-refresh-subdir').")
 (defvar-local emeld--scan-process nil
   "Currently running `make-process' for the async diff scan.")
+(defvar-local emeld--copy-proc nil
+  "In-flight async rsync process for `emeld-copy', or nil when idle.")
 (defvar-local emeld--scan-diff-lines nil
   "Diff status lines from `diff -rq' output.")
 (defvar-local emeld--scan-buf nil
@@ -928,15 +930,21 @@ first, allowing identical/same branches to populate quietly afterward."
     ;; Re-sync hash indicators if physical backfill triggered
     (maphash (lambda (k _) (puthash k t dir-names)) dirs)
     
-    (let ((tail files))
+    ;; Index the file nodes built above by name for O(1) dedup, so the second
+    ;; pass (which re-walks `files', possibly grown by the backfill) does not do
+    ;; an O(n) `cl-find-if' per entry — that was O(n^2) for a wide directory.
+    (let ((existing-names (make-hash-table :test 'equal))
+          (tail files))
+      (dolist (n file-nodes) (puthash (emeld-node-name n) t existing-names))
       (while tail
         (let ((entry (car tail)))
           (let* ((path (car entry))
                  (status (cdr entry)))
             (unless (or (string-empty-p path) (gethash path dir-names)
-                        (cl-find-if (lambda (n) (string= (emeld-node-name n) path)) file-nodes))
+                        (gethash path existing-names))
               (let ((sub-rel (if (string-empty-p prefix) path (concat prefix "/" path))))
-                (push (emeld--make-file-node sub-rel parent status) file-nodes)))))
+                (push (emeld--make-file-node sub-rel parent status) file-nodes)
+                (puthash path t existing-names)))))
         (setq tail (cdr tail))))
 
     ;; 4. Build immediate subdirectory structures
@@ -1189,20 +1197,29 @@ Uses a process filter to stream-parse output incrementally."
 
 (defun emeld--parse-diff-line (line left-dir right-dir)
   "Parse a `diff -rq' output LINE into (REL-PATH . STATUS) or nil.
-Explicitly handles and strips single quotes added to paths by the shell."
+Explicitly handles and strips single quotes added to paths by the shell.
+The boundary between the two paths in a \"Files A and B differ\" line is
+anchored on the known RIGHT-DIR prefix (the literal directory passed to
+`diff') rather than a greedy \" and \", so a filename that itself contains
+\" and \" no longer splits the path at the wrong place."
   (cl-flet ((clean-quotes (path)
               (if (and (string-prefix-p "'" path)
                        (string-suffix-p "'" path))
                   (substring path 1 (1- (length path)))
                 path)))
-    (cond
-     ((string-match "^Files \\(.+\\) and .+ differ$" line)
-      (let ((rel (emeld--strip-dir-prefix (clean-quotes (match-string 1 line)) left-dir)))
-        (cons (clean-quotes rel) 'different)))
-     ((string-match "^Files \\(.+\\) and .+ are identical$" line)
-      (let ((rel (emeld--strip-dir-prefix (clean-quotes (match-string 1 line)) left-dir)))
-        (cons (clean-quotes rel) 'same)))
-     ((string-match "^Only in \\(.+\\): \\(.+\\)$" line)
+    ;; The right path always begins with RIGHT-DIR (optionally single-quoted),
+    ;; so use that as the split anchor instead of the first " and ".
+    (let ((sep (concat " and '?"
+                       (regexp-quote (file-name-as-directory
+                                      (expand-file-name right-dir))))))
+      (cond
+       ((string-match (concat "^Files \\(.+\\)" sep ".* differ$") line)
+        (let ((rel (emeld--strip-dir-prefix (clean-quotes (match-string 1 line)) left-dir)))
+          (cons (clean-quotes rel) 'different)))
+       ((string-match (concat "^Files \\(.+\\)" sep ".* are identical$") line)
+        (let ((rel (emeld--strip-dir-prefix (clean-quotes (match-string 1 line)) left-dir)))
+          (cons (clean-quotes rel) 'same)))
+       ((string-match "^Only in \\(.+\\): \\(.+\\)$" line)
       (let* ((dir-part (clean-quotes (match-string 1 line)))
              (name (clean-quotes (match-string 2 line)))
              (full-path (concat (file-name-as-directory dir-part) name))
@@ -1213,7 +1230,7 @@ Explicitly handles and strips single quotes added to paths by the shell."
              (side (if (string-prefix-p left-prefix full-path)
                        'left-only 'right-only)))
         (cons (clean-quotes rel) side)))
-     (t nil))))
+       (t nil)))))
 
 (defun emeld--prefix-to-depth (arg)
   "Convert a raw prefix ARG to a scan depth (>=1), or nil for a full scan."
@@ -2319,7 +2336,7 @@ If the current side is empty but the other has a file, snap to it."
     (let ((start-on-side (point)))
       (while (and (< (point) (line-end-position))
                   (< (point) limit)
-                  (looking-at "[]* └├│─\\[+-]"))
+                  (looking-at "[]* └├│─[+-]"))
         (forward-char 1))
 
       ;; If we reached the limit on the left side, back up slightly to stay on the left
@@ -2338,7 +2355,7 @@ If the current side is empty but the other has a file, snap to it."
             (let ((new-limit (if on-right (+ (line-beginning-position) width) (line-end-position))))
               (while (and (< (point) (line-end-position))
                           (< (point) new-limit)
-                          (looking-at "[]* └├│─\\[+-]"))
+                          (looking-at "[]* └├│─[+-]"))
                 (forward-char 1)))))))))
 
 (defun emeld--change-status-p (node)
@@ -2702,10 +2719,15 @@ bounded scan, the identical-files merge) sees a newer generation and aborts."
   (when (and emeld--scan-process
              (process-live-p emeld--scan-process))
     (delete-process emeld--scan-process))
+  ;; An async rsync copy is independent of the scan, but a rescan or buffer
+  ;; kill should not leave it running with a sentinel pointing at a stale tree.
+  (when (and emeld--copy-proc (process-live-p emeld--copy-proc))
+    (delete-process emeld--copy-proc))
   (dolist (p emeld--gitignore-procs)
     (when (process-live-p p) (delete-process p)))
   (setq emeld--gitignore-procs nil
         emeld--scan-process nil
+        emeld--copy-proc nil
         emeld--scan-diff-lines nil
         emeld--scan-buf nil))
 
@@ -3251,6 +3273,30 @@ Drops the entry entirely when no sides remain marked."
         (puthash rel sides emeld--marked-paths)
       (remhash rel emeld--marked-paths))))
 
+(defun emeld--update-line-mark (node side marked)
+  "Rewrite NODE's SIDE mark glyph on the current line in place.
+SIDE is `left' or `right'; MARKED non-nil shows `*', nil clears it.  Locates
+the cell by its `emeld-mark-cell' text property (set in `emeld--render-nodes'),
+so it is robust to column width and wide-character padding.  Lets a single
+mark/unmark avoid a full `emeld--render' of the whole tree."
+  (save-excursion
+    (beginning-of-line)
+    (let ((end (line-end-position)) (pos nil))
+      (while (and (not pos) (< (point) end))
+        (if (eq (get-text-property (point) 'emeld-mark-cell) side)
+            (setq pos (point))
+          (goto-char (or (next-single-property-change (point) 'emeld-mark-cell nil end)
+                         end))))
+      (when pos
+        (let ((inhibit-read-only t))
+          (delete-region pos (1+ pos))
+          (goto-char pos)
+          (insert (propertize (if marked "*" " ")
+                              'face (and marked 'font-lock-keyword-face)
+                              'emeld-mark-cell side
+                              'emeld-node node
+                              'mouse-face 'highlight)))))))
+
 (defun emeld--node-side-at-point ()
   "Return (NODE . SIDE) for the file at point, SIDE being `left' or `right'.
 The side is chosen by the column; if that side has no file but the other
@@ -3277,7 +3323,8 @@ the next node, staying on the same side where possible."
   (let* ((ns (emeld--node-side-at-point))
          (side (cdr ns)))
     (emeld--set-mark (emeld--node-relpath (car ns)) side t)
-    (emeld--render)
+    ;; Update just this line's glyph rather than re-rendering the whole tree.
+    (emeld--update-line-mark (car ns) side t)
     (forward-line 1)
     (emeld--move-to-node-name (eq side 'right))))
 
@@ -3288,7 +3335,8 @@ Point then advances to the next node, staying on the same side where possible."
   (let* ((ns (emeld--node-side-at-point))
          (side (cdr ns)))
     (emeld--set-mark (emeld--node-relpath (car ns)) side nil)
-    (emeld--render)
+    ;; Update just this line's glyph rather than re-rendering the whole tree.
+    (emeld--update-line-mark (car ns) side nil)
     (forward-line 1)
     (emeld--move-to-node-name (eq side 'right))))
 
@@ -3422,9 +3470,6 @@ directories."
           (copy-directory source dest t t))
       (copy-file source dest t))
     (message "Copied %s" (file-name-nondirectory (directory-file-name source)))))
-
-(defvar-local emeld--copy-proc nil
-  "In-flight async rsync process for `emeld-copy', or nil when idle.")
 
 (defun emeld--copy-async (jobs)
   "Copy JOBS via rsync, one at a time, asynchronously.
@@ -3612,49 +3657,42 @@ point is deleted from the current side (the column point is in)."
   "Swap the left and right comparison directories and flip all node paths.
 In git mode the two revisions are swapped and the comparison re-scanned."
   (interactive)
-  (when emeld--git-mode
-    (cl-rotatef emeld--git-left-rev emeld--git-right-rev)
-    (setf (emeld-node-name emeld--root-node)
-          (emeld--git-rev-label emeld--git-left-rev)
-          (emeld-node-name-right emeld--root-node)
-          (emeld--git-rev-label emeld--git-right-rev))
-    (emeld-refresh)
-    (message "Swapped revisions: %s <-> %s"
-             (emeld--git-rev-label emeld--git-left-rev)
-             (emeld--git-rev-label emeld--git-right-rev)))
-  (unless emeld--git-mode
-  (unless (and emeld--left-root emeld--right-root)
-    (user-error "No directories loaded to swap"))
-
-  ;; 1. Swap the root directory variables
-  (let ((old-left emeld--left-root))
-    (setq emeld--left-root emeld--right-root)
-    (setq emeld--right-root old-left))
-
-  ;; 2. Recursively swap paths and flip side-exclusive statuses in the tree
-  (cl-labels ((swap-node (node)
-                (when node
-                  ;; Swap left and right paths
-                  (let ((old-l-path (emeld-node-left-path node))
-                        (old-r-path (emeld-node-right-path node)))
-                    (setf (emeld-node-left-path node) old-r-path)
-                    (setf (emeld-node-right-path node) old-l-path))
-                  ;; Flip side-exclusive diff statuses
-                  (cl-case (emeld-node-diff-status node)
-                    (left-only (setf (emeld-node-diff-status node) 'right-only))
-                    (right-only (setf (emeld-node-diff-status node) 'left-only)))
-                  ;; Recurse into children
-                  (mapc #'swap-node (emeld-node-children node)))))
-    ;; Swap the root node's display names too
-    (let ((old-name (emeld-node-name emeld--root-node))
-          (old-name-right (emeld-node-name-right emeld--root-node)))
-      (setf (emeld-node-name emeld--root-node) (or old-name-right old-name))
-      (setf (emeld-node-name-right emeld--root-node) old-name))
-    (swap-node emeld--root-node))
-
-  ;; 3. Redraw
-  (emeld--render)
-  (message "Swapped left and right panes.")))
+  (if emeld--git-mode
+      (progn
+        (cl-rotatef emeld--git-left-rev emeld--git-right-rev)
+        (setf (emeld-node-name emeld--root-node)
+              (emeld--git-rev-label emeld--git-left-rev)
+              (emeld-node-name-right emeld--root-node)
+              (emeld--git-rev-label emeld--git-right-rev))
+        (emeld-refresh)
+        (message "Swapped revisions: %s <-> %s"
+                 (emeld--git-rev-label emeld--git-left-rev)
+                 (emeld--git-rev-label emeld--git-right-rev)))
+    (unless (and emeld--left-root emeld--right-root)
+      (user-error "No directories loaded to swap"))
+    ;; 1. Swap the root directory variables
+    (cl-rotatef emeld--left-root emeld--right-root)
+    ;; 2. Recursively swap paths and flip side-exclusive statuses in the tree
+    (cl-labels ((swap-node (node)
+                  (when node
+                    ;; Swap left and right paths
+                    (cl-rotatef (emeld-node-left-path node)
+                                (emeld-node-right-path node))
+                    ;; Flip side-exclusive diff statuses
+                    (cl-case (emeld-node-diff-status node)
+                      (left-only (setf (emeld-node-diff-status node) 'right-only))
+                      (right-only (setf (emeld-node-diff-status node) 'left-only)))
+                    ;; Recurse into children
+                    (mapc #'swap-node (emeld-node-children node)))))
+      ;; Swap the root node's display names too
+      (let ((old-name (emeld-node-name emeld--root-node))
+            (old-name-right (emeld-node-name-right emeld--root-node)))
+        (setf (emeld-node-name emeld--root-node) (or old-name-right old-name))
+        (setf (emeld-node-name-right emeld--root-node) old-name))
+      (swap-node emeld--root-node))
+    ;; 3. Redraw
+    (emeld--render)
+    (message "Swapped left and right panes.")))
 
 (defun emeld--toggle-indicator (label enabled)
   "Return a string for toggle LABEL showing ENABLED state.
@@ -3761,6 +3799,13 @@ reflects the live scan counters without needing to be re-installed."
   "Return the emeld-node text-property at point."
   (get-text-property (point) 'emeld-node))
 
+(defvar emeld--render-seek-path nil
+  "Relpath `emeld--render' wants point to land on, bound during a render.")
+(defvar emeld--render-seek-is-dir nil
+  "Whether `emeld--render-seek-path' names a directory node.")
+(defvar emeld--render-seek-pos nil
+  "Line start of the matched seek node, set by `emeld--render-nodes'.")
+
 (defun emeld--render ()
   "Render the current visible tree into the comparison buffer, preserving point."
   (let* ((inhibit-read-only t)
@@ -3819,38 +3864,22 @@ reflects the live scan counters without needing to be re-installed."
       (when emeld--git-mode (emeld--insert-git-commit-block))
       (insert (make-string (* 2 emeld--column-width) ?-) "\n")
       ;; Root node (collapsible) — draws even with no children so the
-      ;; directory structure stays visible for visual reference.
-      (when emeld--root-node
-        (emeld--render-nodes (list emeld--root-node) "" emeld--column-width))
-      
-      ;; Restore point based on path matching or structural layout line
-      (or (and target-path
-               (emeld--move-to-node-by-path target-path target-is-dir current-col))
-          (progn
-            (goto-char (point-min))
-            (forward-line (1- (min fallback-line (count-lines (point-min) (point-max)))))))))
+      ;; directory structure stays visible for visual reference.  The seek
+      ;; vars let the render itself note where the target node landed (O3).
+      (let ((emeld--render-seek-path target-path)
+            (emeld--render-seek-is-dir target-is-dir)
+            (emeld--render-seek-pos nil))
+        (when emeld--root-node
+          (emeld--render-nodes (list emeld--root-node) "" emeld--column-width))
+        ;; Restore point: jump to the node matched during render, else the
+        ;; structural fallback line.
+        (if (and target-path emeld--render-seek-pos)
+            (progn (goto-char emeld--render-seek-pos)
+                   (move-to-column current-col))
+          (goto-char (point-min))
+          (forward-line (1- (min fallback-line (count-lines (point-min) (point-max)))))))))
     
     (set-buffer-modified-p nil)))
-
-(defun emeld--move-to-node-by-path (rel-path is-dir target-col)
-  "Search the buffer to position point on the node matching REL-PATH.
-Returns t if successfully positioned, otherwise nil."
-  (let ((found nil))
-    (save-excursion
-      (goto-char (point-min))
-      (while (and (not found) (not (eobp)))
-        (let ((node (emeld--current-node)))
-          (when (and node
-                     (string= (emeld--node-relpath node) rel-path)
-                     (eq (emeld-node-is-dir node) is-dir))
-            (setq found (point))))
-        (forward-line 1)))
-    (if found
-        (progn
-          (goto-char found)
-          (move-to-column target-col)
-          t)
-      nil)))
 
 (defun emeld--node-visible-p (node)
   "Determine if NODE should be visible based on status and structure filters.
@@ -3936,8 +3965,11 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
         (write-region nil nil outfile nil 'silent)
         (message "Wrote patch with %d change(s) to %s" (length nodes) outfile)))))
 
-(defun emeld--render-nodes (nodes indent-prefix column-width)
-  "Render a list of NODES with INDENT-PREFIX and COLUMN-WIDTH."
+(defun emeld--render-nodes (nodes indent-prefix column-width &optional rel-prefix)
+  "Render a list of NODES with INDENT-PREFIX and COLUMN-WIDTH.
+REL-PATH is threaded down as REL-PREFIX (the parent's relative path) so each
+node's relpath is built incrementally rather than walked up to the root per
+node — see `emeld--node-relpath' for the equivalent slow form."
   (let ((count (length nodes))
         (idx 0))
     (dolist (node nodes)
@@ -3965,11 +3997,32 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
                                 (propertize " …" 'face 'shadow)
                               "")))
           (let* ((start (point))
-                 (rel (emeld--node-relpath node))
-                 (left-mark (if (emeld--marked-side-p rel 'left)
-                                (propertize "*" 'face 'font-lock-keyword-face) " "))
-                 (right-mark (if (emeld--marked-side-p rel 'right)
-                                 (propertize "*" 'face 'font-lock-keyword-face) " ")))
+                 ;; Build relpath from the parent's (O2) instead of walking to
+                 ;; the root for every node on every render.
+                 (rel (if (emeld-node-parent node)
+                          (if (string-empty-p (or rel-prefix ""))
+                              (emeld-node-name node)
+                            (concat rel-prefix "/" (emeld-node-name node)))
+                        ""))
+                 (lmarked (emeld--marked-side-p rel 'left))
+                 (rmarked (emeld--marked-side-p rel 'right))
+                 ;; Tag each mark cell with `emeld-mark-cell' so a single
+                 ;; mark/unmark can rewrite just that glyph (`emeld--update-line-mark')
+                 ;; instead of re-rendering the whole tree.
+                 (left-mark (propertize (if lmarked "*" " ")
+                                        'face (and lmarked 'font-lock-keyword-face)
+                                        'emeld-mark-cell 'left))
+                 (right-mark (propertize (if rmarked "*" " ")
+                                         'face (and rmarked 'font-lock-keyword-face)
+                                         'emeld-mark-cell 'right)))
+            ;; Record this node's line start when it is the point-restore target
+            ;; (O3), so the caller jumps straight here after the render rather
+            ;; than rescanning every line.
+            (when (and emeld--render-seek-path
+                       (null emeld--render-seek-pos)
+                       (eq (emeld-node-is-dir node) emeld--render-seek-is-dir)
+                       (string= rel emeld--render-seek-path))
+              (setq emeld--render-seek-pos start))
             ;; Left mark column
             (insert left-mark " ")
             ;; Left Side
@@ -4042,7 +4095,7 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
                                                               emeld-indent-offset)
                                                             ?\s))
                                      (concat indent-prefix (make-string emeld-indent-offset ?\s)))
-                                   column-width))))))))
+                                   column-width rel))))))))
 
 (defclass emeld-dynamic-suffix (transient-suffix)
   ((dynamic-description :initarg :dynamic-description :initform nil))

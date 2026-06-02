@@ -3,9 +3,15 @@
 * [0.44.0] - 2026-06-02
 ** Fixed
 - ~revert-buffer~ (and ~auto-revert~) in an emeld comparison buffer no longer errors with "Wrong number of arguments".  ~emeld-refresh~, which serves as the buffer's ~revert-buffer-function~, now accepts the two arguments ~revert-buffer~ passes it (they are ignored); plain ~g~ / ~M-x emeld-rescan~ are unaffected.
+- A file whose name contains " and " (e.g. ~rock and roll.txt~) is no longer mis-parsed from ~diff -rq~ output: the split between the two paths is now anchored on the known right-hand directory prefix rather than a greedy " and ", so such files land at the correct place in the tree.
+- An in-flight asynchronous rsync copy (~emeld-copy~) is now cancelled when the scan is stopped or the buffer is killed, instead of being left running with a sentinel pointing at a stale tree.
 ** Changed
 - Layout options are now buffer-local: ~emeld-show-tree-lines~, ~emeld-compact-tree~, ~emeld-indent-offset~ and ~emeld-column-ratio~ are made buffer-local in ~emeld-mode~ alongside the other view toggles.  Tweaking tree-lines, the compact layout, indentation (~>~/~<~) or the column split (~}~/~{~) in one comparison no longer leaks into other emeld buffers or the global defaults.
 - Packaging: ~emeld-diff~ is now autoloaded (matching ~emeld-git-diff~, ~emeld-diff-dwim~, ~emeld-load-preset~ and ~emeld-sidebar~), and ~emeld.el~ now declares full package metadata — ~Package-Requires~ (~(emacs "27.1") (transient "0.3.0")~), ~Author~, ~Maintainer~, ~URL~ and ~Package-Version~ — so the package installs cleanly via ~package.el~/MELPA and the external ~transient~ dependency is recorded.
+** Performance
+- Marking / unmarking a single file (~m~ / ~u~) now rewrites just that line's mark glyph in place instead of re-rendering the whole tree, so holding ~m~ down a large comparison no longer slows quadratically.
+- Each render builds every node's relative path incrementally from its parent's, rather than walking up to the root per node, and restoring point after a render jumps straight to the target node (recorded during the render) instead of rescanning the whole buffer line by line.
+- The progressive tree builder de-duplicates back-filled files via a hash set instead of a linear ~cl-find-if~ per entry, removing an O(n²) cost for very wide directories.
 
 * [0.43.0] - 2026-05-29
 ** Added
