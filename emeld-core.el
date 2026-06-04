@@ -100,17 +100,28 @@ Set to \"\" for no prefix."
   :type 'boolean
   :group 'emeld)
 
-(defcustom emeld-compact-tree t
-  "When non-nil, use compact tree indentation (the default).
-Compact (the default) matches the continuation indent to the branch
-width for a tighter tree (`│ └─file') that sits better in the available
-space.  When nil, each level is indented one space wider than the branch
-connector, so a child's connector hangs one column past the parent's
-content (`│  └─file') and reads as hooking into the parent's subtree.
-Either way files and directories share the same indent, so siblings
-always align under their parent.  Toggle to the wider layout with
-`emeld-toggle-compact-tree' (\\`z')."
-  :type 'boolean
+(defcustom emeld-tree-density 'compact
+  "How tightly the tree is indented.  One of three symbols:
+
+`compact' (the default) matches the continuation indent to the branch
+width for a tighter tree (`│ └─file') that sits well in the available
+space.
+
+`extreme' collapses each level to a single column regardless of
+`emeld-indent-offset' — the connector is a lone glyph with no dashes
+(`│└file') — for the densest possible tree.  Especially handy in the
+narrow `emeld-sidebar'.
+
+`wide' indents each level one space wider than the branch connector, so
+a child's connector hangs one column past the parent's content
+(`│  └─file') and reads as hooking into the parent's subtree.
+
+Whatever the density, files and directories share the same indent, so
+siblings always align under their parent.  Cycle compact → extreme →
+wide → compact with `emeld-cycle-tree-density' (\\`z')."
+  :type '(choice (const :tag "Compact (default)" compact)
+                 (const :tag "Extreme (1 column/level)" extreme)
+                 (const :tag "Wide" wide))
   :group 'emeld)
 
 (defcustom emeld-show-strikethrough t
@@ -2281,7 +2292,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "M-d") #'emeld-toggle-show-different)
     (define-key map (kbd "N")   #'emeld-toggle-show-added)
     (define-key map (kbd "T")   #'emeld-toggle-tree-lines)
-    (define-key map (kbd "z")   #'emeld-toggle-compact-tree)
+    (define-key map (kbd "z")   #'emeld-cycle-tree-density)
     (define-key map (kbd "s")   #'emeld-toggle-show-strikethrough)
     (define-key map (kbd "G")   #'emeld-toggle-gitignore)
     (define-key map (kbd "i")   #'emeld-toggle-ignore-whitespace)
@@ -2309,7 +2320,7 @@ Mimics Meld's display of missing files."
   ;; compact layout, indentation or the column split in one buffer does not
   ;; leak into other emeld buffers or the global defaults.
   (make-local-variable 'emeld-show-tree-lines)
-  (make-local-variable 'emeld-compact-tree)
+  (make-local-variable 'emeld-tree-density)
   (make-local-variable 'emeld-indent-offset)
   (make-local-variable 'emeld-column-ratio)
   (setq-local revert-buffer-function #'emeld-refresh)
@@ -2448,13 +2459,24 @@ Uses cached data when available to avoid re-scanning."
   (setq emeld-show-tree-lines (not emeld-show-tree-lines))
   (emeld--render))
 
-(defun emeld-toggle-compact-tree ()
-  "Toggle compact tree indentation.
-See `emeld-compact-tree'."
+(defun emeld--tree-density-next (density)
+  "Return the density that follows DENSITY in the cycle.
+compact → extreme → wide → compact."
+  (pcase density
+    ('compact 'extreme)
+    ('extreme 'wide)
+    (_        'compact)))
+
+(defun emeld-cycle-tree-density ()
+  "Cycle the tree density: compact → extreme → wide → compact.
+See `emeld-tree-density'."
   (interactive)
-  (setq emeld-compact-tree (not emeld-compact-tree))
-  (message "Compact tree: %s" (if emeld-compact-tree "on" "off"))
+  (setq emeld-tree-density (emeld--tree-density-next emeld-tree-density))
+  (message "Tree density: %s" emeld-tree-density)
   (emeld--render))
+
+(define-obsolete-function-alias 'emeld-toggle-compact-tree
+  'emeld-cycle-tree-density "emeld 0.5")
 
 (defun emeld-toggle-mirror ()
   "Toggle `emeld-copy-mirror', rsync `--delete' exact-mirror copying.
@@ -2759,11 +2781,11 @@ scan generation and bail).  The partial tree is left in place; rescan with
 (defun emeld-redraw ()
   "Reset the display layout to defaults and re-render, without rescanning.
 Restores the indentation (`emeld-indent-offset'), the pane/tree separation
-(`emeld-column-ratio') and the compact-tree flag (`emeld-compact-tree') to
+(`emeld-column-ratio') and the tree density (`emeld-tree-density') to
 their standard values, recomputes the column width from the current window
 width, and redraws — preserving point and expansion state.  Use this to
 undo layout tweaks made with \\[emeld-increase-indent]/\\[emeld-decrease-indent],
-\\[emeld-grow-column]/\\[emeld-shrink-column] or \\[emeld-toggle-compact-tree],
+\\[emeld-grow-column]/\\[emeld-shrink-column] or \\[emeld-cycle-tree-density],
 or after resizing the window or frame.  For a fresh comparison use
 `emeld-rescan' (\\[emeld-rescan])."
   (interactive)
@@ -2771,11 +2793,11 @@ or after resizing the window or frame.  For a fresh comparison use
     (user-error "No comparison loaded"))
   (emeld--reset-display-var 'emeld-indent-offset)
   (emeld--reset-display-var 'emeld-column-ratio)
-  (emeld--reset-display-var 'emeld-compact-tree)
+  (emeld--reset-display-var 'emeld-tree-density)
   (emeld--render)
-  (message "Display reset (indent %d, columns %d/%d, compact %s)"
+  (message "Display reset (indent %d, columns %d/%d, density %s)"
            emeld-indent-offset emeld-column-ratio (- 100 emeld-column-ratio)
-           (if emeld-compact-tree "on" "off")))
+           emeld-tree-density))
 
 (defun emeld-refresh (&optional _ignore-auto _noconfirm)
   "Refresh the comparison asynchronously.
@@ -3791,9 +3813,11 @@ reflects the live scan counters without needing to be re-installed."
                   ;; Mirror copies can delete destination files, so flag it.
                   (when emeld-copy-mirror
                     (propertize "[Mirror] " 'face 'warning))
-                  ;; Compact is the default, so flag only the wider layout.
-                  (unless emeld-compact-tree
-                    (propertize "[Wide] " 'face 'bold))))))
+                  ;; Compact is the default, so flag only the other densities.
+                  (unless (eq emeld-tree-density 'compact)
+                    (propertize (format "[%s] "
+                                        (capitalize (symbol-name emeld-tree-density)))
+                                'face 'bold))))))
 
 (defun emeld--current-node ()
   "Return the emeld-node text-property at point."
@@ -3965,6 +3989,40 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
         (write-region nil nil outfile nil 'silent)
         (message "Wrote patch with %d change(s) to %s" (length nodes) outfile)))))
 
+(defun emeld--tree-branch-width ()
+  "Column width of a node's branch connector under the current density."
+  (if (eq emeld-tree-density 'extreme) 1 emeld-indent-offset))
+
+(defun emeld--tree-branch (is-last)
+  "Return the branch connector string for a node; IS-LAST marks the last sibling.
+Honors `emeld-show-tree-lines' and `emeld-tree-density'."
+  (if emeld-show-tree-lines
+      (if (eq emeld-tree-density 'extreme)
+          (if is-last "└" "├")
+        (concat (if is-last "└" "├")
+                (make-string (1- emeld-indent-offset) ?─)))
+    (make-string (emeld--tree-branch-width) ?\s)))
+
+(defun emeld--tree-continuation (is-last)
+  "Return the child-prefix continuation string drawn under a node.
+IS-LAST marks the last sibling (so its trunk is blank rather than `│').
+Honors `emeld-show-tree-lines' and `emeld-tree-density'."
+  (if emeld-show-tree-lines
+      (pcase emeld-tree-density
+        ('extreme (if is-last " " "│"))
+        ('wide (concat (if is-last " " "│")
+                       (make-string emeld-indent-offset ?\s)))
+        (_ (concat (if is-last " " "│")
+                   (make-string (1- emeld-indent-offset) ?\s))))
+    ;; Tree-lines off: mirror the per-level widths above so `wide' still
+    ;; indents one column more than `compact' (it would otherwise collapse
+    ;; to the same width as the branch).
+    (make-string (pcase emeld-tree-density
+                   ('extreme 1)
+                   ('wide (1+ emeld-indent-offset))
+                   (_ emeld-indent-offset))
+                 ?\s)))
+
 (defun emeld--render-nodes (nodes indent-prefix column-width &optional rel-prefix)
   "Render a list of NODES with INDENT-PREFIX and COLUMN-WIDTH.
 REL-PATH is threaded down as REL-PREFIX (the parent's relative path) so each
@@ -3977,10 +4035,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
       (when (emeld--node-visible-p node)
         (let* ((status (emeld-node-diff-status node))
                (is-last (= idx count))
-               (branch (if emeld-show-tree-lines
-                           (concat (if is-last "└" "├")
-                                   (make-string (1- emeld-indent-offset) ?─))
-                         (make-string emeld-indent-offset ?\s)))
+               (branch (emeld--tree-branch is-last))
                (full-prefix (concat indent-prefix branch))
                (face (cond ((eq status 'same) 'emeld-same-face)
                            ((eq status 'different) 'emeld-diff-face)
@@ -4071,30 +4126,23 @@ node — see `emeld--node-relpath' for the equivalent slow form."
               ;; in `indent-prefix' line up vertically with the rows above; the
               ;; remaining offset spaces indent the diff text under the name.
               (let ((diff-prefix (concat "  " indent-prefix
-                                         (make-string emeld-indent-offset ?\s))))
+                                         (make-string (emeld--tree-branch-width) ?\s))))
                 (dolist (dl (emeld-node-inline-diff node))
                   (let ((dstart (point)))
                     (insert diff-prefix dl "\n")
                     (add-text-properties dstart (point)
                                          `(emeld-node ,node emeld-inline-diff t))))))
 
-            ;; Recurse.  By default the continuation indent is one space wider
-            ;; than the branch dashes (offset spaces vs offset-1 dashes), so a
-            ;; child's connector hangs one column past the parent's content
-            ;; start and reads as hooking into the parent's subtree.  When
-            ;; `emeld-compact-tree' is non-nil the continuation matches the
-            ;; branch width for a tighter tree.  Either way files and dirs use
-            ;; the same indent, so siblings always align under their parent.
+            ;; Recurse.  The continuation indent depends on `emeld-tree-density':
+            ;; `compact' matches the branch width for a tight tree, `wide' adds
+            ;; one space so a child's connector hangs past the parent's content,
+            ;; and `extreme' collapses each level to a single column.  Either
+            ;; way files and dirs use the same indent, so siblings always align
+            ;; under their parent (see `emeld--tree-continuation').
             (when (and (emeld-node-expanded node) (emeld-node-children node))
               (emeld--render-nodes (emeld-node-children node)
-                                   (if emeld-show-tree-lines
-                                       (concat indent-prefix
-                                               (if is-last " " "│")
-                                               (make-string (if emeld-compact-tree
-                                                                (1- emeld-indent-offset)
-                                                              emeld-indent-offset)
-                                                            ?\s))
-                                     (concat indent-prefix (make-string emeld-indent-offset ?\s)))
+                                   (concat indent-prefix
+                                           (emeld--tree-continuation is-last))
                                    column-width rel))))))))
 
 (defclass emeld-dynamic-suffix (transient-suffix)
@@ -4113,8 +4161,8 @@ node — see `emeld--node-relpath' for the equivalent slow form."
      (lambda () (interactive) (emeld-toggle-show-files)) :transient t)
     ("T" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
      (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
-    ("z" (lambda () (if emeld-compact-tree "[x] compact" "[ ] compact"))
-     (lambda () (interactive) (emeld-toggle-compact-tree)) :transient t)
+    ("z" (lambda () (format "density: %s" emeld-tree-density))
+     (lambda () (interactive) (emeld-cycle-tree-density)) :transient t)
     ("s" (lambda () (if emeld-show-strikethrough "[x] strikethrough" "[ ] strikethrough"))
      (lambda () (interactive) (emeld-toggle-show-strikethrough)) :transient t)
     ("G" (lambda () (if emeld-respect-gitignore "[x] gitignore" "[ ] gitignore"))

@@ -1,5 +1,9 @@
 #+TITLE: Changelog for Emeld
 
+* [Unreleased]
+** Changed
+- ~z~ now *cycles* tree density instead of toggling it: compact (default) → extreme → wide → compact.  The new ~extreme~ density collapses each level to a single column regardless of ~emeld-indent-offset~ (~│└file~) for the densest possible tree — especially useful in the narrow ~emeld-sidebar~, where ~z~ is now also bound (~emeld-sidebar-cycle-density~, kept buffer-local to the sidebar).  The boolean ~emeld-compact-tree~ option is replaced by the tri-state ~emeld-tree-density~ symbol (~compact~/~extreme~/~wide~), and ~emeld-toggle-compact-tree~ is now an obsolete alias for ~emeld-cycle-tree-density~.  The header-line flags the active non-default density (e.g. ~[Extreme]~, ~[Wide]~), and ~r~ (~emeld-redraw~) resets it along with the other layout vars.
+
 * [0.44.0] - 2026-06-02
 ** Fixed
 - ~revert-buffer~ (and ~auto-revert~) in an emeld comparison buffer no longer errors with "Wrong number of arguments".  ~emeld-refresh~, which serves as the buffer's ~revert-buffer-function~, now accepts the two arguments ~revert-buffer~ passes it (they are ignored); plain ~g~ / ~M-x emeld-rescan~ are unaffected.

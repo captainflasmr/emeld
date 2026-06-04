@@ -126,14 +126,13 @@ basename globs of every filter group that is active by default."
       (setq idx (1+ idx))
       (let* ((is-last (= idx count))
              (is-dir (emeld-node-is-dir node))
-             (branch (if emeld-show-tree-lines
-                         (concat (if is-last "└" "├")
-                                 (make-string (1- emeld-indent-offset) ?─))
-                       (make-string emeld-indent-offset ?\s)))
+             (branch (emeld--tree-branch is-last))
+             ;; Files sit flush after the branch (like the diff view); only
+             ;; directories carry the expand toggle and folder prefix.
              (indicator (if is-dir
                             (concat (if (emeld-node-expanded node) "[-] " "[+] ")
                                     emeld-dir-prefix)
-                          "    "))
+                          ""))
              (face (if is-dir 'emeld-dir-face 'default))
              (start (point)))
         (insert (propertize (concat prefix branch) 'face 'shadow))
@@ -144,11 +143,7 @@ basename globs of every filter group that is active by default."
         (when (and is-dir (emeld-node-expanded node) (emeld-node-children node))
           (emeld--sidebar-render-nodes
            (emeld-node-children node)
-           (concat prefix
-                   (if emeld-show-tree-lines
-                       (concat (if is-last " " "│")
-                               (make-string (1- emeld-indent-offset) ?\s))
-                     (make-string emeld-indent-offset ?\s)))))))))
+           (concat prefix (emeld--tree-continuation is-last))))))))
 
 (defun emeld--sidebar-render ()
   "Render the sidebar tree, preserving the path at point and the highlight."
@@ -321,6 +316,60 @@ when the sidebar is not the selected window."
       (emeld--walk-set-expanded c nil))
     (emeld--sidebar-render)))
 
+(defun emeld--sidebar-walk-expand (node)
+  "Populate and expand NODE and all its descendant directories from disk."
+  (when (emeld-node-is-dir node)
+    (emeld--sidebar-populate node)
+    (setf (emeld-node-expanded node) t)
+    (mapc #'emeld--sidebar-walk-expand (emeld-node-children node))))
+
+(defun emeld--sidebar-walk-dirs-only (node)
+  "Expand NODE's intermediate dirs and collapse leaf dirs (no sub-dirs).
+Populates from disk as it descends so the whole folder skeleton is known."
+  (when (emeld-node-is-dir node)
+    (emeld--sidebar-populate node)
+    (setf (emeld-node-expanded node)
+          (cl-some #'emeld-node-is-dir (emeld-node-children node)))
+    (mapc #'emeld--sidebar-walk-dirs-only (emeld-node-children node))))
+
+(defun emeld-sidebar-expand-all ()
+  "Expand every directory in the sidebar, loading children from disk as needed."
+  (interactive)
+  (when emeld--root-node
+    (mapc #'emeld--sidebar-walk-expand (emeld-node-children emeld--root-node))
+    (emeld--sidebar-render)))
+
+(defvar-local emeld--sidebar-cycle-state nil
+  "Most recent state from `emeld-sidebar-cycle-visibility'.
+One of `top', `dirs', `all', or nil.")
+
+(defun emeld-sidebar-cycle-visibility ()
+  "Cycle the sidebar's expansion in three steps, like the diff view's `S-TAB'.
+
+Order:
+- TOP: only the root's immediate child directories visible (rest collapsed).
+- DIRS: every intermediate directory expanded, leaf directories collapsed so
+  the folder skeleton shows without diving into the deepest folders.
+- ALL: every directory expanded.
+
+Repeated invocations cycle TOP -> DIRS -> ALL -> TOP."
+  (interactive)
+  (when emeld--root-node
+    (let ((next (pcase emeld--sidebar-cycle-state
+                  ('top 'dirs)
+                  ('dirs 'all)
+                  (_ 'top)))
+          (children (emeld-node-children emeld--root-node)))
+      (setq emeld--sidebar-cycle-state next)
+      (pcase next
+        ('top  (dolist (c children) (emeld--walk-set-expanded c nil))
+               (message "Visibility: TOP (top-level dirs)"))
+        ('dirs (mapc #'emeld--sidebar-walk-dirs-only children)
+               (message "Visibility: DIRS (folder skeleton)"))
+        ('all  (mapc #'emeld--sidebar-walk-expand children)
+               (message "Visibility: ALL (everything)")))
+      (emeld--sidebar-render))))
+
 (defun emeld-sidebar-refresh ()
   "Rebuild the sidebar tree from disk, restoring expansion and point."
   (interactive)
@@ -337,6 +386,24 @@ when the sidebar is not the selected window."
   (setq-local emeld-sidebar-show-hidden (not emeld-sidebar-show-hidden))
   (emeld-sidebar-refresh)
   (message "Sidebar dotfiles: %s" (if emeld-sidebar-show-hidden "shown" "hidden")))
+
+(defun emeld-sidebar-cycle-density ()
+  "Cycle this sidebar's tree density: compact → extreme → wide → compact.
+The setting is buffer-local to the sidebar, so it does not affect
+`emeld-diff' buffers.  See `emeld-tree-density'."
+  (interactive)
+  (setq-local emeld-tree-density (emeld--tree-density-next emeld-tree-density))
+  (emeld--sidebar-render)
+  (message "Sidebar tree density: %s" emeld-tree-density))
+
+(defun emeld-sidebar-toggle-tree-lines ()
+  "Toggle the tree-line guides (`│├└') in this sidebar.
+The setting is buffer-local to the sidebar, so it does not affect
+`emeld-diff' buffers.  See `emeld-show-tree-lines'."
+  (interactive)
+  (setq-local emeld-show-tree-lines (not emeld-show-tree-lines))
+  (emeld--sidebar-render)
+  (message "Sidebar tree-lines: %s" (if emeld-show-tree-lines "on" "off")))
 
 (defun emeld-sidebar-reveal-current ()
   "Reveal the file shown in the main window within the sidebar."
@@ -359,7 +426,12 @@ when the sidebar is not the selected window."
     (define-key map (kbd "p")       #'emeld-sidebar-previous-line)
     (define-key map (kbd "g")       #'emeld-sidebar-refresh)
     (define-key map (kbd "[")       #'emeld-sidebar-collapse-all)
+    (define-key map (kbd "]")       #'emeld-sidebar-expand-all)
+    (define-key map (kbd "<backtab>") #'emeld-sidebar-cycle-visibility)
+    (define-key map (kbd "S-TAB")     #'emeld-sidebar-cycle-visibility)
     (define-key map (kbd "h")       #'emeld-sidebar-toggle-hidden)
+    (define-key map (kbd "z")       #'emeld-sidebar-cycle-density)
+    (define-key map (kbd "T")       #'emeld-sidebar-toggle-tree-lines)
     (define-key map (kbd "F")       #'emeld-sidebar-follow-mode)
     (define-key map (kbd ".")       #'emeld-sidebar-reveal-current)
     (define-key map (kbd "q")       #'quit-window)
@@ -376,7 +448,10 @@ when the sidebar is not the selected window."
   (make-local-variable 'emeld--sidebar-current)
   (make-local-variable 'emeld--sidebar-hl-overlay)
   (make-local-variable 'emeld--root-node)
-  (make-local-variable 'emeld-sidebar-show-hidden))
+  (make-local-variable 'emeld-sidebar-show-hidden)
+  (make-local-variable 'emeld-show-tree-lines)
+  ;; The sidebar is narrow, so default to the most condensed density.
+  (setq-local emeld-tree-density 'extreme))
 
 (defun emeld--sidebar-get-buffer (root)
   "Return the sidebar buffer, (re)building its tree rooted at ROOT."
