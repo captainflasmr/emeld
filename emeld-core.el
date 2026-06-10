@@ -84,9 +84,10 @@ defaults to inactive.  Toggle groups on/off with `emeld-toggle-filter-group'."
   :type 'boolean
   :group 'emeld)
 
-(defcustom emeld-dir-prefix "📁 "
+(defcustom emeld-dir-prefix ""
   "Prefix string shown before directory names to distinguish from files.
-Set to \"\" for no prefix."
+Defaults to no prefix for maximum compatibility (terminals and Windows
+builds may not render emoji or icons).  Set to e.g. \"📁 \" for an icon."
   :type 'string
   :group 'emeld)
 
@@ -100,28 +101,27 @@ Set to \"\" for no prefix."
   :type 'boolean
   :group 'emeld)
 
-(defcustom emeld-tree-density 'compact
+(defcustom emeld-tree-density 'wide
   "How tightly the tree is indented.  One of three symbols:
 
-`compact' (the default) matches the continuation indent to the branch
-width for a tighter tree (`│ └─file') that sits well in the available
-space.
+`wide' (the default) indents each level one space wider than the branch
+connector, so a child's connector hangs one column past the parent's
+content (`│  └─file') and reads as hooking into the parent's subtree.
+
+`compact' matches the continuation indent to the branch width for a
+tighter tree (`│ └─file') that sits well in the available space.
 
 `extreme' collapses each level to a single column regardless of
 `emeld-indent-offset' — the connector is a lone glyph with no dashes
 (`│└file') — for the densest possible tree.  Especially handy in the
 narrow `emeld-sidebar'.
 
-`wide' indents each level one space wider than the branch connector, so
-a child's connector hangs one column past the parent's content
-(`│  └─file') and reads as hooking into the parent's subtree.
-
 Whatever the density, files and directories share the same indent, so
 siblings always align under their parent.  Cycle compact → extreme →
 wide → compact with `emeld-cycle-tree-density' (\\`z')."
-  :type '(choice (const :tag "Compact (default)" compact)
-                 (const :tag "Extreme (1 column/level)" extreme)
-                 (const :tag "Wide" wide))
+  :type '(choice (const :tag "Wide (default)" wide)
+                 (const :tag "Compact" compact)
+                 (const :tag "Extreme (1 column/level)" extreme))
   :group 'emeld)
 
 (defcustom emeld-show-strikethrough t
@@ -3813,8 +3813,8 @@ reflects the live scan counters without needing to be re-installed."
                   ;; Mirror copies can delete destination files, so flag it.
                   (when emeld-copy-mirror
                     (propertize "[Mirror] " 'face 'warning))
-                  ;; Compact is the default, so flag only the other densities.
-                  (unless (eq emeld-tree-density 'compact)
+                  ;; Wide is the default, so flag only the more compact densities.
+                  (unless (eq emeld-tree-density 'wide)
                     (propertize (format "[%s] "
                                         (capitalize (symbol-name emeld-tree-density)))
                                 'face 'bold))))))
