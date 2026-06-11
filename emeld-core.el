@@ -2378,9 +2378,13 @@ If the current side is empty but the other has a file, snap to it."
         (goto-char start-on-side)
         (skip-chars-forward "* └├│─")))
     
-    ;; Smart snapping: only if this side is truly empty and the other side has a file
+    ;; Smart snapping: only if this side is truly empty and the other side has
+    ;; a file.  Skipped when `emeld-show-strikethrough' is on, since the empty
+    ;; side then shows the struck name — a valid place to land and to mark for
+    ;; deletion (so e.g. marking down the left column stays on the left).
     (let ((node (get-text-property (point) 'emeld-node)))
-      (when (and node (emeld-node-parent node)) ;; Only snap for children, not root nodes
+      (when (and node (emeld-node-parent node) ;; Only snap for children, not root nodes
+                 (not emeld-show-strikethrough))
         (let* ((has-left (emeld-node-left-path node))
                (has-right (emeld-node-right-path node))
                (current-is-empty (not (if on-right has-right has-left))))
@@ -3398,20 +3402,27 @@ mark/unmark avoid a full `emeld--render' of the whole tree."
 
 (defun emeld--node-side-at-point ()
   "Return (NODE . SIDE) for the file at point, SIDE being `left' or `right'.
-The side is chosen by the column; if that side has no file but the other
-does, the other side is returned so the mark always sits next to a file.
-Signals a `user-error' if there is no node at point."
+The side is the column point is in.  When that side has no file: if the
+other side does and its absence is displayed here as a strikethrough
+\(`emeld-show-strikethrough'), the empty side under point is returned, so it
+can be marked to delete the file from the other side (the \"make the other
+side match the side you marked\" sync of `emeld-copy').  Otherwise the
+other (file) side is returned so the mark sits next to a file.  Signals a
+`user-error' if there is no node at point."
   (let ((node (get-text-property (point) 'emeld-node)))
     (unless node (user-error "No node at point"))
     (let* ((on-left (< (current-column) emeld--column-width))
            (this (if on-left 'left 'right))
            (this-path (if on-left (emeld-node-left-path node)
-                        (emeld-node-right-path node))))
+                        (emeld-node-right-path node)))
+           (other-path (if on-left (emeld-node-right-path node)
+                         (emeld-node-left-path node))))
       (cons node
             (cond (this-path this)
-                  ((if on-left (emeld-node-right-path node)
-                     (emeld-node-left-path node))
-                   (if on-left 'right 'left))
+                  ;; Empty side: a visible strikethrough makes it a real
+                  ;; target to mark for deletion; else snap to the file side.
+                  ((and other-path emeld-show-strikethrough) this)
+                  (other-path (if on-left 'right 'left))
                   (t this))))))
 
 (defun emeld-mark ()
@@ -3448,9 +3459,11 @@ Point then advances to the next node, staying on the same side where possible."
 
 (defun emeld--mark-nodes-by-status (statuses &optional side)
   "Mark on SIDE every file node whose `diff-status' is in STATUSES.
-SIDE defaults to `left' (the source side for the left→right sync workflow);
-the matched statuses all have a left file.  Adds to any existing marks and
-returns the number newly marked."
+SIDE defaults to `left' (the source side for the left→right sync workflow).
+Statuses with a left file are marked for copying; `right-only' nodes have
+no left file, so marking them on `left' (the empty side) flags them for
+deletion from the right by `emeld-copy' — completing a left→right mirror.
+Adds to any existing marks and returns the number newly marked."
   (let ((side (or side 'left)) (count 0))
     (cl-labels ((walk (nodes)
                   (dolist (node nodes)
@@ -3484,18 +3497,21 @@ copied with `emeld-copy'."
   (emeld--mark-and-report '(left-only) "left-only file"))
 
 (defun emeld-mark-to-copy ()
-  "Mark everything to copy left→right for syncing: modified + left-only files.
-With these marked, `emeld-copy' (\\[emeld-copy]) copies each to the right,
-making the right directory match the left for those files."
+  "Mark everything for a left→right mirror: modified, left-only and right-only.
+With these marked, `emeld-copy' (\\[emeld-copy]) makes the right directory
+exactly match the left: modified files are overwritten, left-only files
+are created, and right-only files are deleted (they are marked on the
+empty left side, which `emeld-copy' reads as \"delete from the right\")."
   (interactive)
-  (emeld--mark-and-report '(different left-only) "file to copy"))
+  (emeld--mark-and-report '(different left-only right-only) "file to sync"))
 
 (defun emeld-mark-all ()
-  "Mark all changed files: modified plus left-only (new) files.
-This is the left-to-right sync set, so the marked files can then be
-copied with `emeld-copy'.  Same file set as `emeld-mark-to-copy'."
+  "Mark all changed files for a left→right mirror sync.
+Modified, left-only and right-only files; the marked set can then be
+applied with `emeld-copy' to make the right match the left (copies plus
+deletions of right-only files).  Same file set as `emeld-mark-to-copy'."
   (interactive)
-  (emeld--mark-and-report '(different left-only) "changed file"))
+  (emeld--mark-and-report '(different left-only right-only) "changed file"))
 
 (defun emeld-copy-path-at-point (arg)
   "Copy the filename at point to the kill ring.
@@ -3643,28 +3659,29 @@ ancestors are then recomputed.  Mutates the tree without rendering."
                   (t 'right-only)))))
     (emeld--recompute-ancestors node)))
 
-(defun emeld--update-after-copy (jobs)
-  "Update only the copied JOBS in the tree, then re-render once.
-JOBS is the (SOURCE . DEST-ROOT) list `emeld-copy' used.  Each copied
-node is re-classified in place (now present on the destination side) and
-its ancestors recomputed, so the tree reflects the copy without the
-flash of a full rescan.  Falls back to a full `emeld-refresh' if any
-copied node cannot be located in the tree."
+(defun emeld--update-after-copy (rels)
+  "Update only the synced RELS in the tree, then re-render once.
+RELS are the relative paths `emeld-copy' acted on (copied or deleted).
+Each node is re-classified in place from its current on-disk state — a
+copy makes it `same', a deletion drops it from the tree — and ancestors
+are recomputed, so the tree reflects the sync without the flash of a full
+rescan.  Falls back to a full `emeld-refresh' if any node cannot be
+located in the tree."
   (let ((ok t))
-    (dolist (job jobs)
-      (let* ((rel (emeld--rel-from-abs (car job)))
-             (node (and rel (emeld--find-node rel))))
+    (dolist (rel rels)
+      (let ((node (and rel (emeld--find-node rel))))
         (if node
             (emeld--reclassify-copied-node node)
           (setq ok nil))))
     (if ok (emeld--render) (emeld-refresh))))
 
-(defun emeld--copy-async (jobs)
+(defun emeld--copy-async (jobs rels)
   "Copy JOBS via rsync, one at a time, asynchronously.
-JOBS is a list of (SOURCE . DEST-ROOT).  Parent directories are created
-synchronously per job; on completion the buffer is refreshed, marks are
-cleared and a summary is reported.  rsync output is logged to the hidden
-buffer ` *emeld-rsync*'."
+JOBS is a list of (SOURCE . DEST-ROOT).  RELS are the relative paths the
+overall sync touched (copies and any deletions already performed); on
+completion only those nodes are updated in place (`emeld--update-after-copy'),
+marks are cleared and a summary is reported.  rsync output is logged to
+the hidden buffer ` *emeld-rsync*'."
   (when (and emeld--copy-proc (process-live-p emeld--copy-proc))
     (user-error "A copy is already in progress"))
   (let* ((buf (current-buffer))
@@ -3682,7 +3699,7 @@ buffer ` *emeld-rsync*'."
               (with-current-buffer buf
                 (setq emeld--copy-proc nil)
                 (clrhash emeld--marked-paths)
-                (emeld--update-after-copy jobs))
+                (emeld--update-after-copy rels))
               (message "Copied %d/%d node(s) via rsync%s" count total
                        (if (> errors 0)
                            (format " (%d error%s — see ` *emeld-rsync*')"
@@ -3717,8 +3734,10 @@ buffer ` *emeld-rsync*'."
     (message "Copying %d node(s) via rsync..." total)
     (funcall run-next jobs)))
 
-(defun emeld--copy-sync (jobs)
-  "Copy JOBS (list of (SOURCE . DEST-ROOT)) synchronously with the built-in copy."
+(defun emeld--copy-sync (jobs rels)
+  "Copy JOBS (list of (SOURCE . DEST-ROOT)) synchronously with the built-in copy.
+RELS are the relative paths the overall sync touched; only those nodes
+are updated in place afterwards (`emeld--update-after-copy')."
   (let ((count 0) (errors 0))
     (dolist (job jobs)
       (if (file-exists-p (car job))
@@ -3727,49 +3746,64 @@ buffer ` *emeld-rsync*'."
             (error (cl-incf errors)))
         (cl-incf errors)))
     (clrhash emeld--marked-paths)
-    (emeld--update-after-copy jobs)
+    (emeld--update-after-copy rels)
     (message "Copied %d node(s)%s" count
              (if (> errors 0) (format " (%d errors)" errors) ""))))
 
 (defun emeld--copy-jobs ()
-  "Return the copy jobs as a list of (SOURCE . DEST-ROOT).
-From the marked set if any (each from its marked side; a both-marked node
-copies left→right), otherwise the single node at point on the current
-side.  Signals a `user-error' when there is nothing to copy."
+  "Return sync jobs for the marked set (or the node at point).
+The rule is \"make the other side match the side you marked\".  Each job
+is one of:
+
+  (SOURCE . DEST-ROOT)  copy SOURCE to the other side (the marked side
+                        has the file);
+  (:delete . PATH)      delete PATH from the other side (the marked side
+                        is empty — the struck-through, one-sided case).
+
+From the marked set if any (each acting on its marked side; a both-marked
+node uses the left side), otherwise the single node at point on the
+current side.  Signals a `user-error' when there is nothing to do."
   (let ((marked (let (paths)
                   (maphash (lambda (k _) (push k paths)) emeld--marked-paths)
                   (nreverse paths))))
     (if marked
         (mapcar (lambda (rel)
-                  (let* ((from (if (emeld--marked-side-p rel 'left) 'left 'right))
-                         (src-root (if (eq from 'left) emeld--left-root emeld--right-root))
-                         (dst-root (if (eq from 'left) emeld--right-root emeld--left-root)))
-                    (cons (expand-file-name rel src-root) dst-root)))
+                  (let* ((on-left (emeld--marked-side-p rel 'left))
+                         (src-root (if on-left emeld--left-root emeld--right-root))
+                         (dst-root (if on-left emeld--right-root emeld--left-root))
+                         (src (expand-file-name rel src-root)))
+                    (if (file-exists-p src)
+                        (cons src dst-root)
+                      (cons :delete (expand-file-name rel dst-root)))))
                 marked)
-      (let* ((node (get-text-property (point) 'emeld-node))
-             (on-left (< (current-column) emeld--column-width)))
-        (unless node (user-error "No node at point"))
-        (let ((source (if on-left (emeld-node-left-path node) (emeld-node-right-path node)))
-              (dst-root (if on-left emeld--right-root emeld--left-root)))
-          (unless source (user-error "No file on current side to copy"))
-          (list (cons source dst-root)))))))
+      (let* ((ns (emeld--node-side-at-point))
+             (node (car ns))
+             (on-left (eq (cdr ns) 'left))
+             (source (if on-left (emeld-node-left-path node) (emeld-node-right-path node)))
+             (other  (if on-left (emeld-node-right-path node) (emeld-node-left-path node)))
+             (dst-root (if on-left emeld--right-root emeld--left-root)))
+        (cond
+         (source (list (cons source dst-root)))
+         (other  (list (cons :delete other)))
+         (t (user-error "No file on either side to sync")))))))
 
 (defun emeld-copy ()
-  "Copy marked files/dirs to the other side (or the node at point).
-Each marked node is copied from its marked side to the opposite side (a
-node marked on both sides copies left→right); with no marks, the node at
-point is copied from the current side.  Missing parent directories are
-created on the destination.
+  "Sync marked files/dirs to the other side (or the node at point).
+The rule is \"make the other side match the side you marked\": a node
+marked on the side that HAS the file is copied across, while a node
+marked on its empty (struck-through) side is DELETED from the other side.
+With no marks the node at point is synced from the side point is in.
+Missing parent directories are created on the destination.
 
-The transfer uses rsync or the built-in copy per `emeld-copy-method'.
-rsync copies run asynchronously (one node at a time) so Emacs stays
-responsive; built-in copies are synchronous.  When `emeld-copy-mirror'
-is on, rsync directory copies use `--delete' to make the destination an
-exact mirror of the source.
+Copies use rsync or the built-in copy per `emeld-copy-method'; rsync
+copies run asynchronously (one node at a time) so Emacs stays responsive,
+built-in copies are synchronous.  When `emeld-copy-mirror' is on, rsync
+directory copies use `--delete' to make the destination an exact mirror.
+Deletions move the file to trash and run synchronously first.
 
-On completion only the copied nodes are updated in place (re-classified
+On completion only the touched nodes are updated in place (re-classified
 and their ancestors recomputed) and the tree is re-rendered once, rather
-than triggering a full rescan — so the copied section reflects the new
+than triggering a full rescan — so the synced section reflects the new
 state without the whole tree flashing (see `emeld--update-after-copy')."
   (interactive)
   (when emeld--git-mode
@@ -3782,15 +3816,37 @@ state without the whole tree flashing (see `emeld--update-after-copy')."
   (let* ((use-rsync (emeld--copy-use-rsync-p))
          (mirror (and use-rsync emeld-copy-mirror))
          (jobs (emeld--copy-jobs))
-         (n (length jobs)))
-    (when (yes-or-no-p
-           (format "%s %d node(s) to the other side%s%s? "
-                   (if mirror "Mirror" "Copy") n
-                   (if use-rsync " via rsync" "")
-                   (if mirror " (deletes destination-only files in dirs)" "")))
-      (if use-rsync
-          (emeld--copy-async jobs)
-        (emeld--copy-sync jobs)))))
+         (deletes (cl-remove-if-not (lambda (j) (eq (car-safe j) :delete)) jobs))
+         (copies  (cl-remove-if     (lambda (j) (eq (car-safe j) :delete)) jobs))
+         (nc (length copies)) (nd (length deletes))
+         ;; Relative paths touched (copies + deletes), for the surgical update.
+         (rels (delq nil (append
+                          (mapcar (lambda (j) (emeld--rel-from-abs (car j))) copies)
+                          (mapcar (lambda (j) (emeld--rel-from-abs (cdr j))) deletes))))
+         (prompt (cond
+                  ((zerop nd)
+                   (format "%s %d node(s) to the other side%s%s? "
+                           (if mirror "Mirror" "Copy") nc
+                           (if use-rsync " via rsync" "")
+                           (if mirror " (deletes destination-only files in dirs)" "")))
+                  ((zerop nc)
+                   (format "Delete %d node(s) from the other side to sync (to trash)? " nd))
+                  (t
+                   (format "Sync: copy %d and delete %d node(s) to the other side%s? "
+                           nc nd (if use-rsync " (copies via rsync)" ""))))))
+    (when (yes-or-no-p prompt)
+      ;; Deletions first (synchronous, to trash); the surgical update then
+      ;; drops those now-absent nodes from the tree.
+      (dolist (j deletes)
+        (let ((path (cdr j)))
+          (when (file-exists-p path) (ignore-errors (emeld--delete-one path)))))
+      (cond
+       (copies (if use-rsync
+                   (emeld--copy-async copies rels)
+                 (emeld--copy-sync copies rels)))
+       (t (clrhash emeld--marked-paths)
+          (emeld--update-after-copy rels)
+          (message "Deleted %d node(s) to sync" nd))))))
 
 (defun emeld--delete-one (path)
   "Delete the file or directory at PATH recursively, moving it to trash."
@@ -4389,7 +4445,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
    ("TAB" "peek inline diff (file)" emeld-toggle-inline-diff :transient t)
    ("D"   "diff root (recursive)" emeld-diff-root)
    ("d"   "diff dir at point"   emeld-diff-dir)
-   ("C"   "copy to other side" emeld-copy)
+   ("C"   "sync to other side (copy/delete)" emeld-copy)
    ("R" (lambda () (if emeld-copy-mirror "[x] mirror copy (--delete)" "[ ] mirror copy (--delete)"))
     (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
    ("x"   "delete marked/at point" emeld-delete)
@@ -4403,8 +4459,8 @@ node — see `emeld--node-relpath' for the equivalent slow form."
    ("u"   "unmark"          emeld-unmark :transient t)
    ("* m" "modified"        emeld-mark-modified :transient t)
    ("* l" "left-only (new)" emeld-mark-left-only :transient t)
-   ("* c" "→ copy right"    emeld-mark-to-copy :transient t)
-   ("* a" "all changed"     emeld-mark-all :transient t)
+   ("* c" "→ mirror right"  emeld-mark-to-copy :transient t)
+   ("* a" "all changed (mirror)" emeld-mark-all :transient t)
    ("U"   "unmark all"      emeld-unmark-all :transient t)])
 
 (transient-define-prefix emeld-dispatch ()
