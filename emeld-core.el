@@ -4003,9 +4003,14 @@ In git mode the two revisions are swapped and the comparison re-scanned."
 A leading ASCII checkbox prefixes LABEL: \"[x] \" when ENABLED, \"[ ] \"
 when not.  Plain ASCII is used (rather than Unicode check glyphs) so the
 indicator renders correctly on Windows consoles and in terminals without
-Unicode support.  No face is applied — the checkbox alone signals state,
-since dimming the off labels can make them unreadable on some themes."
-  (concat (if enabled "[x] " "[ ] ") label))
+Unicode support.  The checkbox alone signals state (dimming the off labels
+can make them unreadable on some themes); LABEL's first letter is bold to
+hint at the key that toggles it (e.g. \"S\" in \"Same\")."
+  (concat (if enabled "[x] " "[ ] ")
+          (if (> (length label) 0)
+              (concat (propertize (substring label 0 1) 'face 'bold)
+                      (substring label 1))
+            label)))
 
 (defun emeld--display-state-string ()
   "Return a string showing the primary Same/New/Modified filter states.

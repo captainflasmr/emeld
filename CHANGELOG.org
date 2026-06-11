@@ -16,6 +16,7 @@
 - The Modified-files filter toggle moved from ~M-d~ to ~M~, so the three primary filters now sit on the symmetric ~S~ / ~N~ / ~M~ (Same / New / Modified).  ~emeld-mark-all~ (all changed files), previously on ~M~, moves to ~* a~, joining the ~*~ mark-by-status family (~* m~ / ~* l~ / ~* c~ / ~* a~).
 - "Expand only paths to changes" (~emeld-expand-changes~) moved from ~\\~ to ~/~.
 - The File transient (~?~ → ~f~) is split into four side-by-side columns — Open, Dired, Diff, Sync — instead of one long list (keys unchanged).
+- The header-line filter legend now renders the first letter of each primary filter in bold (~*S*ame~ / ~*N*ew~ / ~*M*odified~) as a hint to the key that toggles it.
 
 * [0.45.0] - 2026-06-11
 ** Fixed
