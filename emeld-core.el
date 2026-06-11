@@ -4435,22 +4435,25 @@ node — see `emeld--node-relpath' for the equivalent slow form."
 
 (transient-define-prefix emeld-dispatch-file ()
   "Emeld file actions."
-  ["File"
-   ("RET" "action (smart)"     emeld-action)
-   ("e"   "ediff"              emeld-ediff)
-   ("="   "diff / open / fold" emeld-soft-diff)
-   ("SPC" "diff / open / fold" emeld-soft-diff)
-   ("A"   "dired left side"    emeld-dired-left)
-   ("B"   "dired right side"   emeld-dired-right)
-   ("TAB" "peek inline diff (file)" emeld-toggle-inline-diff :transient t)
-   ("D"   "diff root (recursive)" emeld-diff-root)
-   ("d"   "diff dir at point"   emeld-diff-dir)
-   ("C"   "sync to other side (copy/delete)" emeld-copy)
-   ("R" (lambda () (if emeld-copy-mirror "[x] mirror copy (--delete)" "[ ] mirror copy (--delete)"))
-    (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
-   ("x"   "delete marked/at point" emeld-delete)
-   ("w"   "copy path"          emeld-copy-path-at-point)
-   ("P"   "format as patch"    emeld-format-patch)])
+  [["Open"
+    ("RET" "action (smart)"     emeld-action)
+    ("e"   "ediff"              emeld-ediff)
+    ("="   "diff / open / fold" emeld-soft-diff)
+    ("SPC" "diff / open / fold" emeld-soft-diff)
+    ("TAB" "peek inline diff (file)" emeld-toggle-inline-diff :transient t)]
+   ["Dired"
+    ("A"   "dired left side"    emeld-dired-left)
+    ("B"   "dired right side"   emeld-dired-right)
+    ("w"   "copy path"          emeld-copy-path-at-point)]
+   ["Diff"
+    ("D"   "diff root (recursive)" emeld-diff-root)
+    ("d"   "diff dir at point"   emeld-diff-dir)
+    ("P"   "format as patch"    emeld-format-patch)]
+   ["Sync"
+    ("C"   "sync to other side (copy/delete)" emeld-copy)
+    ("R" (lambda () (if emeld-copy-mirror "[x] mirror copy (--delete)" "[ ] mirror copy (--delete)"))
+     (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
+    ("x"   "delete marked/at point" emeld-delete)]])
 
 (transient-define-prefix emeld-dispatch-mark ()
   "Emeld marking."

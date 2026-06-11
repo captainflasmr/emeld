@@ -9,10 +9,6 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
-** DOING maybe still toggle when one side is strikethrough so a copy can also delete?
-
-** DOING reorganise file transient menu
-
 ** TODO indent doesn't increase in extreme compact
 
 ** TODO add directory to .dir-locals.el
