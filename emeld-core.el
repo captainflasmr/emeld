@@ -91,6 +91,22 @@ builds may not render emoji or icons).  Set to e.g. \"📁 \" for an icon."
   :type 'string
   :group 'emeld)
 
+(defcustom emeld-fold-collapsed-indicator "[+] "
+  "Indicator shown before a collapsed (folded) directory name.
+Rendered just before `emeld-dir-prefix'.  Plain ASCII by default for
+maximum terminal/Windows compatibility; set it together with
+`emeld-fold-expanded-indicator' to icons or triangles to mimic Meld, e.g.
+\"▸ \" collapsed / \"▾ \" expanded.  Keep the two indicators the same
+display width so folded and unfolded directory names stay aligned."
+  :type 'string
+  :group 'emeld)
+
+(defcustom emeld-fold-expanded-indicator "[-] "
+  "Indicator shown before an expanded (unfolded) directory name.
+See `emeld-fold-collapsed-indicator' for details and alignment notes."
+  :type 'string
+  :group 'emeld)
+
 (defcustom emeld-indent-offset 2
   "Indentation offset for each directory level."
   :type 'integer
@@ -4201,7 +4217,9 @@ node — see `emeld--node-relpath' for the equivalent slow form."
                            ((eq status 'right-only) 'emeld-right-only-face)))
                (name-face (if (emeld-node-is-dir node) 'emeld-dir-face face))
                (dir-indicator (if (emeld-node-is-dir node)
-                                  (concat (if (emeld-node-expanded node) "[-] " "[+] ")
+                                  (concat (if (emeld-node-expanded node)
+                                              emeld-fold-expanded-indicator
+                                            emeld-fold-collapsed-indicator)
                                           emeld-dir-prefix)
                                 ""))
                ;; Mark directories a depth-limited scan left unscanned.

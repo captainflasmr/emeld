@@ -130,7 +130,9 @@ basename globs of every filter group that is active by default."
              ;; Files sit flush after the branch (like the diff view); only
              ;; directories carry the expand toggle and folder prefix.
              (indicator (if is-dir
-                            (concat (if (emeld-node-expanded node) "[-] " "[+] ")
+                            (concat (if (emeld-node-expanded node)
+                                        emeld-fold-expanded-indicator
+                                      emeld-fold-collapsed-indicator)
                                     emeld-dir-prefix)
                           ""))
              (face (if is-dir 'emeld-dir-face 'default))

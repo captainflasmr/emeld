@@ -6,6 +6,7 @@
 ** Fixed
 - Rescanning no longer folds away newly-appeared directories.  After a rescan, expansion state is restored only for directories that already existed when it was captured; directories that have just appeared — e.g. a subtree revealed by toggling ~.gitignore~ respect *off* — keep their default-expanded state, matching a first scan, so the new content is shown rather than silently collapsed.
 ** Added
+- ~emeld-fold-collapsed-indicator~ / ~emeld-fold-expanded-indicator~: customizable fold toggle shown before a directory name (defaults ~"[+] "~ / ~"[-] "~, the previous hard-coded text).  Like ~emeld-dir-prefix~, set them to icons or triangles (e.g. ~"▸ "~ / ~"▾ "~) to mimic Meld.  Honoured by both the diff view and ~emeld-sidebar~.
 - ~emeld-dired-left~ (~A~) and ~emeld-dired-right~ (~B~): quick jump to dired for the left/right side of the node at point — a directory opens dired in it, a file opens dired on its parent with point on the file, and with no node (or no path on that side) the side's comparison root is used.  In git mode the repo-relative path is resolved against the repo's working tree.
 - The header line shows a ~⚠ gitignore~ note (warning face) while ~emeld-respect-gitignore~ is on, alongside the existing ~⚠ files hidden~ note.  It appears only when active, flagging that git-ignored files — which can be whole subtrees via ~.gitignore~, ~.git/info/exclude~ or the global excludes — are being dropped from the scan, so the omission is never a surprise.
 ** Changed
