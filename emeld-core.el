@@ -396,6 +396,12 @@ With `emeld--scan-processed' this drives the header-line progress bar.")
   "Hash table of marked nodes (Dired-style marking).
 Keys are relative paths; each value is a list of marked sides — a subset
 of (left right).  A node can be marked on either side independently.")
+(defvar-local emeld--hidden-paths nil
+  "Relative paths temporarily hidden this session by `emeld-hide-at-point'.
+The renderer skips these nodes (and their subtrees).  Buffer-local and
+deliberately *not* reset on rescan, so a hide survives `emeld-refresh'
+within the session; it is never persisted to `.dir-locals.el' (use
+`emeld-add-filter-at-point' for that).  Cleared by `emeld-unhide-all'.")
 (defvar-local emeld--last-render-time nil
   "Float-time of the last `emeld--render' call, for render throttling.")
 (defvar-local emeld--same-skip-files nil
@@ -2098,6 +2104,43 @@ without hand-editing `.dir-locals.el'."
                            (expand-file-name dir-locals-file emeld--left-root)))
       (emeld-refresh))))
 
+(defun emeld-unhide-all ()
+  "Restore every node hidden this session by `emeld-hide-at-point'."
+  (interactive)
+  (if (null emeld--hidden-paths)
+      (message "Nothing is hidden")
+    (let ((n (length emeld--hidden-paths)))
+      (setq emeld--hidden-paths nil)
+      (emeld--render)
+      (message "Restored %d hidden item%s" n (if (= n 1) "" "s")))))
+
+(defun emeld-hide-at-point (&optional arg)
+  "Temporarily hide the node at point for this session (not persisted).
+The node's relative path is remembered buffer-locally and skipped by the
+renderer, so it — and, for a directory, its whole subtree — drops out of
+the view.  Handy for decluttering a scan you still want intact: hides
+survive a rescan within the session but are never written to
+`.dir-locals.el'.  For a permanent filter use `emeld-add-filter-at-point'
+\(\\[emeld-add-filter-at-point]) instead.
+
+With a prefix ARG (\\[universal-argument] \\[emeld-hide-at-point]),
+unhide everything hidden this session (`emeld-unhide-all')."
+  (interactive "P")
+  (if arg
+      (emeld-unhide-all)
+    (let ((node (get-text-property (point) 'emeld-node)))
+      (unless node (user-error "No node at point"))
+      (when (eq node emeld--root-node) (user-error "Cannot hide the root node"))
+      (let ((rel (emeld--node-relpath node)))
+        (cl-pushnew rel emeld--hidden-paths :test #'equal)
+        ;; `emeld--render' falls back to the same line number when point's
+        ;; node is gone, so point lands on whatever moves up into its place.
+        (emeld--render)
+        (message "Hid \"%s\" (%d hidden this session; %s restores all)"
+                 rel (length emeld--hidden-paths)
+                 (substitute-command-keys
+                  "\\[universal-argument] \\[emeld-hide-at-point]"))))))
+
 ;;;###autoload
 (defun emeld-diff (dir1 dir2 &optional depth)
   "Compare DIR1 and DIR2 side-by-side.
@@ -2374,6 +2417,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "I")   #'emeld-toggle-gitignore)
     (define-key map (kbd "i")   #'emeld-toggle-ignore-whitespace)
     (define-key map (kbd "&")   #'emeld-add-filter-at-point)
+    (define-key map (kbd "C-k") #'emeld-hide-at-point)
     (define-key map (kbd "F")   #'emeld-toggle-show-files)
     (define-key map (kbd ">")   #'emeld-increase-indent)
     (define-key map (kbd "<")   #'emeld-decrease-indent)
@@ -4038,7 +4082,13 @@ from the transient (\\[emeld-dispatch])."
    (when emeld-respect-gitignore
      (propertize " ⚠ gitignore" 'face 'warning))
    (unless emeld-show-files
-     (propertize " ⚠ files hidden" 'face 'warning))))
+     (propertize " ⚠ files hidden" 'face 'warning))
+   ;; Session-only temporary hides (`emeld-hide-at-point'); flag the count so
+   ;; the user knows items are tucked away and how to bring them back.
+   (when emeld--hidden-paths
+     (propertize (format " ⚠ %d hidden (C-u C-k restores)"
+                         (length emeld--hidden-paths))
+                 'face 'warning))))
 
 (defun emeld--progress-bar (fraction &optional width)
   "Return a WIDTH-character text bar visualizing FRACTION (0.0-1.0).
@@ -4201,8 +4251,15 @@ The root node is always visible.  When showing identical files, top-level
 subdirectories are exposed for structural reference; with identical files
 hidden, an all-identical (`same') directory is hidden too, so toggling Same
 off returns to a pure diff view.  Directories containing changes are always
-shown so collapsed folder rows remain navigable."
-  (or (eq node emeld--root-node)
+shown so collapsed folder rows remain navigable.  Nodes temporarily
+hidden this session (`emeld--hidden-paths', via `emeld-hide-at-point') are
+never visible regardless of the other rules."
+  (and
+   ;; Session-only temporary hide; the relpath walk is skipped entirely
+   ;; unless something is actually hidden.
+   (not (and emeld--hidden-paths
+             (member (emeld--node-relpath node) emeld--hidden-paths)))
+   (or (eq node emeld--root-node)
       ;; Expose top-level subdirectories for structural context, but only while
       ;; showing identical files; otherwise a `same' dir must not surface.
       (and emeld-show-same
@@ -4215,7 +4272,7 @@ shown so collapsed folder rows remain navigable."
              (cond ((eq status 'same) emeld-show-same)
                    ((eq status 'different) emeld-show-different)
                    ((memq status '(left-only right-only)) emeld-show-added)
-                   (t t))))))
+                   (t t)))))))
 
 (defun emeld--node-relpath (node)
   "Return the relative path of NODE from the root."
@@ -4476,7 +4533,10 @@ node — see `emeld--node-relpath' for the equivalent slow form."
     (">" "indent more"  emeld-increase-indent :transient t)
     ("<" "indent less"  emeld-decrease-indent :transient t)
     ("}" "pane wider"   emeld-grow-column :transient t)
-    ("{" "pane narrow"  emeld-shrink-column :transient t)]])
+    ("{" "pane narrow"  emeld-shrink-column :transient t)]
+   ["Hide (session)"
+    ("C-k" "hide node (C-u: unhide all)" emeld-hide-at-point)
+    ("U"   "unhide all"                  emeld-unhide-all)]])
 
 (transient-define-prefix emeld-dispatch-navigate ()
   "Emeld navigation and rescanning."
