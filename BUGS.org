@@ -11,13 +11,15 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 ** DOING better indication which are modified
 
+** DOING give fold icons to be customizable
+
+** TODO indent doesn't increase in extreme compact
+
 ** TODO maybe reset by rescanning .dir-locals.el with user change?
 
 ** TODO maybe a quick hide, C-k?
 
 ** TODO maybe show the full patch (home squashed) for the current point
-
-** TODO when copied, don't rescan all just the copied section so no flash
 
 ** TODO maybe still toggle when one side is strikethrough so a copy can also delete?
 

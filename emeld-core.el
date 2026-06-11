@@ -3553,6 +3553,96 @@ directories."
       (copy-file source dest t))
     (message "Copied %s" (file-name-nondirectory (directory-file-name source)))))
 
+(defun emeld--find-node (rel)
+  "Return the tree node whose relative path is REL, or nil.
+Descends from `emeld--root-node' matching each path component against
+child node names."
+  (let ((node emeld--root-node))
+    (catch 'done
+      (dolist (part (split-string rel "/" t) node)
+        (setq node (cl-find part (emeld-node-children node)
+                            :key #'emeld-node-name :test #'string=))
+        (unless node (throw 'done nil))))))
+
+(defun emeld--rel-from-abs (abs)
+  "Return ABS relative to whichever comparison root contains it, else nil."
+  (let ((abs (expand-file-name abs))
+        (l (file-name-as-directory (expand-file-name emeld--left-root)))
+        (r (file-name-as-directory (expand-file-name emeld--right-root))))
+    (cond ((string-prefix-p l abs) (file-relative-name abs l))
+          ((string-prefix-p r abs) (file-relative-name abs r)))))
+
+(defun emeld--recompute-ancestors (node)
+  "Recompute the diff-status of NODE's ancestors up to (and incl.) the root.
+A directory becomes `same' only when none of its children differ."
+  (let ((p (emeld-node-parent node)))
+    (while p
+      (setf (emeld-node-diff-status p)
+            (if (cl-some (lambda (c) (not (eq (emeld-node-diff-status c) 'same)))
+                         (emeld-node-children p))
+                'different 'same))
+      (setq p (emeld-node-parent p)))))
+
+(defun emeld--reclassify-copied-node (node)
+  "Re-classify NODE in place after a copy populated the destination side.
+A file is re-statused from the two sides' on-disk presence (a copy makes
+both sides identical -> `same'); a directory is re-diffed so a non-mirror
+merge that leaves destination-only files is reflected accurately.  NODE's
+ancestors are then recomputed.  Mutates the tree without rendering."
+  (let* ((rel (emeld--node-relpath node))
+         (left-sub (concat (file-name-as-directory emeld--left-root) rel))
+         (right-sub (concat (file-name-as-directory emeld--right-root) rel))
+         (left-exists (file-exists-p left-sub))
+         (right-exists (file-exists-p right-sub)))
+    (cond
+     ;; Should not happen after a copy, but stay correct: gone on both sides.
+     ((not (or left-exists right-exists))
+      (let ((parent (emeld-node-parent node)))
+        (when parent
+          (setf (emeld-node-children parent)
+                (delq node (emeld-node-children parent))))))
+     ;; Directory now on both sides — re-diff the subtree (handles merges).
+     ((and (emeld-node-is-dir node) left-exists right-exists)
+      (let ((entries (emeld--diff-subdir-entries left-sub right-sub))
+            (saved (emeld--collect-expanded node))
+            (saved-dirs (emeld--collect-dirs node)))
+        (setf (emeld-node-left-path node) left-sub
+              (emeld-node-right-path node) right-sub
+              (emeld-node-children node) (emeld--entries-to-nodes entries rel node)
+              (emeld-node-scanned node) t)
+        (setf (emeld-node-diff-status node)
+              (if (cl-some (lambda (c) (not (eq (emeld-node-diff-status c) 'same)))
+                           (emeld-node-children node))
+                  'different 'same))
+        (let ((emeld--saved-expanded saved)
+              (emeld--saved-dirs saved-dirs))
+          (emeld--restore-expanded node))))
+     ;; File (or a directory still single-sided) — re-status from presence.
+     (t
+      (setf (emeld-node-left-path node) (and left-exists left-sub)
+            (emeld-node-right-path node) (and right-exists right-sub)
+            (emeld-node-diff-status node)
+            (cond ((and left-exists right-exists) 'same)
+                  (left-exists 'left-only)
+                  (t 'right-only)))))
+    (emeld--recompute-ancestors node)))
+
+(defun emeld--update-after-copy (jobs)
+  "Update only the copied JOBS in the tree, then re-render once.
+JOBS is the (SOURCE . DEST-ROOT) list `emeld-copy' used.  Each copied
+node is re-classified in place (now present on the destination side) and
+its ancestors recomputed, so the tree reflects the copy without the
+flash of a full rescan.  Falls back to a full `emeld-refresh' if any
+copied node cannot be located in the tree."
+  (let ((ok t))
+    (dolist (job jobs)
+      (let* ((rel (emeld--rel-from-abs (car job)))
+             (node (and rel (emeld--find-node rel))))
+        (if node
+            (emeld--reclassify-copied-node node)
+          (setq ok nil))))
+    (if ok (emeld--render) (emeld-refresh))))
+
 (defun emeld--copy-async (jobs)
   "Copy JOBS via rsync, one at a time, asynchronously.
 JOBS is a list of (SOURCE . DEST-ROOT).  Parent directories are created
@@ -3576,7 +3666,7 @@ buffer ` *emeld-rsync*'."
               (with-current-buffer buf
                 (setq emeld--copy-proc nil)
                 (clrhash emeld--marked-paths)
-                (emeld-refresh))
+                (emeld--update-after-copy jobs))
               (message "Copied %d/%d node(s) via rsync%s" count total
                        (if (> errors 0)
                            (format " (%d error%s — see ` *emeld-rsync*')"
@@ -3621,7 +3711,7 @@ buffer ` *emeld-rsync*'."
             (error (cl-incf errors)))
         (cl-incf errors)))
     (clrhash emeld--marked-paths)
-    (emeld-refresh)
+    (emeld--update-after-copy jobs)
     (message "Copied %d node(s)%s" count
              (if (> errors 0) (format " (%d errors)" errors) ""))))
 
@@ -3659,7 +3749,12 @@ The transfer uses rsync or the built-in copy per `emeld-copy-method'.
 rsync copies run asynchronously (one node at a time) so Emacs stays
 responsive; built-in copies are synchronous.  When `emeld-copy-mirror'
 is on, rsync directory copies use `--delete' to make the destination an
-exact mirror of the source."
+exact mirror of the source.
+
+On completion only the copied nodes are updated in place (re-classified
+and their ancestors recomputed) and the tree is re-rendered once, rather
+than triggering a full rescan — so the copied section reflects the new
+state without the whole tree flashing (see `emeld--update-after-copy')."
   (interactive)
   (when emeld--git-mode
     (user-error "Copy is not available when comparing git revisions"))
