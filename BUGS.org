@@ -9,7 +9,3 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
-** TODO maybe a quick hide, C-k?
-
-** TODO add directory tree display for dired?
-

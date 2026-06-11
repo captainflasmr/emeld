@@ -24,6 +24,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Depth-limited "shallow" scan for huge trees or slow mounts (SMB/NFS): prefix ~emeld-diff~ with a depth (~C-u 2 M-x emeld-diff~) to scan only the top levels and stop; deeper directories are marked with a dim ~…~ and drilled into on demand with ~C-u g~.
 - Integration with ~ediff~.
 - A treemacs-style file-tree sidebar (~M-x emeld-sidebar~) that follows and highlights the active file — built on the same tree machinery (see below).
+- A tree-navigable, Dired-like file manager (~M-x emeld-dired~): mark, copy, rename, delete and create files in a single foldable tree instead of one flat listing (see below).
 - Fully themeable (uses standard Emacs faces).
 
 * Installation
@@ -88,6 +89,41 @@ The active file is revealed — its ancestor directories expanded — and highli
 | q         | Close the sidebar                               |
 
 Customize ~emeld-sidebar-position~ (~left~/~right~), ~emeld-sidebar-width~, ~emeld-sidebar-show-hidden~ and ~emeld-sidebar-follow~.
+
+* Tree-navigable Dired (~M-x emeld-dired~)
+
+~M-x emeld-dired~ shows a directory as a single foldable *tree* you can operate on like Dired — mark files, copy, rename, delete and create files and directories — instead of one flat listing.  It is built with the same tree machinery as the comparison view and the sidebar, but is a stand-alone file manager: it takes over its window like Dired (rather than docking like ~emeld-sidebar~) and is mark/operation oriented rather than following the active file.
+
+Invoked from a Dired buffer it roots at that buffer's directory; elsewhere it roots at ~default-directory~.  A prefix arg (~C-u M-x emeld-dired~), or ~M-x emeld-dired-find~, prompts for the directory.  ~^~ re-roots at the parent directory.
+
+Marking is Dired-style and single-column: ~m~ marks (~*~), ~d~ flags for deletion (~D~).  Operations act on the marked files, or — when nothing is marked — on the file at point, exactly like Dired.  Dotfiles are shown by default (toggle with ~h~); children load lazily as you open directories, and the header line shows live marked/flagged counts.  Every operation rebuilds the tree in place, preserving expansion and point.
+
+| Key       | Action                                                     |
+|-----------+------------------------------------------------------------|
+| RET / f   | Visit the file at point (or toggle a directory)            |
+| o         | Visit the file in another window                           |
+| TAB       | Expand / collapse the directory at point                   |
+| n / p     | Next / previous line                                       |
+| ^         | Re-root at the parent directory                            |
+| [ / ]     | Collapse all / expand all                                  |
+| m         | Mark the file at point (~*~)                                |
+| d         | Flag the file at point for deletion (~D~)                   |
+| u / DEL   | Unmark (forward / backward)                                |
+| U         | Unmark all                                                 |
+| t         | Toggle marks on all visible files                          |
+| x         | Delete the flagged (~D~) files                              |
+| D         | Delete the marked files (or file at point)                 |
+| C         | Copy the marked files (or file at point)                   |
+| R         | Rename / move the marked files (or file at point)          |
+| +         | Create a directory                                         |
+| M-+       | Create a file (and visit it)                               |
+| g         | Refresh from disk (keeps expansion and point)              |
+| h         | Toggle hidden (dot) files                                  |
+| z         | Cycle tree density (compact → extreme → wide)              |
+| T         | Toggle tree-line guides                                    |
+| q         | Quit                                                       |
+
+Deletions move the files to trash rather than erasing them outright.  When several files are marked, ~C~ and ~R~ require the destination to be an existing directory.  Customize ~emeld-dired-show-hidden~ (default ~t~) to show or hide dotfiles by default.
 
 * Transient Menu (~?~)
 
