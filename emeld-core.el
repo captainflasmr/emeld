@@ -1,7 +1,7 @@
 ;;; emeld-core.el --- Meld-Inspired Local Diff: shared core -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.44.0
+;; Version: 0.45.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -324,6 +324,11 @@ that points at HEAD as \"HEAD\" rather than a bare abbreviated SHA.")
 (defvar-local emeld--column-width nil)
 (defvar-local emeld--saved-expanded nil
   "Saved expanded directory paths to restore after refresh.")
+(defvar-local emeld--saved-dirs nil
+  "All directory paths that existed when `emeld--saved-expanded' was captured.
+Lets `emeld--restore-expanded' tell a directory the user had collapsed from
+one that has only just appeared (e.g. a subtree revealed by toggling
+`emeld-respect-gitignore' off), so new content is shown rather than folded.")
 (defcustom emeld-benchmark nil
   "When non-nil, record and display detailed timing for each pipeline phase."
   :type 'boolean
@@ -2261,7 +2266,8 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "=")   #'emeld-soft-diff)
     (define-key map (kbd "f")   #'emeld-find-file)
     (define-key map (kbd "v")   #'emeld-find-file)
-    (define-key map (kbd "g")   #'emeld-rescan)
+    (define-key map (kbd "g")   #'emeld-redraw)
+    (define-key map (kbd "G")   #'emeld-rescan)
     (define-key map (kbd "k")   #'emeld-stop-scan)
     (define-key map (kbd "R")   #'emeld-toggle-mirror)
     (define-key map (kbd "r")   #'emeld-redraw)
@@ -2294,7 +2300,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "T")   #'emeld-toggle-tree-lines)
     (define-key map (kbd "z")   #'emeld-cycle-tree-density)
     (define-key map (kbd "s")   #'emeld-toggle-show-strikethrough)
-    (define-key map (kbd "G")   #'emeld-toggle-gitignore)
+    (define-key map (kbd "I")   #'emeld-toggle-gitignore)
     (define-key map (kbd "i")   #'emeld-toggle-ignore-whitespace)
     (define-key map (kbd "F")   #'emeld-toggle-show-files)
     (define-key map (kbd ">")   #'emeld-increase-indent)
@@ -2817,6 +2823,7 @@ buffer's `revert-buffer-function', which is called with two arguments."
     (setq emeld--scan-buf buf
           emeld--benchmark-data nil
           emeld--saved-expanded (emeld--collect-expanded root)
+          emeld--saved-dirs (emeld--collect-dirs root)
           emeld--saved-point-path (when node
                                     (or (emeld-node-left-path node)
                                         (emeld-node-right-path node)))
@@ -2892,7 +2899,8 @@ on a file, its containing directory is rescanned."
        ;; Present on both sides — re-diff and rebuild the subtree.
        ((and left-exists right-exists)
         (let ((entries (emeld--diff-subdir-entries left-sub right-sub))
-              (saved (emeld--collect-expanded node)))
+              (saved (emeld--collect-expanded node))
+              (saved-dirs (emeld--collect-dirs node)))
           (setf (emeld-node-left-path node) left-sub
                 (emeld-node-right-path node) right-sub
                 (emeld-node-children node) (emeld--entries-to-nodes entries rel node))
@@ -2902,7 +2910,9 @@ on a file, its containing directory is rescanned."
                     'different 'same))
           ;; A full recursive subdir scan clears any depth-limit boundary mark.
           (setf (emeld-node-scanned node) t)
-          (let ((emeld--saved-expanded saved)) (emeld--restore-expanded node))
+          (let ((emeld--saved-expanded saved)
+                (emeld--saved-dirs saved-dirs))
+            (emeld--restore-expanded node))
           (emeld--render)
           (message "Rescanned %s — %d change%s" rel
                    (cl-count-if (lambda (e) (not (eq (cdr e) 'same))) entries)
@@ -2943,14 +2953,30 @@ asynchronously (`emeld-refresh')."
     paths))
 
 (defun emeld--restore-expanded (node)
-  "Restore expansion state from `emeld--saved-expanded' for tree under NODE."
+  "Restore expansion state from `emeld--saved-expanded' for tree under NODE.
+Only directories that already existed when the state was captured (those in
+`emeld--saved-dirs') are re-collapsed when absent from `emeld--saved-expanded'.
+Directories that have newly appeared since — e.g. a subtree revealed by
+toggling `emeld-respect-gitignore' off — keep their default-expanded state,
+so the new content is shown rather than silently folded (matching a first
+scan, where everything starts expanded)."
   (when emeld--saved-expanded
     (dolist (child (emeld-node-children node))
       (when (emeld-node-is-dir child)
         (let ((rel (emeld--node-relpath child)))
-          (unless (member rel emeld--saved-expanded)
+          (when (and (member rel emeld--saved-dirs)
+                     (not (member rel emeld--saved-expanded)))
             (setf (emeld-node-expanded child) nil))
           (emeld--restore-expanded child))))))
+
+(defun emeld--collect-dirs (node)
+  "Return a list of relative paths for every directory under NODE."
+  (let ((paths nil))
+    (dolist (child (emeld-node-children node))
+      (when (emeld-node-is-dir child)
+        (push (emeld--node-relpath child) paths)
+        (setq paths (nconc (emeld--collect-dirs child) paths))))
+    paths))
 
 (defun emeld--maybe-populate-lazy-dir (node)
   "Populate NODE's children if it is a lazy (unexpanded) single-sided directory."
@@ -3718,36 +3744,38 @@ In git mode the two revisions are swapped and the comparison re-scanned."
 
 (defun emeld--toggle-indicator (label enabled)
   "Return a string for toggle LABEL showing ENABLED state.
-Enabled toggles are bold; disabled toggles use the plain header-line
-face.  No colour is applied, only weight, so the status display stays on
-the standard foreground and background."
-  (if enabled (propertize label 'face 'bold) label))
+A leading ASCII checkbox prefixes LABEL: \"[x] \" when ENABLED, \"[ ] \"
+when not.  Plain ASCII is used (rather than Unicode check glyphs) so the
+indicator renders correctly on Windows consoles and in terminals without
+Unicode support.  No face is applied — the checkbox alone signals state,
+since dimming the off labels can make them unreadable on some themes."
+  (concat (if enabled "[x] " "[ ] ") label))
 
 (defun emeld--display-state-string ()
-  "Return a compact string showing current display toggle states.
-The Meld-style primary filters (Same/Modified/New) are grouped first and
-separated by a vertical bar from the secondary display flags (F files,
-T tree-lines, s strikethrough, G respect-gitignore) so the primary
-filtering stays distinct from the rest.  When files are hidden
-\(`emeld-show-files' nil) the F flag and an explicit \"files hidden\"
-note are shown in the `warning' face, since a files-less tree can look
-empty and be mistaken for \"no differences\"."
+  "Return a string showing the primary Same/New/Modified filter states.
+Each label is spelled out with a leading ASCII checkbox.  Scan-affecting
+notes are appended after them: the whitespace mode (-w/-b) when active, a
+`warning'-faced \"⚠ gitignore\" note while `emeld-respect-gitignore' is
+on (git-ignored files are dropped from the scan, which can silently hide
+whole subtrees), and a `warning'-faced \"⚠ files hidden\" note when
+`emeld-show-files' is nil, since a files-less tree can look empty and be
+mistaken for \"no differences\".  The secondary display
+toggles (Files/Tree-lines/Strikethrough/Gitignore) are intentionally
+omitted here to keep the header line uncluttered; they remain reachable
+from the transient (\\[emeld-dispatch])."
   (concat
-   ;; Meld primary filtering: Same / Modified / New
-   (emeld--toggle-indicator "S" emeld-show-same)
-   (emeld--toggle-indicator "M" emeld-show-different)
-   (emeld--toggle-indicator "N" emeld-show-added)
-   " │ "
-   ;; Secondary display flags.  Files-off is emphasized: hiding files can
-   ;; make the tree look empty even when differences exist.
-   (if emeld-show-files
-       (emeld--toggle-indicator "F" t)
-     (propertize "F" 'face 'warning))
-   (emeld--toggle-indicator "T" emeld-show-tree-lines)
-   (emeld--toggle-indicator "s" emeld-show-strikethrough)
-   (emeld--toggle-indicator "G" emeld-respect-gitignore)
+   (emeld--toggle-indicator "Same" emeld-show-same)
+   " "
+   (emeld--toggle-indicator "New" emeld-show-added)
+   " "
+   (emeld--toggle-indicator "Modified" emeld-show-different)
    (when emeld-ignore-whitespace
      (if (eq emeld-ignore-whitespace 'all) " -w" " -b"))
+   ;; Git-ignored files are silently dropped from the scan, which can hide
+   ;; whole subtrees (e.g. anything under a `.git/info/exclude' entry).
+   ;; Flag it only while active so the omission is never a surprise.
+   (when emeld-respect-gitignore
+     (propertize " ⚠ gitignore" 'face 'warning))
    (unless emeld-show-files
      (propertize " ⚠ files hidden" 'face 'warning))))
 
@@ -3770,18 +3798,19 @@ face so it uses the standard header-line foreground and background."
   (pcase emeld--status-phase
     ('running-diff
      (if (> emeld--scan-diff-count 0)
-         (format " [Scanning… %d entries]" emeld--scan-diff-count)
-       " [Scanning…]"))
+         (format " Scanning… %d entries" emeld--scan-diff-count)
+       " Scanning…"))
     ('building-tree
      (cond
-      ((zerop emeld--scan-total) " [Building tree…]")
+      ((zerop emeld--scan-total) " Building tree…")
       ((< emeld--scan-processed emeld--scan-total)
        (let ((frac (/ (float emeld--scan-processed) emeld--scan-total)))
-         (format " [Building tree %s %d%%]"
+         (format " Building tree %s %d%%"
                  (emeld--progress-bar frac) (round (* 100 frac)))))
-      (t " [Assembling nodes…]")))
-    ('done " [Ready]")
-    (_     " [Idle]")))
+      (t " Assembling nodes…")))
+    ;; When the scan is finished or idle there is nothing in progress to
+    ;; report, so show no status text at all — only the filter legend.
+    (_ "")))
 
 (defun emeld--update-header-line ()
   "Install the header-line format showing scan progress, status and legend.
@@ -3790,7 +3819,7 @@ reflects the live scan counters without needing to be re-installed."
   (setq header-line-format
         '(:eval
           (concat (emeld--scan-progress-string)
-                  " [" (emeld--display-state-string) "] "
+                  " " (emeld--display-state-string) " "
                   ;; Flag a git revision comparison and which revs.
                   (when emeld--git-mode
                     (propertize (format "[git %s→%s] "
@@ -4165,7 +4194,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
      (lambda () (interactive) (emeld-cycle-tree-density)) :transient t)
     ("s" (lambda () (if emeld-show-strikethrough "[x] strikethrough" "[ ] strikethrough"))
      (lambda () (interactive) (emeld-toggle-show-strikethrough)) :transient t)
-    ("G" (lambda () (if emeld-respect-gitignore "[x] gitignore" "[ ] gitignore"))
+    ("I" (lambda () (if emeld-respect-gitignore "[x] gitignore" "[ ] gitignore"))
      (lambda () (interactive) (emeld-toggle-gitignore)))
     ("i" (lambda ()
            (pcase emeld-ignore-whitespace
@@ -4189,7 +4218,8 @@ node — see `emeld--node-relpath' for the equivalent slow form."
 (transient-define-prefix emeld-dispatch-navigate ()
   "Emeld navigation and rescanning."
   ["Navigate"
-   ("g"   "rescan (C-u: dir at point)" emeld-rescan)
+   ("g"   "reset layout + redraw" emeld-redraw)
+   ("G"   "rescan (C-u: dir at point)" emeld-rescan)
    ("k"   "stop scan"            emeld-stop-scan)
    ("r"   "reset layout + redraw" emeld-redraw)
    ("W"   "swap panes"         emeld-swap-panes)
@@ -4234,10 +4264,10 @@ node — see `emeld--node-relpath' for the equivalent slow form."
   [["File Status"
      ("S" (lambda () (if emeld-show-same "[x] Same" "[ ] Same"))
      (lambda () (interactive) (emeld-toggle-show-same)) :transient t)
-     ("M-d" (lambda () (if emeld-show-different "[x] Modified" "[ ] Modified"))
-     (lambda () (interactive) (emeld-toggle-show-different)) :transient t)
      ("N" (lambda () (if emeld-show-added "[x] New" "[ ] New"))
-     (lambda () (interactive) (emeld-toggle-show-added)) :transient t)]
+     (lambda () (interactive) (emeld-toggle-show-added)) :transient t)
+     ("M-d" (lambda () (if emeld-show-different "[x] Modified" "[ ] Modified"))
+     (lambda () (interactive) (emeld-toggle-show-different)) :transient t)]
    ["Filename"
     :if (lambda () emeld-filter-groups)
     :class transient-column

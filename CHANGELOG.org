@@ -1,7 +1,15 @@
 #+TITLE: Changelog for Emeld
 
 * [Unreleased]
+
+* [0.45.0] - 2026-06-11
+** Fixed
+- Rescanning no longer folds away newly-appeared directories.  After a rescan, expansion state is restored only for directories that already existed when it was captured; directories that have just appeared — e.g. a subtree revealed by toggling ~.gitignore~ respect *off* — keep their default-expanded state, matching a first scan, so the new content is shown rather than silently collapsed.
+** Added
+- The header line shows a ~⚠ gitignore~ note (warning face) while ~emeld-respect-gitignore~ is on, alongside the existing ~⚠ files hidden~ note.  It appears only when active, flagging that git-ignored files — which can be whole subtrees via ~.gitignore~, ~.git/info/exclude~ or the global excludes — are being dropped from the scan, so the omission is never a surprise.
 ** Changed
+- Keybinding moves: ~g~ now redraws (reset layout + redraw, alias of ~r~), ~G~ now rescans (~C-u G~ rescans the directory at point), and ~.gitignore~ respect moved from ~G~ to ~I~ (~emeld-toggle-gitignore~).  This follows the common ~g~=refresh / ~G~=full-rescan convention.
+- Header-line legend redesigned.  The primary filters are spelled out in Meld's order — ~Same~ ~New~ ~Modified~ — each with an ASCII ~[x]~/~[ ]~ checkbox (renders correctly on Windows consoles and in terminals without Unicode).  The secondary display flags (Files/Tree-lines/Strikethrough/Gitignore) were dropped from the header to reduce clutter — they remain in the transient (~?~) — and the enclosing brackets around the status group were removed.  The scan-status text (~Scanning…~, ~Building tree…~) now appears only while a scan is in progress; when idle the header shows just the filter legend.
 - ~z~ now *cycles* tree density instead of toggling it: compact (default) → extreme → wide → compact.  The new ~extreme~ density collapses each level to a single column regardless of ~emeld-indent-offset~ (~│└file~) for the densest possible tree — especially useful in the narrow ~emeld-sidebar~, where ~z~ is now also bound (~emeld-sidebar-cycle-density~, kept buffer-local to the sidebar).  The boolean ~emeld-compact-tree~ option is replaced by the tri-state ~emeld-tree-density~ symbol (~compact~/~extreme~/~wide~), and ~emeld-toggle-compact-tree~ is now an obsolete alias for ~emeld-cycle-tree-density~.  The header-line flags the active non-default density (e.g. ~[Extreme]~, ~[Wide]~), and ~r~ (~emeld-redraw~) resets it along with the other layout vars.
 
 * [0.44.0] - 2026-06-02

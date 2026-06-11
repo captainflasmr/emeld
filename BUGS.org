@@ -9,6 +9,24 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
+** TODO look at M keybinding
+
+** TODO maybe remove redraw
+
+** TODO maybe reset by rescanning .dir-locals.el with user change?
+
+** TODO / to replace \ to show only diffs
+
+** TODO easier way to jump to A or B dirs, key "A", key "B"
+
+** TODO maybe a quick hide, C-k?
+
+** TODO maybe show the full patch (home squashed) for the current point
+
+** TODO when copied, don't rescan all just the copied section so no flash
+
+** TODO maybe still toggle when one side is strikethrough so a copy can also delete?
+
 ** TODO when edited file and then rescanned newly modified files didn't show
 
 ** TODO check re-render in window that obeys proper proportions
