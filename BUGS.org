@@ -9,21 +9,17 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
-** DOING better indication which are modified
-
-** DOING give fold icons to be customizable
+** DOING maybe still toggle when one side is strikethrough so a copy can also delete?
 
 ** TODO indent doesn't increase in extreme compact
+
+** TODO add directory to .dir-locals.el
 
 ** TODO maybe reset by rescanning .dir-locals.el with user change?
 
 ** TODO maybe a quick hide, C-k?
 
 ** TODO maybe show the full patch (home squashed) for the current point
-
-** TODO maybe still toggle when one side is strikethrough so a copy can also delete?
-
-** TODO when edited file and then rescanned newly modified files didn't show
 
 ** TODO check re-render in window that obeys proper proportions
 
