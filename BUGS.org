@@ -9,15 +9,9 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
-** TODO look at M keybinding
-
-** TODO maybe remove redraw
+** DOING better indication which are modified
 
 ** TODO maybe reset by rescanning .dir-locals.el with user change?
-
-** TODO / to replace \ to show only diffs
-
-** TODO easier way to jump to A or B dirs, key "A", key "B"
 
 ** TODO maybe a quick hide, C-k?
 

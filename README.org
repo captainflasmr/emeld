@@ -9,12 +9,12 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Side-by-side view in a single buffer.
 - Recursive glob-based filtering (like Meld) — excluded at the ~diff~ level.
 - ~.gitignore~ support, on by default — ignored files hidden on both sides, toggle with ~I~.  While active the header line shows a ~⚠ gitignore~ note, so silently-hidden subtrees are never a surprise.
-- Instant toggles for Identical, Modified, New, and File visibility (~S~/~M-d~/~N~/~F~).
+- Instant toggles for Same, New, Modified, and File visibility (~S~/~N~/~M~/~F~).
 - Orphan files shown with strikethrough on the missing side (Meld-style, toggle ~s~).
-- Dired-style, per-side marking (~m~/~u~/~U~): the ~*~ sits in the column of the side you mark, and a node can be marked left, right, or both.  Bulk copy (~C~) copies each marked node from its marked side; bulk delete (~x~) deletes from every marked side; mark all changed files (~M~), or bulk-mark by status (~* m~ modified, ~* l~ left-only, ~* c~ the left→right sync set).
+- Dired-style, per-side marking (~m~/~u~/~U~): the ~*~ sits in the column of the side you mark, and a node can be marked left, right, or both.  Bulk copy (~C~) copies each marked node from its marked side; bulk delete (~x~) deletes from every marked side; bulk-mark by status (~* m~ modified, ~* l~ left-only, ~* c~ the left→right sync set, ~* a~ all changed).
 - Filter groups toggleable from the transient menu.
 - Org-mode-style visibility cycling: ~S-TAB~ cycles the whole tree (TOP → DIRS → CHANGES), ~TAB~ does the equivalent for the subtree at point.  On a file, ~TAB~ instead peeks an inline diff underneath the row (Magit-style), expandable and collapsible without leaving the tree.
-- Bulk expand/collapse: ~[~ collapse all, ~]~ expand all, ~\\~ expand only paths leading to changes.
+- Bulk expand/collapse: ~[~ collapse all, ~]~ expand all, ~/~ expand only paths leading to changes.
 - File copying between directories (~C~), via rsync when available — asynchronous and delta-efficient, with an optional exact-mirror (~--delete~) mode toggled with ~R~.
 - Recursive ~diff~ buffers for the whole root (~D~) or the directory at point (~d~), and a non-intrusive preview (~=~/~SPC~) that diffs/opens the node at point while keeping point in the tree.
 - Export changes as a unified-diff patch (~P~).
@@ -95,17 +95,17 @@ The transient is a two-level hierarchy.  The top level keeps the menus you reach
 
 Top level:
 
-- ~File Status~ :: Toggle file visibility (~S~ same, ~M-d~ modified, ~N~ added).
+- ~File Status~ :: Toggle the primary filters (~S~ same, ~N~ added, ~M~ modified).
 - ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~cl~ list all globs.
 - ~Preset~ :: Save the current directory pair (~ps~), load a saved pair (~pl~), delete one (~pd~).
 - ~Menus~ :: Open a sub-menu — ~v~ View, ~n~ Navigate, ~f~ File, ~m~ Mark.
 
 Sub-menus (opened from the ~Menus~ column):
 
-- ~View~ (~v~) :: Two columns. ~Show~ toggles what is displayed — files (~F~ hide files, show directories only), tree-lines (~T~), tree density (~z~ cycles compact → extreme → wide), strikethrough (~s~), ~.gitignore~ respect (~I~). ~Layout~ holds bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~\\~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), and pane resize (~{~/~}~).
-- ~Navigate~ (~n~) :: Rescan (~G~; ~C-u G~ rescans just the directory at point), stop an in-progress scan (~k~), redraw after a resize (~g~ or ~r~), swap panes (~W~), and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
-- ~File~ (~f~) :: Operate on files (~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree — soft diff a modified file, show a new/one-sided one, fold a directory, ~D~ diff whole root, ~d~ diff directory at point, ~C~ copy marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point, ~w~ copy path, ~P~ format patch).
-- ~Mark~ (~m~) :: Mark/unmark the file on the current side (~m~/~u~); mark all changed files (~M~); bulk-mark by status — modified (~* m~), left-only (~* l~), or the whole left→right sync set (~* c~, same set as ~M~); ~U~ unmark all.
+- ~View~ (~v~) :: Two columns. ~Show~ toggles what is displayed — files (~F~ hide files, show directories only), tree-lines (~T~), tree density (~z~ cycles compact → extreme → wide), strikethrough (~s~), ~.gitignore~ respect (~I~). ~Layout~ holds bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~/~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), and pane resize (~{~/~}~).
+- ~Navigate~ (~n~) :: Rescan (~G~; ~C-u G~ rescans just the directory at point), stop an in-progress scan (~k~), redraw after a resize (~g~), swap panes (~W~), and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
+- ~File~ (~f~) :: Operate on files (~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree — soft diff a modified file, show a new/one-sided one, fold a directory, ~A~/~B~ jump to dired on the left/right side, ~D~ diff whole root, ~d~ diff directory at point, ~C~ copy marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point, ~w~ copy path, ~P~ format patch).
+- ~Mark~ (~m~) :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), the whole left→right sync set (~* c~), or all changed files (~* a~, same set as ~* c~); ~U~ unmark all.
 
 Every command keeps its direct key binding in ~emeld-mode~ (see below), so the menu hierarchy is only for discovery — you never have to drill through it to reach a command you already know.
 
@@ -117,11 +117,13 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | S-TAB     | Cycle whole tree: TOP → DIRS → CHANGES            |
 | [         | Collapse all                                      |
 | ]         | Expand all                                        |
-| \\        | Expand only paths to changes                      |
+| /         | Expand only paths to changes                      |
 | RET       | Smart action (Ediff/open file; dired/expand dir)  |
 | e         | Ediff the file at point (left vs right)           |
 | =         | Preview (point stays in tree): soft diff (modified), show file (new), fold (Dir) |
 | f, v      | Find File (Open current side)                     |
+| A         | Dired the left side (node at point, or left root) |
+| B         | Dired the right side (node at point, or right root) |
 | D         | Diff whole root (recursive unified ~diff~ buffer) |
 | d         | Diff directory at point (recursive; file → its dir) |
 | C         | Copy marked nodes (each from its marked side) or node at point |
@@ -131,16 +133,16 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | SPC       | Preview (point stays in tree): fold (Dir), soft diff (modified), show file (new) |
 | o         | Jump to the other side                            |
 | S         | Toggle same (identical) files                     |
-| M-d       | Toggle modified files                             |
+| M         | Toggle modified files                             |
 | N         | Toggle added (new) files                          |
 | F         | Toggle file visibility (hide files, show dirs only)|
 | m         | Mark file on current side                         |
-| M         | Mark all changed files (modified + left-only)     |
 | u         | Unmark file on current side                       |
 | U         | Unmark all nodes                                  |
 | * m       | Mark all modified files                           |
 | * l       | Mark all left-only (created) files                |
 | * c       | Mark all to copy left→right (modified + left-only)|
+| * a       | Mark all changed files (modified + left-only)     |
 | s         | Toggle strikethrough display                      |
 | T         | Toggle tree-line display                          |
 | z         | Cycle tree density: compact → extreme → wide      |
@@ -149,7 +151,7 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | G         | Rescan whole comparison (~C-u G~: rescan dir at point) |
 | k         | Stop/abort an in-progress scan (keeps the partial tree) |
 | R         | Toggle mirror copy (rsync ~--delete~; shows ~[Mirror]~ in header) |
-| g, r      | Reset layout (indent + pane split + density) to defaults and redraw |
+| g         | Reset layout (indent + pane split + density) to defaults and redraw |
 | n/p       | Navigation (Side-aware)                           |
 | M-n/M-p   | Jump to next/previous file change                 |
 | { / }     | Shrink/grow left pane width                       |

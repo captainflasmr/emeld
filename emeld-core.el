@@ -2260,17 +2260,18 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "S-TAB")     #'emeld-cycle-visibility)
     (define-key map (kbd "[")   #'emeld-collapse-all)
     (define-key map (kbd "]")   #'emeld-expand-all)
-    (define-key map (kbd "\\")  #'emeld-expand-changes)
+    (define-key map (kbd "/")   #'emeld-expand-changes)
     (define-key map (kbd "RET") #'emeld-action)
     (define-key map (kbd "e")   #'emeld-ediff)
     (define-key map (kbd "=")   #'emeld-soft-diff)
     (define-key map (kbd "f")   #'emeld-find-file)
     (define-key map (kbd "v")   #'emeld-find-file)
+    (define-key map (kbd "A")   #'emeld-dired-left)
+    (define-key map (kbd "B")   #'emeld-dired-right)
     (define-key map (kbd "g")   #'emeld-redraw)
     (define-key map (kbd "G")   #'emeld-rescan)
     (define-key map (kbd "k")   #'emeld-stop-scan)
     (define-key map (kbd "R")   #'emeld-toggle-mirror)
-    (define-key map (kbd "r")   #'emeld-redraw)
     (define-key map (kbd "W")   #'emeld-swap-panes)
     (define-key map (kbd "n")   #'emeld-next-line)
     (define-key map (kbd "p")   #'emeld-previous-line)
@@ -2290,12 +2291,12 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "m")   #'emeld-mark)
     (define-key map (kbd "u")   #'emeld-unmark)
     (define-key map (kbd "U")   #'emeld-unmark-all)
-    (define-key map (kbd "M")   #'emeld-mark-all)
     (define-key map (kbd "* m") #'emeld-mark-modified)
     (define-key map (kbd "* l") #'emeld-mark-left-only)
     (define-key map (kbd "* c") #'emeld-mark-to-copy)
+    (define-key map (kbd "* a") #'emeld-mark-all)
     (define-key map (kbd "S")   #'emeld-toggle-show-same)
-    (define-key map (kbd "M-d") #'emeld-toggle-show-different)
+    (define-key map (kbd "M")   #'emeld-toggle-show-different)
     (define-key map (kbd "N")   #'emeld-toggle-show-added)
     (define-key map (kbd "T")   #'emeld-toggle-tree-lines)
     (define-key map (kbd "z")   #'emeld-cycle-tree-density)
@@ -3102,6 +3103,40 @@ In git mode the file is shown at the current side's revision (via
               (find-file-other-window path)
             (message "No file on %s side" (if on-left "left" "right"))))))))
 
+(defun emeld--dired-side (on-left)
+  "Open dired for the ON-LEFT (else right) side as a quick jump.
+Targets the node at point on that side: a directory opens dired in it, a
+file opens dired on its parent with point on the file.  When the node has
+no path on that side (or point is not on a node) the side's comparison
+root is used instead.  In git mode the node's repo-relative path is
+resolved against the repo's working tree."
+  (let* ((node (get-text-property (point) 'emeld-node))
+         (root (if on-left emeld--left-root emeld--right-root))
+         (side-path
+          (cond
+           ((and node emeld--git-mode emeld--git-repo)
+            (expand-file-name (emeld--node-relpath node) emeld--git-repo))
+           (node (if on-left (emeld-node-left-path node)
+                   (emeld-node-right-path node)))))
+         (target (or (and side-path (file-exists-p side-path) side-path)
+                     root)))
+    (unless (and target (file-exists-p target))
+      (user-error "No %s directory to open" (if on-left "left" "right")))
+    (if (file-directory-p target)
+        (dired target)
+      (dired (file-name-directory target))
+      (dired-goto-file target))))
+
+(defun emeld-dired-left ()
+  "Jump to dired for the left side of the node at point (or the left root)."
+  (interactive)
+  (emeld--dired-side t))
+
+(defun emeld-dired-right ()
+  "Jump to dired for the right side of the node at point (or the right root)."
+  (interactive)
+  (emeld--dired-side nil))
+
 (defun emeld-soft-diff ()
   "Contextual \"just act\" command for SPC (and `=').
 Do the obvious thing for the node at point:
@@ -3442,8 +3477,7 @@ making the right directory match the left for those files."
 (defun emeld-mark-all ()
   "Mark all changed files: modified plus left-only (new) files.
 This is the left-to-right sync set, so the marked files can then be
-copied with `emeld-copy'.  Mirrors the single-key mark-all of `vc-dir';
-same file set as `emeld-mark-to-copy'."
+copied with `emeld-copy'.  Same file set as `emeld-mark-to-copy'."
   (interactive)
   (emeld--mark-and-report '(different left-only) "changed file"))
 
@@ -4208,7 +4242,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
    ["Layout"
     ("[" "collapse all"  emeld-collapse-all :transient t)
     ("]" "expand all"    emeld-expand-all :transient t)
-    ("\\" "expand to changes" emeld-expand-changes :transient t)
+    ("/" "expand to changes" emeld-expand-changes :transient t)
     ("<backtab>" "cycle visibility" emeld-cycle-visibility :transient t)
     (">" "indent more"  emeld-increase-indent :transient t)
     ("<" "indent less"  emeld-decrease-indent :transient t)
@@ -4221,7 +4255,6 @@ node — see `emeld--node-relpath' for the equivalent slow form."
    ("g"   "reset layout + redraw" emeld-redraw)
    ("G"   "rescan (C-u: dir at point)" emeld-rescan)
    ("k"   "stop scan"            emeld-stop-scan)
-   ("r"   "reset layout + redraw" emeld-redraw)
    ("W"   "swap panes"         emeld-swap-panes)
    ("o"   "jump other side"    emeld-jump-other-side :transient t)
    ("M-n" "next change"        emeld-next-change :transient t)
@@ -4238,6 +4271,8 @@ node — see `emeld--node-relpath' for the equivalent slow form."
    ("e"   "ediff"              emeld-ediff)
    ("="   "diff / open / fold" emeld-soft-diff)
    ("SPC" "diff / open / fold" emeld-soft-diff)
+   ("A"   "dired left side"    emeld-dired-left)
+   ("B"   "dired right side"   emeld-dired-right)
    ("TAB" "peek inline diff (file)" emeld-toggle-inline-diff :transient t)
    ("D"   "diff root (recursive)" emeld-diff-root)
    ("d"   "diff dir at point"   emeld-diff-dir)
@@ -4252,11 +4287,11 @@ node — see `emeld--node-relpath' for the equivalent slow form."
   "Emeld marking."
   ["Mark"
    ("m"   "mark"            emeld-mark :transient t)
-   ("M"   "all changed"     emeld-mark-all :transient t)
    ("u"   "unmark"          emeld-unmark :transient t)
    ("* m" "modified"        emeld-mark-modified :transient t)
    ("* l" "left-only (new)" emeld-mark-left-only :transient t)
    ("* c" "→ copy right"    emeld-mark-to-copy :transient t)
+   ("* a" "all changed"     emeld-mark-all :transient t)
    ("U"   "unmark all"      emeld-unmark-all :transient t)])
 
 (transient-define-prefix emeld-dispatch ()
@@ -4266,7 +4301,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
      (lambda () (interactive) (emeld-toggle-show-same)) :transient t)
      ("N" (lambda () (if emeld-show-added "[x] New" "[ ] New"))
      (lambda () (interactive) (emeld-toggle-show-added)) :transient t)
-     ("M-d" (lambda () (if emeld-show-different "[x] Modified" "[ ] Modified"))
+     ("M" (lambda () (if emeld-show-different "[x] Modified" "[ ] Modified"))
      (lambda () (interactive) (emeld-toggle-show-different)) :transient t)]
    ["Filename"
     :if (lambda () emeld-filter-groups)
