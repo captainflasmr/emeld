@@ -3,8 +3,8 @@
 ;; Author: James Dyer <captainflasmr@gmail.com>
 ;; Maintainer: James Dyer <captainflasmr@gmail.com>
 ;; Keywords: files, tools
-;; Version: 0.45.0
-;; Package-Version: 0.45.0
+;; Version: 0.46.0
+;; Package-Version: 0.46.0
 ;; Package-Requires: ((emacs "27.1") (transient "0.3.0"))
 ;; URL: https://github.com/captainflasmr/emeld
 

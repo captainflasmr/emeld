@@ -9,19 +9,7 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
-** TODO indent doesn't increase in extreme compact
-
-** TODO add directory to .dir-locals.el
-
-** TODO maybe reset by rescanning .dir-locals.el with user change?
-
 ** TODO maybe a quick hide, C-k?
 
-** TODO maybe show the full patch (home squashed) for the current point
-
-** TODO check re-render in window that obeys proper proportions
-
 ** TODO add directory tree display for dired?
-
-** TODO Scanning got stuck after copying files and then auto rescan
 

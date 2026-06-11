@@ -147,6 +147,7 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | T         | Toggle tree-line display                          |
 | z         | Cycle tree density: compact → extreme → wide      |
 | I         | Toggle ~.gitignore~ respect (rescans)             |
+| &         | Filter node at point → save to ~.dir-locals.el~ and rescan |
 | W         | Swap left/right panes                              |
 | G         | Rescan whole comparison (~C-u G~: rescan dir at point) |
 | k         | Stop/abort an in-progress scan (keeps the partial tree) |
@@ -269,3 +270,5 @@ Emeld ships with Meld-style default filter groups (see above).  To override them
 #+end_src
 
 Toggle named groups on/off from the transient menu (~?~) or with ~M-x emeld-toggle-filter-group~.  The header line shows the current display state; review which groups are active and their globs with ~M-x emeld-list-filter-groups~ (~cl~ in the transient).
+
+You do not have to write ~.dir-locals.el~ by hand.  With point on a file or directory in the tree, ~&~ (~emeld-add-filter-at-point~, also under ~&~ in the transient filter column) adds it as a filter and saves it: it prompts for the glob (defaulting to the basename — edit it to e.g. ~*.log~ or a ~sub/dir~ relative path) and the group to add it to (completing over existing names; a new name creates a new, active group), writes the updated ~emeld-filter-groups~ to ~.dir-locals.el~ at the left root, activates the group and rescans so the matching files drop out at once.  Repeat it to progressively tidy up a fresh comparison; the exclusions persist for next time.

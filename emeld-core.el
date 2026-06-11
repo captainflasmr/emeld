@@ -1,7 +1,7 @@
 ;;; emeld-core.el --- Meld-Inspired Local Diff: shared core -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.45.0
+;; Version: 0.46.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -2044,6 +2044,60 @@ GROUP is the name of a group defined in `emeld-filter-groups'."
         (goto-char (point-min))))
     (pop-to-buffer "*emeld filter groups*")))
 
+(defun emeld-add-filter-at-point (glob group)
+  "Add GLOB to filter GROUP and persist it to the project `.dir-locals.el'.
+Interactively, GLOB defaults to the basename of the node at point — edit it
+to a pattern such as `*.log', or a `sub/dir' relative path — and GROUP is
+read with completion over the existing `emeld-filter-groups' names; an
+unknown name creates a new, active group.
+
+The updated `emeld-filter-groups' value is written to `.dir-locals.el' at
+the left root (via `add-dir-local-variable', under the `nil' mode used in
+the manual setup, then saved), applied to this comparison, and rescanned
+so the matching files drop out immediately.  This lets you permanently
+tidy up a directory comparison — excluding build/cache/noise paths —
+without hand-editing `.dir-locals.el'."
+  (interactive
+   (let* ((node (or (get-text-property (point) 'emeld-node)
+                    (user-error "Point is not on a file or directory")))
+          (base (emeld-node-name node))
+          (g (read-string
+              (format "Filter glob (basename, *.ext, or sub/dir) [%s]: " base)
+              nil nil base))
+          (names (mapcar #'car emeld-filter-groups))
+          (default-group (or (car names) "Project"))
+          (grp (completing-read
+                (format "Add to filter group [%s]: " default-group)
+                names nil nil nil nil default-group)))
+     (list g grp)))
+  (setq glob (string-trim glob))
+  (when (string-empty-p glob) (user-error "Empty glob"))
+  (unless emeld--left-root (user-error "No comparison loaded"))
+  (let* ((buf (current-buffer))
+         (groups (copy-tree emeld-filter-groups))
+         (entry (assoc group groups)))
+    (if entry
+        ;; Append to an existing group unless the glob is already there.
+        (if (member glob (emeld--group-globs entry))
+            (message "\"%s\" is already in group \"%s\"" glob group)
+          (setcdr (last entry) (list glob)))
+      ;; New group: (NAME t GLOB) — active by default.
+      (setq groups (append groups (list (list group t glob)))))
+    ;; Persist to .dir-locals.el at the left root and save it (no manual edit).
+    (let ((default-directory emeld--left-root))
+      (save-window-excursion
+        (add-dir-local-variable nil 'emeld-filter-groups groups)
+        (when (buffer-modified-p) (save-buffer))))
+    ;; Apply now: update the buffer-local value, make the group active, rescan.
+    (with-current-buffer buf
+      (setq-local emeld-filter-groups groups)
+      (unless (member group emeld--active-filter-groups)
+        (setq emeld--active-filter-groups (cons group emeld--active-filter-groups)))
+      (message "Filtering \"%s\" via group \"%s\" — saved to %s"
+               glob group (abbreviate-file-name
+                           (expand-file-name dir-locals-file emeld--left-root)))
+      (emeld-refresh))))
+
 ;;;###autoload
 (defun emeld-diff (dir1 dir2 &optional depth)
   "Compare DIR1 and DIR2 side-by-side.
@@ -2319,6 +2373,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "s")   #'emeld-toggle-show-strikethrough)
     (define-key map (kbd "I")   #'emeld-toggle-gitignore)
     (define-key map (kbd "i")   #'emeld-toggle-ignore-whitespace)
+    (define-key map (kbd "&")   #'emeld-add-filter-at-point)
     (define-key map (kbd "F")   #'emeld-toggle-show-files)
     (define-key map (kbd ">")   #'emeld-increase-indent)
     (define-key map (kbd "<")   #'emeld-decrease-indent)
@@ -4508,6 +4563,11 @@ node — see `emeld--node-relpath' for the equivalent slow form."
           (push (transient-parse-suffix
                  'emeld-dispatch
                  (list "cl" "list all globs..." 'emeld-list-filter-groups))
+                suffixes)
+          (push (transient-parse-suffix
+                 'emeld-dispatch
+                 (list "&" "filter node at point → .dir-locals…"
+                       'emeld-add-filter-at-point))
                 suffixes)
           (nreverse suffixes))))]
    ["Menus"
