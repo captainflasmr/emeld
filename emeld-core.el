@@ -1,7 +1,7 @@
 ;;; emeld-core.el --- Meld-Inspired Local Diff: shared core -*- lexical-binding: t; -*-
 
 ;; Keywords: files, tools
-;; Version: 0.46.0
+;; Version: 0.48.0
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -3983,8 +3983,11 @@ point is deleted from the current side (the column point is in)."
                             (progn (emeld--delete-one path) (cl-incf count))
                           (error (cl-incf errors)))
                       (cl-incf missing)))))
-              (emeld-refresh)
+              ;; Update only the affected nodes in place (no full rescan/flash);
+              ;; `emeld--update-after-copy' re-classifies each from on-disk state
+              ;; and drops nodes now gone from both sides.
               (clrhash emeld--marked-paths)
+              (emeld--update-after-copy marked)
               (message "Deleted %d file(s)%s%s" count
                        (if (> missing 0) (format ", %d already gone" missing) "")
                        (if (> errors 0) (format " (%d errors)" errors) "")))))
@@ -3997,7 +4000,8 @@ point is deleted from the current side (the column point is in)."
           (condition-case err
               (progn
                 (emeld--delete-one path)
-                (emeld-refresh)
+                ;; Local in-place update of just this node (no full rescan/flash).
+                (emeld--update-after-copy (list (emeld--node-relpath node)))
                 (message "Deleted %s from %s side" (emeld-node-name node) side))
             (error (message "Delete failed: %s" (error-message-string err)))))))))
 
@@ -4060,9 +4064,9 @@ hint at the key that toggles it (e.g. \"S\" in \"Same\")."
   "Return a string showing the primary Same/New/Modified filter states.
 Each label is spelled out with a leading ASCII checkbox.  Scan-affecting
 notes are appended after them: the whitespace mode (-w/-b) when active, a
-`warning'-faced \"⚠ gitignore\" note while `emeld-respect-gitignore' is
+`warning'-faced \"(!) gitignore\" note while `emeld-respect-gitignore' is
 on (git-ignored files are dropped from the scan, which can silently hide
-whole subtrees), and a `warning'-faced \"⚠ files hidden\" note when
+whole subtrees), and a `warning'-faced \"(!) files hidden\" note when
 `emeld-show-files' is nil, since a files-less tree can look empty and be
 mistaken for \"no differences\".  The secondary display
 toggles (Files/Tree-lines/Strikethrough/Gitignore) are intentionally
@@ -4080,13 +4084,13 @@ from the transient (\\[emeld-dispatch])."
    ;; whole subtrees (e.g. anything under a `.git/info/exclude' entry).
    ;; Flag it only while active so the omission is never a surprise.
    (when emeld-respect-gitignore
-     (propertize " ⚠ gitignore" 'face 'warning))
+     (propertize " (!) gitignore" 'face 'warning))
    (unless emeld-show-files
-     (propertize " ⚠ files hidden" 'face 'warning))
+     (propertize " (!) files hidden" 'face 'warning))
    ;; Session-only temporary hides (`emeld-hide-at-point'); flag the count so
    ;; the user knows items are tucked away and how to bring them back.
    (when emeld--hidden-paths
-     (propertize (format " ⚠ %d hidden (C-u C-k restores)"
+     (propertize (format " (!) %d hidden (C-u C-k restores)"
                          (length emeld--hidden-paths))
                  'face 'warning))))
 
@@ -4586,6 +4590,19 @@ node — see `emeld--node-relpath' for the equivalent slow form."
    ("* a" "all changed (mirror)" emeld-mark-all :transient t)
    ("U"   "unmark all"      emeld-unmark-all :transient t)])
 
+(transient-define-prefix emeld-dispatch-preset ()
+  "Emeld presets (saved directory pairs)."
+  ["Preset"
+   ("s" "save current" emeld-save-preset)
+   ("l" "load…"        emeld-load-preset)
+   ("d" "delete…"      emeld-delete-preset)])
+
+(transient-define-prefix emeld-dispatch-compare ()
+  "Emeld comparison sources."
+  ["Compare"
+   ("G" "git revisions…"    emeld-git-diff)
+   ("H" "git history step…" emeld-git-step-history)])
+
 (transient-define-prefix emeld-dispatch ()
   "Transient menu for emeld."
   [["File Status"
@@ -4639,14 +4656,9 @@ node — see `emeld--node-relpath' for the equivalent slow form."
     ("v" "View →"     emeld-dispatch-view)
     ("n" "Navigate →" emeld-dispatch-navigate)
     ("f" "File →"     emeld-dispatch-file)
-    ("m" "Mark →"     emeld-dispatch-mark)]
-   ["Preset"
-    ("ps" "save current" emeld-save-preset)
-    ("pl" "load…"        emeld-load-preset)
-    ("pd" "delete…"      emeld-delete-preset)]
-   ["Compare"
-    ("G" "git revisions…"   emeld-git-diff)
-    ("H" "git history step…" emeld-git-step-history)]
+    ("m" "Mark →"     emeld-dispatch-mark)
+    ("p" "Preset →"   emeld-dispatch-preset)
+    ("C" "Compare →"  emeld-dispatch-compare)]
    ])
 
 (define-key emeld-mode-map (kbd "?") #'emeld-dispatch)

@@ -466,8 +466,7 @@ Dired semantics: ordinary marks win; otherwise the node under point."
                    (format "Copy %s to: " (file-name-nondirectory
                                            (directory-file-name (car targets)))))
                  emeld--dired-root
-                 (and (not multi) (file-name-nondirectory (car targets))))))
-         (last nil))
+                 (and (not multi) (file-name-nondirectory (car targets)))))))
     (when (and multi (not (file-directory-p dest)))
       (user-error "Destination must be an existing directory when copying many files"))
     (dolist (source targets)
@@ -476,12 +475,10 @@ Dired semantics: ordinary marks win; otherwise the node under point."
                                        (directory-file-name source))
                                       dest)
                   dest)))
-        (emeld--dired-copy-one source to)
-        (setq last to)))
-    ;; Reveal the destination if it lives inside this tree.
-    (emeld--dired-after-op (and last (string-prefix-p emeld--dired-root
-                                                      (expand-file-name last))
-                                last))
+        (emeld--dired-copy-one source to)))
+    ;; Keep point on the source and advance to the next item (like Dired).
+    (emeld--dired-after-op)
+    (emeld-dired-next-line)
     (message "Copied %d file(s)" (length targets))))
 
 (defun emeld-dired-do-rename ()

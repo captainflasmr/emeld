@@ -8,7 +8,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 * Features
 - Side-by-side view in a single buffer.
 - Recursive glob-based filtering (like Meld) — excluded at the ~diff~ level.
-- ~.gitignore~ support, on by default — ignored files hidden on both sides, toggle with ~I~.  While active the header line shows a ~⚠ gitignore~ note, so silently-hidden subtrees are never a surprise.
+- ~.gitignore~ support, on by default — ignored files hidden on both sides, toggle with ~I~.  While active the header line shows a ~(!) gitignore~ note, so silently-hidden subtrees are never a surprise.
 - Instant toggles for Same, New, Modified, and File visibility (~S~/~N~/~M~/~F~).
 - Orphan files shown with strikethrough on the missing side (Meld-style, toggle ~s~).
 - Dired-style, per-side marking (~m~/~u~/~U~): the ~*~ sits in the column of the side you mark, and a node can be marked left, right, or both.  Copy/sync (~C~) makes the *other* side match the side you marked — a node marked on the side that has the file is copied across, while a node marked on its empty (struck-through) side is *deleted* from the other side, so you can resolve a one-sided file either way.  Bulk delete (~x~) deletes from every marked side; bulk-mark by status (~* m~ modified, ~* l~ left-only, ~* c~/~* a~ the full left→right mirror set — modified + left-only + right-only).
@@ -42,7 +42,7 @@ For very large trees or slow filesystems (SMB/NFS), give ~emeld-diff~ a prefix a
 
 ** Comparing git revisions
 
-From inside a git work tree, run ~M-x emeld-git-diff~ (or ~G~ in the transient menu) to compare two revisions instead of two directories.  You are prompted for a left (old) and right (new) revision; completion offers branches, tags and recent commits, plus ~[working tree]~ and ~[index]~.  The default compares ~HEAD~ against the working tree, i.e. "what have I changed since the last commit".
+From inside a git work tree, run ~M-x emeld-git-diff~ (or ~C~ then ~G~ in the transient menu — Compare → git revisions) to compare two revisions instead of two directories.  You are prompted for a left (old) and right (new) revision; completion offers branches, tags and recent commits, plus ~[working tree]~ and ~[index]~.  The default compares ~HEAD~ against the working tree, i.e. "what have I changed since the last commit".
 
 The result is the same side-by-side tree, showing the hierarchy of added, deleted and modified files between the two revisions (renames appear as a deleted old path plus an added new path).  Because the content lives in git history rather than on disk:
 
@@ -56,7 +56,7 @@ The header line shows ~[git OLD→NEW]~ with the chosen revision labels; a revis
 
 *** Stepping through history
 
-~M-x emeld-git-step-history~ (or ~H~ in the transient) walks the history one commit at a time.  You pick a starting revision (default ~HEAD~); the buffer shows what that commit changed — its first parent on the left, the commit on the right — and you step through:
+~M-x emeld-git-step-history~ (or ~C~ then ~H~ in the transient — Compare → git history step) walks the history one commit at a time.  You pick a starting revision (default ~HEAD~); the buffer shows what that commit changed — its first parent on the left, the commit on the right — and you step through:
 
 - ~,~ — move to the *older* commit (back in time)
 - ~.~ — move to the *newer* commit (forward, back toward the start)
@@ -133,8 +133,7 @@ Top level:
 
 - ~File Status~ :: Toggle the primary filters (~S~ same, ~N~ added, ~M~ modified).
 - ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~cl~ list all globs.
-- ~Preset~ :: Save the current directory pair (~ps~), load a saved pair (~pl~), delete one (~pd~).
-- ~Menus~ :: Open a sub-menu — ~v~ View, ~n~ Navigate, ~f~ File, ~m~ Mark.
+- ~Menus~ :: Open a sub-menu — ~v~ View, ~n~ Navigate, ~f~ File, ~m~ Mark, ~p~ Preset, ~C~ Compare.
 
 Sub-menus (opened from the ~Menus~ column):
 
@@ -142,6 +141,8 @@ Sub-menus (opened from the ~Menus~ column):
 - ~Navigate~ (~n~) :: Rescan (~G~; ~C-u G~ rescans just the directory at point), stop an in-progress scan (~k~), redraw after a resize (~g~), swap panes (~W~), and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
 - ~File~ (~f~) :: Operate on files, in four columns. ~Open~: ~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree (soft diff a modified file, show a new/one-sided one, fold a directory), ~TAB~ peek inline diff. ~Dired~: ~A~/~B~ jump to dired on the left/right side, ~w~ copy path. ~Diff~: ~D~ diff whole root, ~d~ diff directory at point, ~P~ format patch. ~Sync~: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point.
 - ~Mark~ (~m~) :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), the full left→right mirror set (~* c~/~* a~ — modified + left-only + right-only); ~U~ unmark all.
+- ~Preset~ (~p~) :: Save the current directory pair (~s~), load a saved pair (~l~), delete one (~d~).
+- ~Compare~ (~C~) :: Switch comparison source — ~G~ compare two git revisions, ~H~ step through git history one commit at a time.
 
 Every command keeps its direct key binding in ~emeld-mode~ (see below), so the menu hierarchy is only for discovery — you never have to drill through it to reach a command you already know.
 
@@ -220,7 +221,7 @@ Filter-group toggling (~emeld-toggle-filter-group~) and the preset commands (~em
 - ~emeld-same-files-method~: How toggling ~S~ finds identical files — ~list~ (default, fast: enumerate the left tree and subtract the files the initial scan already classified, avoiding a second content comparison) or ~diff~ (exact: re-run ~diff -rqs~).
 - ~emeld-list-command~: Program + args used by the ~list~ method to enumerate files (default ~("find" "." "-type" "f")~; set to e.g. ~("fd" "--type" "f" "--hidden" "--no-ignore")~ to use fd).
 - ~emeld-show-strikethrough~: Show strikethrough for orphan files on the missing side (default ~t~).  When nil, the missing side shows nothing.  The struck-through cell is also the marking target for deletion: with strikethrough on, marking it (~m~) marks the empty side, so ~C~ (sync) deletes the file from the side that has it.  With strikethrough off, marking a one-sided file snaps to the file side instead (so ~C~ copies it across).
-- ~emeld-respect-gitignore~: Respect ~.gitignore~ rules during comparison (default ~t~).  Ignored files are hidden on both sides via a cached ~git ls-files~ query per root (honors nested ~.gitignore~, ~.git/info/exclude~, and the global excludes file).  Toggle interactively with ~I~; while on, the header line shows a ~⚠ gitignore~ note.  Requires the ~git~ executable; has no effect outside a work tree.
+- ~emeld-respect-gitignore~: Respect ~.gitignore~ rules during comparison (default ~t~).  Ignored files are hidden on both sides via a cached ~git ls-files~ query per root (honors nested ~.gitignore~, ~.git/info/exclude~, and the global excludes file).  Toggle interactively with ~I~; while on, the header line shows a ~(!) gitignore~ note.  Requires the ~git~ executable; has no effect outside a work tree.
 - ~emeld-tree-density~: How tightly the tree is indented (default ~wide~).  ~wide~ indents each level one space wider than the branch connector so a child's connector hangs one column past the parent's content (~│  └─file~), reading as hooking into the parent's subtree; ~compact~ matches the continuation indent to the branch width for a tighter tree (~│ └─file~) that sits well in the available space; ~extreme~ collapses each level to a single column regardless of ~emeld-indent-offset~ (~│└file~), for the densest tree — especially handy in the narrow ~emeld-sidebar~.  Files align with their sibling directories whatever the density.  Cycle compact → extreme → wide → compact with ~z~ (~emeld-cycle-tree-density~; in the sidebar, ~z~ runs ~emeld-sidebar-cycle-density~, which keeps the setting local to the sidebar).
 - ~emeld-dir-prefix~: Prefix string shown before directory names (default ~""~, no prefix — chosen for compatibility with terminals and Windows builds that may not render emoji or icons).  Set to e.g. ~"📁 "~ for an icon, or any text marker you prefer.
 - ~emeld-fold-collapsed-indicator~ / ~emeld-fold-expanded-indicator~: the fold toggle shown before a directory name, for the collapsed and expanded states (defaults ~"[+] "~ / ~"[-] "~, plain ASCII for terminal/Windows compatibility).  Set them to icons or triangles to mimic Meld; applies to both the diff view and ~emeld-sidebar~.  Keep the two the same display width so folded and unfolded names stay aligned.
@@ -268,9 +269,9 @@ Filter-group toggling (~emeld-toggle-filter-group~) and the preset commands (~em
 
 Frequently-compared directory pairs can be saved and recalled:
 
-- ~M-x emeld-save-preset~ (or ~ps~ in the transient) — name and save the current comparison's left/right directories.
-- ~M-x emeld-load-preset~ (or ~pl~) — pick a saved pair via completion (annotated with its directories) and start the comparison.  This is autoloaded, so it works as an entry point even before any comparison is open.
-- ~M-x emeld-delete-preset~ (~pd~) — remove a saved pair.
+- ~M-x emeld-save-preset~ (or ~p s~ in the transient) — name and save the current comparison's left/right directories.
+- ~M-x emeld-load-preset~ (or ~p l~) — pick a saved pair via completion (annotated with its directories) and start the comparison.  This is autoloaded, so it works as an entry point even before any comparison is open.
+- ~M-x emeld-delete-preset~ (~p d~) — remove a saved pair.
 
 Presets are stored in ~emeld-presets~, which emeld registers with ~savehist-additional-variables~.  With ~savehist-mode~ enabled they persist across sessions automatically; without it they last only for the current session.
 
@@ -310,4 +311,4 @@ Toggle named groups on/off from the transient menu (~?~) or with ~M-x emeld-togg
 
 You do not have to write ~.dir-locals.el~ by hand.  With point on a file or directory in the tree, ~&~ (~emeld-add-filter-at-point~, also under ~&~ in the transient filter column) adds it as a filter and saves it: it prompts for the glob (defaulting to the basename — edit it to e.g. ~*.log~ or a ~sub/dir~ relative path) and the group to add it to (completing over existing names; a new name creates a new, active group), writes the updated ~emeld-filter-groups~ to ~.dir-locals.el~ at the left root, activates the group and rescans so the matching files drop out at once.  Repeat it to progressively tidy up a fresh comparison; the exclusions persist for next time.
 
-For a *temporary* tidy-up that you do not want recorded, ~C-k~ (~emeld-hide-at-point~) hides just the node at point — and, for a directory, its subtree — for this session only.  Nothing is written to ~.dir-locals.el~, and the hide survives a rescan within the session; the header line shows a ~⚠ N hidden~ note while anything is tucked away.  Restore everything with ~C-u C-k~ (~emeld-unhide-all~).  Use this when you want to declutter the view but stay interested in the item later; use ~&~ when the exclusion should be permanent.
+For a *temporary* tidy-up that you do not want recorded, ~C-k~ (~emeld-hide-at-point~) hides just the node at point — and, for a directory, its subtree — for this session only.  Nothing is written to ~.dir-locals.el~, and the hide survives a rescan within the session; the header line shows a ~(!) N hidden~ note while anything is tucked away.  Restore everything with ~C-u C-k~ (~emeld-unhide-all~).  Use this when you want to declutter the view but stay interested in the item later; use ~&~ when the exclusion should be permanent.

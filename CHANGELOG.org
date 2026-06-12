@@ -2,6 +2,14 @@
 
 * [Unreleased]
 
+* [0.48.0] - 2026-06-12
+** Fixed
+- Header-line warning notes now use a plain ASCII ~(!)~ marker instead of the ~⚠~ warning sign, which rendered as a missing-glyph box on fonts that lack it (common on Windows).  Affects the ~(!) gitignore~, ~(!) files hidden~ and ~(!) N hidden~ notes; the ~warning~ face still highlights them.
+- ~emeld-dired~: copying (~C~) now advances point to the next item afterwards, the way the mark commands do, instead of leaving it at the start of the next line.
+** Changed
+- ~emeld-delete~ (~x~) no longer rescans the whole comparison on completion.  Like ~emeld-copy~, it now re-classifies only the deleted nodes in place — a file deleted from one side becomes one-sided, and a node now gone from both sides drops out of the tree — recomputes their ancestors and re-renders once, so the view updates without the whole tree flashing.  Falls back to a full rescan only if a node cannot be located.
+- The top-level transient (~?~) is tidier: the ~Preset~ and ~Compare~ commands moved out of standalone columns into the ~Menus~ column as their own focused sub-menus — ~p~ (Preset →: ~s~ save / ~l~ load / ~d~ delete) and ~C~ (Compare →: ~G~ git revisions / ~H~ git history step) — joining View/Navigate/File/Mark.
+
 * [0.47.0] - 2026-06-11
 ** Added
 - ~emeld-dired~: a tree-navigable, Dired-like file manager.  ~M-x emeld-dired~ shows the current Dired buffer's directory (or ~default-directory~ elsewhere; a prefix arg, or ~M-x emeld-dired-find~, prompts for a directory) as a single foldable tree — built on the same node model and rendering as the diff view and ~emeld-sidebar~ — and lets you work it like Dired: mark files (~m~), flag for deletion (~d~) and expunge (~x~), unmark (~u~ / ~U~ / ~DEL~ / ~t~), copy (~C~), rename/move (~R~), delete (~D~), and create a directory (~+~) or file (~M-+~).  Operations act on the marked files, or on the file at point when nothing is marked, mirroring Dired.  Unlike the sidebar it takes over its window (like Dired) rather than docking, and is mark/operation oriented rather than following the active file.  Directories fold open and closed (~TAB~), ~RET~/~f~ visit (~o~ in another window), ~^~ re-roots at the parent, ~[~/~]~ collapse/expand all, ~g~ refreshes, and ~h~ toggles dotfiles (shown by default).  Children load lazily per directory, the header line shows live marked/flagged counts, and every operation rebuilds the tree in place while preserving expansion and point.
