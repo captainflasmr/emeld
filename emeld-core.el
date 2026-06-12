@@ -4245,7 +4245,21 @@ reflects the live scan counters without needing to be re-installed."
             (progn (goto-char emeld--render-seek-pos)
                    (move-to-column current-col))
           (goto-char (point-min))
-          (forward-line (1- (min fallback-line (count-lines (point-min) (point-max)))))))))
+          (forward-line (1- (min fallback-line (count-lines (point-min) (point-max)))))
+          ;; The line we landed on may be a header/separator (e.g. the copied
+          ;; node dropped out of the visible tree); snap to the nearest node
+          ;; line so point always rests on a node, not a structural line.
+          (unless (get-text-property (point) 'emeld-node)
+            (let ((fwd (next-single-property-change (point) 'emeld-node)))
+              (cond
+               (fwd (goto-char fwd))
+               ((setq fwd (previous-single-property-change (point) 'emeld-node))
+                (goto-char (1- fwd))
+                (beginning-of-line)))))
+          ;; Align to the node name on the side point started in (not column 0
+          ;; / the tree-line glyphs) so point sits on the node text.
+          (when (get-text-property (point) 'emeld-node)
+            (emeld--move-to-node-name (>= current-col emeld--column-width)))))))
     
     (set-buffer-modified-p nil)))
 

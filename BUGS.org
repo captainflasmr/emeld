@@ -8,11 +8,3 @@
 This document contains the current bugs/improvements, this is just for me mainly but does include any Issues reported.
 
 * Bugs/Improvements
-
-** DOING when copied point should progress to the next item, currently it jumps to the start of the next line
-
-** DOING windows can't see gitignore icon
-
-** DOING on file delete do only local scan and no full and flash
-
-** DOING squeeze top transient a little
