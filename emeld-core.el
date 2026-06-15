@@ -3241,6 +3241,7 @@ resolved against the repo's working tree."
                      root)))
     (unless (and target (file-exists-p target))
       (user-error "No %s directory to open" (if on-left "left" "right")))
+    (select-window (split-window-right))
     (if (file-directory-p target)
         (dired target)
       (dired (file-name-directory target))
