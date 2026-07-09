@@ -2381,8 +2381,8 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "v")   #'emeld-find-file)
     (define-key map (kbd "A")   #'emeld-dired-left)
     (define-key map (kbd "B")   #'emeld-dired-right)
-    (define-key map (kbd "g")   #'emeld-redraw)
-    (define-key map (kbd "G")   #'emeld-rescan)
+    (define-key map (kbd "g")   #'emeld-rescan)
+    (define-key map (kbd "G")   #'emeld-redraw)
     (define-key map (kbd "k")   #'emeld-stop-scan)
     (define-key map (kbd "R")   #'emeld-toggle-mirror)
     (define-key map (kbd "W")   #'emeld-swap-panes)
@@ -4560,8 +4560,8 @@ node — see `emeld--node-relpath' for the equivalent slow form."
 (transient-define-prefix emeld-dispatch-navigate ()
   "Emeld navigation and rescanning."
   ["Navigate"
-   ("g"   "reset layout + redraw" emeld-redraw)
-   ("G"   "rescan (C-u: dir at point)" emeld-rescan)
+    ("g"   "rescan (C-u: dir at point)" emeld-rescan)
+    ("G"   "reset layout + redraw" emeld-redraw)
    ("k"   "stop scan"            emeld-stop-scan)
    ("W"   "swap panes"         emeld-swap-panes)
    ("o"   "jump other side"    emeld-jump-other-side :transient t)
