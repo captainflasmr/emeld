@@ -2,6 +2,13 @@
 
 * [Unreleased]
 
+** Added
+- ~emeld-sidebar-follow-mode~ now follows multi-candidate xref navigation.  In an ~*xref*~ buffer — and any other ~xref--xref-buffer-mode~ buffer, such as find-references results — a buffer-local ~post-command-hook~ (~emeld--sidebar-follow-xref~) reveals the file of the candidate at point the moment point moves onto it.  The file is resolved exactly via the candidate's location marker (~emeld--sidebar-xref-candidate-file~), so it is correct regardless of which window displays the preview.  Enabling follow mode retro-fits xref buffers that already exist; disabling it scrubs them again; and re-loading the package into a session where the mode is already on wires it too (the mode body does not re-run on its own).
+
+** Fixed
+- The sidebar now follows files shown in *non-selected* windows, which is why it previously never updated while stepping through xref definition candidates: a candidate preview always switches some other window's buffer — the origin window during a minibuffer-driven completing-read preview, or the next window while browsing the ~*xref*~ list — and ~window-buffer-change-functions~ reports only the frame, so a selected-window-only look could never see it.  ~emeld--sidebar-follow~ now tracks each window's current buffer in the ~emeld--sidebar-follow-seen~ window→buffer map and, when the selected window shows no file (minibuffer active, or browsing the ~*xref*~ list), reveals the file of whichever other window just changed; the selected window's file still wins.  The preview mechanism must be ~switch-to-buffer~-based for the hook to fire (exactly what ~xref--show-location~ and minibuffer previewers do; ~set-window-buffer~ does not run the hook).  When a preview is cancelled and the origin window restored, the sidebar follows back to the original file on its own, and candidates outside the sidebar root are skipped by the existing root-prefix guard.
+- ~emeld-sidebar.el~ byte-compiles warning-free again on Emacs 31+: the deprecated ~when-let~ in ~emeld--sidebar-project-root~ is now ~when-let*~.
+
 * [0.48.0] - 2026-06-12
 ** Fixed
 - Header-line warning notes now use a plain ASCII ~(!)~ marker instead of the ~⚠~ warning sign, which rendered as a missing-glyph box on fonts that lack it (common on Windows).  Affects the ~(!) gitignore~, ~(!) files hidden~ and ~(!) N hidden~ notes; the ~warning~ face still highlights them.

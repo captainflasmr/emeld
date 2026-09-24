@@ -57,8 +57,15 @@ Each entry is (NAME [ACTIVE] GLOBS...).  NAME is a string.
 If the second element is t or nil, it sets the default active state;
 otherwise all elements after NAME are glob patterns and the group
 defaults to inactive.  Toggle groups on/off with `emeld-toggle-filter-group'."
-  :type '(repeat (list (string :tag "Group name")
-                       (repeat :tag "Glob patterns" string)))
+  :type '(repeat
+          (choice :tag "Filter group"
+                  (cons :tag "Name, active flag, globs"
+                        (string :tag "Group name")
+                        (cons (boolean :tag "Active by default")
+                              (repeat :tag "Glob patterns" string)))
+                  (cons :tag "Name and globs (inactive by default)"
+                        (string :tag "Group name")
+                        (repeat :tag "Glob patterns" string))))
   :group 'emeld)
 
 (put 'emeld-filter-groups 'safe-local-variable
@@ -66,7 +73,12 @@ defaults to inactive.  Toggle groups on/off with `emeld-toggle-filter-group'."
        (and (listp val)
             (cl-every (lambda (entry)
                         (and (listp entry) (stringp (car entry))
-                             (cl-every #'stringp (cdr entry))))
+                             ;; Optional t/nil "active by default" flag,
+                             ;; mirroring `emeld--group-globs'.
+                             (let ((rest (cdr entry)))
+                               (when (memq (car rest) '(t nil))
+                                 (setq rest (cdr rest)))
+                               (cl-every #'stringp rest))))
                       val))))
 
 (defcustom emeld-show-same nil

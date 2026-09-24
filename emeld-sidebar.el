@@ -10,6 +10,12 @@
 (require 'cl-lib)
 (require 'emeld-core)
 
+;; xref APIs used by the preview-follower below; guarded by `fboundp' at
+;; runtime so emeld stays usable without xref in exotic builds.
+(declare-function xref--item-at-point "xref" nil)
+(declare-function xref-item-location "xref" (item))
+(declare-function xref-location-marker "xref" (location))
+
 ;;;; ─── Sidebar (treemacs-style single-tree file explorer) ──────────
 ;;
 ;; A docked side window that renders ONE directory tree (not a diff),
@@ -68,7 +74,7 @@ directory."
      (expand-file-name
       (or (emeld--git-toplevel dir)
           (when (fboundp 'project-current)
-            (when-let ((proj (project-current nil dir)))
+            (when-let* ((proj (project-current nil dir)))
               (cond ((fboundp 'project-root) (project-root proj))
                     ((fboundp 'project-roots) (car (project-roots proj))))))
           dir)))))
@@ -505,36 +511,129 @@ a directory), TAB expands/collapses, `o' opens without leaving the sidebar,
           (when current
             (with-current-buffer buf (emeld--sidebar-reveal current))))))))
 
-(defun emeld--sidebar-follow (&optional _frame)
+(defvar emeld--sidebar-follow-seen (make-hash-table :test 'eq)
+  "Window-to-last-seen-buffer map used by `emeld--sidebar-follow'.
+`window-buffer-change-functions' reports only the frame, so the follow
+compares each window's current buffer against this map to work out
+which window changed.  This is what keeps the sidebar on xref candidate
+previews: a preview switches a *non-selected* window (the origin window
+during minibuffer completion, the next window while browsing an `*xref*'
+list), which a selected-window-only look can never see.")
+
+(defun emeld--sidebar-follow (&optional frame)
   "Reveal the active window's file in the sidebar (follow-mode hook).
 Fires on both window-selection and window-buffer changes, so it tracks
-switching windows *and* opening a file in the current window."
+switching windows *and* opening a file in the current window.  The
+selected window's file wins; when the selected window shows no file
+(e.g. while completing in the minibuffer, or browsing the `*xref*'
+buffer), the most recently changed other window is followed instead --
+which is how xref candidate previews, displayed in a non-selected
+window, keep the sidebar on the file being previewed."
   (let ((sb (get-buffer-window emeld--sidebar-buffer-name t)))
     (when (and sb (not (eq (selected-window) sb)))
-      (let ((file (buffer-file-name (window-buffer (selected-window))))
-            (sb-buf (window-buffer sb)))
+      (let* ((file (buffer-file-name (window-buffer (selected-window))))
+             (frame (if (and frame (frame-live-p frame)) frame (selected-frame)))
+             (changed nil))
+        ;; Remember every window's buffer; note the first file-bearing
+        ;; window whose buffer changed since the last look.
+        (dolist (win (window-list frame 'nomini))
+          (unless (eq win sb)
+            (let ((buf (window-buffer win)))
+              (unless (eq (gethash win emeld--sidebar-follow-seen) buf)
+                (puthash win buf emeld--sidebar-follow-seen)
+                (when (and (null changed) (buffer-file-name buf))
+                  (setq changed (buffer-file-name buf)))))))
+        ;; The selected window's own file always wins.
+        (when file (setq changed file))
+        (when changed
+          (let ((changed (expand-file-name changed))
+                (sb-buf (window-buffer sb)))
+            (with-current-buffer sb-buf
+              (when (and emeld--sidebar-root
+                         (string-prefix-p emeld--sidebar-root changed)
+                         (not (equal changed emeld--sidebar-current)))
+                (emeld--sidebar-reveal changed)))))))))
+
+(defun emeld--sidebar-xref-candidate-file ()
+  "Return the absolute file of the xref candidate at point, or nil.
+Only answers in `xref--xref-buffer-mode' buffers; on lines without an
+xref item (group headers, blanks) it returns nil.  The file is resolved
+from the candidate's location marker when possible, falling back to
+nothing when the location cannot be resolved."
+  (when (and (fboundp 'xref--item-at-point)
+             (derived-mode-p 'xref--xref-buffer-mode))
+    (let* ((item (xref--item-at-point))
+           (loc (and item (xref-item-location item))))
+      (and loc
+           (condition-case nil
+               (buffer-file-name (marker-buffer (xref-location-marker loc)))
+             (error nil))))))
+
+(defun emeld--sidebar-follow-xref ()
+  "Reveal the file of the xref candidate at point in the sidebar.
+Runs as a buffer-local `post-command-hook' in `xref--xref-buffer-mode'
+buffers, revealing the candidate at point the moment point moves onto
+it.  While candidates are previewed, xref shows each candidate's file
+in a *non-selected* window (`xref--show-location' with SELECT nil), so
+this reads the candidate directly from the buffer rather than waiting
+for `emeld--sidebar-follow' to notice the changed window."
+  (let ((sb (get-buffer-window emeld--sidebar-buffer-name t)))
+    (when (and sb (not (eq (selected-window) sb)))
+      (let ((file (emeld--sidebar-xref-candidate-file)))
         (when file
-          (let ((file (expand-file-name file)))
+          (let ((sb-buf (window-buffer sb)))
             (with-current-buffer sb-buf
               (when (and emeld--sidebar-root
                          (string-prefix-p emeld--sidebar-root file)
                          (not (equal file emeld--sidebar-current)))
                 (emeld--sidebar-reveal file)))))))))
 
+(defun emeld--sidebar-xref-follow-install ()
+  "Install the xref preview follower in all current and future xref buffers."
+  (when (boundp 'xref--xref-buffer-mode-hook)
+    (add-hook 'xref--xref-buffer-mode-hook #'emeld--sidebar-xref-mode-setup))
+  (dolist (buf (buffer-list))
+    (with-current-buffer buf
+      (when (derived-mode-p 'xref--xref-buffer-mode)
+        (add-hook 'post-command-hook #'emeld--sidebar-follow-xref nil t)))))
+
+(defun emeld--sidebar-xref-follow-uninstall ()
+  "Remove the xref preview follower from current and future xref buffers."
+  (when (boundp 'xref--xref-buffer-mode-hook)
+    (remove-hook 'xref--xref-buffer-mode-hook #'emeld--sidebar-xref-mode-setup))
+  (dolist (buf (buffer-list))
+    (with-current-buffer buf
+      (remove-hook 'post-command-hook #'emeld--sidebar-follow-xref t))))
+
+(defun emeld--sidebar-xref-mode-setup ()
+  "Install the preview follower in a newly created xref buffer."
+  (add-hook 'post-command-hook #'emeld--sidebar-follow-xref nil t))
+
 ;;;###autoload
 (define-minor-mode emeld-sidebar-follow-mode
   "Global minor mode: the emeld sidebar reveals and highlights the active file.
 When on, displaying a file (by switching windows or opening it in the
 current window) under the sidebar root expands the path to it, moves the
-sidebar's point onto it and highlights its line."
+sidebar's point onto it and highlights its line.  Browsing multiple
+definition candidates in an `*xref*' buffer is followed too: as each
+candidate's file is previewed, the sidebar reveals where it lives."
   :global t
   :group 'emeld
   (if emeld-sidebar-follow-mode
       (progn
         (add-hook 'window-selection-change-functions #'emeld--sidebar-follow)
-        (add-hook 'window-buffer-change-functions #'emeld--sidebar-follow))
+        (add-hook 'window-buffer-change-functions #'emeld--sidebar-follow)
+        (emeld--sidebar-xref-follow-install))
     (remove-hook 'window-selection-change-functions #'emeld--sidebar-follow)
-    (remove-hook 'window-buffer-change-functions #'emeld--sidebar-follow)))
+    (remove-hook 'window-buffer-change-functions #'emeld--sidebar-follow)
+    (emeld--sidebar-xref-follow-uninstall)))
+
+;; Re-loading this file into a session where `emeld-sidebar-follow-mode'
+;; was enabled before this definition existed (or by an older version of
+;; it) must wire the xref follower too; the mode body will not run again
+;; on its own.
+(when (and (boundp 'emeld-sidebar-follow-mode) emeld-sidebar-follow-mode)
+  (emeld--sidebar-xref-follow-install))
 
 (provide 'emeld-sidebar)
 ;;; emeld-sidebar.el ends here

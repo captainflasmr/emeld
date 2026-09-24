@@ -875,5 +875,119 @@ a new path that is neither is treated as identical."
                 (should (equal (emeld--sidebar-path-at-point) f))))))
       (delete-directory dir t))))
 
+(ert-deftest emeld-sidebar-xref-candidate-file ()
+  "The xref candidate at point resolves to its file; non-item lines yield nil."
+  (let ((dir (make-temp-file "emeld-xr" t)))
+    (unwind-protect
+        (let* ((f1 (expand-file-name "one.el" dir))
+               (f2 (expand-file-name "two.el" dir))
+               (xbuf (get-buffer-create "*emeld-xref-cand-test*")))
+          (with-temp-file f1 (insert "(defun one () 1)"))
+          (with-temp-file f2 (insert "(defun two () 2)"))
+          (require 'xref)
+          (with-current-buffer xbuf
+            (xref--xref-buffer-mode)
+            (let ((inhibit-read-only t))
+              (erase-buffer)
+              (insert (propertize "one: 1\n" 'xref-item
+                                  (xref-make "one"
+                                             (xref-make-file-location f1 1 0)))
+                      (propertize "=== group header ===\n")
+                      (propertize "two: 2\n" 'xref-item
+                                  (xref-make "two"
+                                             (xref-make-file-location f2 1 0)))))
+            (goto-char (point-min))
+            (search-forward "two")
+            (should (equal (emeld--sidebar-xref-candidate-file) f2))
+            ;; a line without an xref item answers nil
+            (goto-char (point-min))
+            (search-forward "group header")
+            (should-not (emeld--sidebar-xref-candidate-file)))
+          (kill-buffer xbuf)
+          (let ((buf (get-file-buffer f1))) (when buf (kill-buffer buf)))
+          (let ((buf (get-file-buffer f2))) (when buf (kill-buffer buf))))
+      (delete-directory dir t))))
+
+(ert-deftest emeld-sidebar-follow-xref-wiring ()
+  "Follow mode installs the preview follower on xref buffers and removes it."
+  (let ((xbuf (get-buffer-create "*emeld-xref-wiring-test*")))
+    (unwind-protect
+        (progn
+          (require 'xref)
+          (with-current-buffer xbuf (xref--xref-buffer-mode))
+          ;; before: no follower
+          (with-current-buffer xbuf
+            (should-not (memq #'emeld--sidebar-follow-xref post-command-hook)))
+          ;; enabling follow mode retro-fits existing xref buffers
+          (emeld-sidebar-follow-mode 1)
+          (with-current-buffer xbuf
+            (should (memq #'emeld--sidebar-follow-xref post-command-hook)))
+          ;; disabling scrubs them again
+          (emeld-sidebar-follow-mode -1)
+          (with-current-buffer xbuf
+            (should-not (memq #'emeld--sidebar-follow-xref post-command-hook)))
+          (should-not (memq #'emeld--sidebar-follow window-selection-change-functions))
+          (should-not (memq #'emeld--sidebar-follow window-buffer-change-functions))
+          ;; future xref buffers pick the follower up from the mode hook
+          (emeld-sidebar-follow-mode 1)
+          (should (memq #'emeld--sidebar-xref-mode-setup xref--xref-buffer-mode-hook))
+          (emeld-sidebar-follow-mode -1)
+          (should-not (memq #'emeld--sidebar-xref-mode-setup
+                            xref--xref-buffer-mode-hook)))
+      (kill-buffer xbuf))))
+
+(ert-deftest emeld-sidebar-follow-changed-window ()
+  "Follow reveals a file shown in a changed NON-selected window.
+This is the xref candidate-preview situation: the selected window shows
+a non-file buffer (the `*xref*' list, or the minibuffer during
+completing-read) while another window temporarily displays each
+candidate's file."
+  (let ((dir (make-temp-file "emeld-fw" t)))
+    (unwind-protect
+        (let* ((f1 (expand-file-name "a.el" dir))
+               (f2 (expand-file-name "b/deep.el" dir))
+               (sb-buf (get-buffer-create emeld--sidebar-buffer-name))
+               buf1 buf2 sb-win)
+          (make-directory (expand-file-name "b" dir))
+          (with-temp-file f1 (insert "(defun aa () 1)"))
+          (with-temp-file f2 (insert "(defun bb () 1)"))
+          (setq buf1 (find-file-noselect f1)
+                buf2 (find-file-noselect f2))
+          (with-current-buffer sb-buf
+            (emeld-sidebar-mode)
+            (setq emeld--sidebar-root (file-name-as-directory dir))
+            (emeld--sidebar-build))
+          (setq sb-win (split-window))
+          (set-window-buffer sb-win sb-buf)
+          (clrhash emeld--sidebar-follow-seen)
+          (emeld-sidebar-follow-mode 1)
+          (unwind-protect
+              (progn
+                ;; normal case: the selected window shows f1
+                (set-window-buffer (selected-window) buf1)
+                (emeld--sidebar-follow)
+                (should (equal (buffer-local-value
+                                'emeld--sidebar-current sb-buf)
+                               f1))
+                ;; preview case: the selected window becomes a non-file
+                ;; buffer while the other window switches to the candidate
+                (let ((main (selected-window))
+                      (other (split-window)))
+                  (set-window-buffer main (get-buffer-create "*emeld-fake-xref*"))
+                  (set-window-buffer other buf1)
+                  (emeld--sidebar-follow)      ; prime the window->buffer map
+                  (set-window-buffer other buf2) ; preview shows candidate f2
+                  (emeld--sidebar-follow)      ; window-buffer-change fires
+                  (should (equal (buffer-local-value
+                                  'emeld--sidebar-current sb-buf)
+                                 f2))))
+            (emeld-sidebar-follow-mode -1)
+            (delete-other-windows)
+            (clrhash emeld--sidebar-follow-seen)
+            (kill-buffer buf1)
+            (kill-buffer buf2)
+            (kill-buffer sb-buf)))
+      (delete-directory dir t))))
+
 (message "Running tests...")
 (ert-run-tests-batch-and-exit)
