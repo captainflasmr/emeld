@@ -2396,8 +2396,6 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "TAB") #'emeld-cycle-subtree)
     (define-key map (kbd "<backtab>") #'emeld-cycle-visibility)
     (define-key map (kbd "S-TAB")     #'emeld-cycle-visibility)
-    (define-key map (kbd "[")   #'emeld-collapse-all)
-    (define-key map (kbd "]")   #'emeld-expand-all)
     (define-key map (kbd "/")   #'emeld-expand-changes)
     (define-key map (kbd "RET") #'emeld-action)
     (define-key map (kbd "e")   #'emeld-ediff)
@@ -2718,22 +2716,6 @@ Shows the directory skeleton without revealing the file leaves inside."
           (throw 'unexpanded nil))))
     t))
 
-(defun emeld-collapse-all ()
-  "Collapse every directory in the tree.  The root stays expanded."
-  (interactive)
-  (when emeld--root-node
-    (dolist (child (emeld-node-children emeld--root-node))
-      (emeld--walk-set-expanded child nil))
-    (emeld--render)))
-
-(defun emeld-expand-all ()
-  "Expand every directory in the tree."
-  (interactive)
-  (when emeld--root-node
-    (dolist (child (emeld-node-children emeld--root-node))
-      (emeld--walk-set-expanded child t))
-    (emeld--render)))
-
 (defun emeld-expand-dirs-only ()
   "Expand intermediate directories; collapse leaf directories.
 Reveals the directory skeleton without showing the file leaves inside.
@@ -2763,7 +2745,7 @@ callers redisplay.  A directory is expanded when its `diff-status' is not
   "Expand directories that lead to a change, collapse those that don't.
 A directory is expanded when its `diff-status' is not `same' — i.e. it
 contains a modified, added, or removed descendant.  Useful for focusing
-the view after \\[emeld-collapse-all], or after toggling same files on."
+the view, e.g. after toggling same files on."
   (interactive)
   (when emeld--root-node
     (emeld--set-expanded-changes)
@@ -2783,7 +2765,7 @@ If point is on a directory:
 
 Repeated invocations cycle FOLDED → DIRS → SUBTREE → FOLDED.  The current
 state is inferred from the actual expansion levels — no per-node state
-is stored, so external commands (TAB on another dir, `[`, `]`, …) compose
+is stored, so external commands (e.g. TAB on another dir) compose
 naturally."
   (interactive)
   (let ((node (get-text-property (point) 'emeld-node)))
@@ -2834,7 +2816,11 @@ Repeated invocations cycle TOP → DIRS → CHANGES → TOP."
                 (_ 'top))))
     (setq emeld--cycle-state next)
     (pcase next
-      ('top     (emeld-collapse-all)    (message "Visibility: TOP (top-level dirs)"))
+      ('top     (when emeld--root-node
+                  (dolist (child (emeld-node-children emeld--root-node))
+                    (emeld--walk-set-expanded child nil)))
+                (emeld--render)
+                (message "Visibility: TOP (top-level dirs)"))
       ('dirs    (emeld-expand-dirs-only) (message "Visibility: DIRS (directory skeleton)"))
       ('changes (emeld-expand-changes)   (message "Visibility: CHANGES (modified files)")))))
 
@@ -4573,8 +4559,6 @@ node — see `emeld--node-relpath' for the equivalent slow form."
       (lambda () (interactive) (emeld-git-toggle-commit-message)) :transient t
       :if (lambda () emeld--git-mode))]
     ["Layout"
-     ("[" "collapse all"  emeld-collapse-all :transient t)
-     ("]" "expand all"    emeld-expand-all :transient t)
      ("/" "expand to changes" emeld-expand-changes :transient t)
      ("<backtab>" "cycle visibility" emeld-cycle-visibility :transient t)
      (">" "indent more"  emeld-increase-indent :transient t)
