@@ -131,7 +131,7 @@ The transient is a two-level hierarchy.  The top level keeps the filename filter
 
 Top level:
 
-- ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~e~ edit ~.dir-locals.el~.
+- ~Filename~ :: Two sub-menus — ~Filter~ (~F~) toggles filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks); ~Dir-locals~ (~L~) edits ~.dir-locals.el~ (~e~) or adds the node at point as a filter (~&~).
 - ~Preset~ :: Save the current directory pair (~s~), load a saved pair (~l~), delete one (~d~).
 - ~Version Control~ :: Switch comparison source — ~G~ compare two git revisions, ~H~ step through git history one commit at a time.
 - ~Menus~ :: Open a sub-menu — ~v~ View, ~f~ File, ~m~ Mark.
@@ -304,8 +304,8 @@ Emeld ships with Meld-style default filter groups (see above).  Starting a compa
                             ("Config" nil "*.cfg" "config/*"))))))
 #+end_src
 
-Toggle named groups on/off from the transient menu (~?~) or with ~M-x emeld-toggle-filter-group~.  The header line shows the current display state; review or hand-edit the groups and their globs in ~.dir-locals.el~ with ~M-x emeld-edit-dir-locals~ (~e~ in the transient), then rescan (~G~) to apply.
+Toggle named groups on/off from the transient menu (~?~ then ~F~) or with ~M-x emeld-toggle-filter-group~.  The header line shows the current display state; review or hand-edit the groups and their globs in ~.dir-locals.el~ with ~M-x emeld-edit-dir-locals~ (~?~ then ~L~ then ~e~), then rescan (~G~) to apply.
 
-You do not have to write ~.dir-locals.el~ by hand.  With point on a file or directory in the tree, ~&~ (~emeld-add-filter-at-point~, also under ~&~ in the transient filter column) adds it as a filter and saves it: it prompts for the glob (defaulting to the basename — edit it to e.g. ~*.log~ or a ~sub/dir~ relative path) and the group to add it to (completing over existing names; a new name creates a new, active group), writes the updated ~emeld-filter-groups~ to ~.dir-locals.el~ at the left root, activates the group and rescans so the matching files drop out at once.  Repeat it to progressively tidy up a fresh comparison; the exclusions persist for next time.
+You do not have to write ~.dir-locals.el~ by hand.  With point on a file or directory in the tree, ~&~ (~emeld-add-filter-at-point~, also under ~&~ in the transient Dir-locals sub-menu) adds it as a filter and saves it: it prompts for the glob (defaulting to the basename — edit it to e.g. ~*.log~ or a ~sub/dir~ relative path) and the group to add it to (completing over existing names; a new name creates a new, active group), writes the updated ~emeld-filter-groups~ to ~.dir-locals.el~ at the left root, activates the group and rescans so the matching files drop out at once.  Repeat it to progressively tidy up a fresh comparison; the exclusions persist for next time.
 
 For a *temporary* tidy-up that you do not want recorded, ~C-k~ (~emeld-hide-at-point~) hides just the node at point — and, for a directory, its subtree — for this session only.  Nothing is written to ~.dir-locals.el~, and the hide survives a rescan within the session; the header line shows a ~(!) N hidden~ note while anything is tucked away.  Restore everything with ~C-u C-k~ (~emeld-unhide-all~).  Use this when you want to declutter the view but stay interested in the item later; use ~&~ when the exclusion should be permanent.

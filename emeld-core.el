@@ -4566,48 +4566,51 @@ node — see `emeld--node-relpath' for the equivalent slow form."
    ("* a" "all changed (mirror)" emeld-mark-all :transient t)
    ("U"   "unmark all"      emeld-unmark-all :transient t)])
 
+(transient-define-prefix emeld-dispatch-filter ()
+  "Emeld filename filter groups."
+  ["Filter"
+   :if (lambda () emeld-filter-groups)
+   :class transient-column
+   :setup-children
+   (lambda (&rest _)
+     (when emeld-filter-groups
+       (let ((idx 0)
+             (suffixes nil)
+             (max-len (apply #'max (mapcar (lambda (g) (length (car g)))
+                                           emeld-filter-groups))))
+         (dolist (g emeld-filter-groups)
+           (let* ((group-name (car g))
+                  (key (format "c%c" (+ ?a idx)))
+                  (cmd (let ((g-name group-name))
+                         (lambda ()
+                           (interactive)
+                           (emeld-toggle-filter-group g-name))))
+                  (desc-func (let ((g-name group-name) (len max-len))
+                               (lambda ()
+                                 (format (concat "[%c] %-" (number-to-string len) "s")
+                                         (if (member g-name emeld--active-filter-groups) ?x ?\s)
+                                         g-name)))))
+             (setq idx (1+ idx))
+             (push (transient-parse-suffix
+                    'emeld-dispatch-filter
+                    (list key "" cmd
+                          :class 'emeld-dynamic-suffix
+                          :dynamic-description desc-func
+                          :transient t))
+                   suffixes)))
+         (nreverse suffixes))))])
+
+(transient-define-prefix emeld-dispatch-dir-locals ()
+  "Emeld `.dir-locals.el' commands."
+  ["Dir-locals"
+   ("e" "edit .dir-locals.el…" emeld-edit-dir-locals)
+   ("&" "filter node at point → .dir-locals…" emeld-add-filter-at-point)])
+
 (transient-define-prefix emeld-dispatch ()
   "Transient menu for emeld."
   [["Filename"
-    :if (lambda () emeld-filter-groups)
-    :class transient-column
-    :setup-children
-    (lambda (&rest _)
-      (when emeld-filter-groups
-        (let ((idx 0)
-              (suffixes nil)
-              (max-len (apply #'max (mapcar (lambda (g) (length (car g)))
-                                            emeld-filter-groups))))
-          (dolist (g emeld-filter-groups)
-            (let* ((group-name (car g))
-                   (key (format "c%c" (+ ?a idx)))
-                   (cmd (let ((g-name group-name))
-                          (lambda ()
-                            (interactive)
-                            (emeld-toggle-filter-group g-name))))
-                   (desc-func (let ((g-name group-name) (len max-len))
-                                (lambda ()
-                                  (format (concat "[%c] %-" (number-to-string len) "s")
-                                          (if (member g-name emeld--active-filter-groups) ?x ?\s)
-                                          g-name)))))
-              (setq idx (1+ idx))
-              (push (transient-parse-suffix
-                     'emeld-dispatch
-                     (list key "" cmd
-                           :class 'emeld-dynamic-suffix
-                           :dynamic-description desc-func
-                           :transient t))
-                    suffixes)))
-          (push (transient-parse-suffix
-                 'emeld-dispatch
-                 (list "e" "edit .dir-locals.el…" 'emeld-edit-dir-locals))
-                suffixes)
-          (push (transient-parse-suffix
-                 'emeld-dispatch
-                 (list "&" "filter node at point → .dir-locals…"
-                       'emeld-add-filter-at-point))
-                suffixes)
-          (nreverse suffixes))))]
+    ("F" "Filter →"     emeld-dispatch-filter)
+    ("L" "Dir-locals →" emeld-dispatch-dir-locals)]
    ["Preset"
     ("s" "save current" emeld-save-preset)
     ("l" "load…"        emeld-load-preset)
