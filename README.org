@@ -127,24 +127,24 @@ Deletions move the files to trash rather than erasing them outright.  When sever
 
 * Transient Menu (~?~)
 
-The transient top level has two rows of columns, plus ~File~ and ~Mark~ sub-menus under ~Menus~ for the longer command sets.  Pressing ~q~ (or ~C-g~) in a sub-menu returns to the top level.
+The transient top level has two rows of columns, plus a ~File~ sub-menu under ~Menus~ for the longer file command set.  Pressing ~q~ (or ~C-g~) in a sub-menu returns to the top level.
 
 Top level, first row:
 
 - ~Filename~ :: Edit ~.dir-locals.el~ (~E~), add the node at point as a filter (~&~), or open the ~Filter~ sub-menu (~F~) to toggle groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks).
 - ~Preset~ :: Save the current directory pair (~S~), load a saved pair (~l~), delete one (~d~).
 - ~Version Control~ :: Switch comparison source — ~G~ compare two git revisions, ~H~ step through git history one commit at a time.
-- ~Menus~ :: Open a sub-menu — ~f~ File, ~m~ Mark.
+- ~Menus~ :: Open a sub-menu — ~f~ File.
 
 Top level, second row:
 
 - ~Show~ :: Toggle what is displayed — files (~t~ hide files, show directories only), tree-lines (~T~), tree density (~z~ cycles compact → extreme → wide), strikethrough (~s~), ~.gitignore~ respect (~I~), whitespace handling (~i~), commit message (~c~, git mode only).
 - ~Layout~ :: Bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~/~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), and pane resize (~{~/~}~).
-- ~Hide (session)~ :: Temporarily hide the node at point (~C-k~, session only; ~C-u C-k~ unhides all) and unhide all (~U~).
+- ~Hide (session)~ :: Temporarily hide the node at point (~C-k~, session only; ~C-u C-k~ unhides all) and unhide all (~r~).
+- ~Mark~ :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), the full left→right mirror set (~* c~/~* a~ — modified + left-only + right-only); ~U~ unmark all.
 
 Sub-menus (opened from the ~Menus~ column):
 - ~File~ (~f~) :: Operate on files, in four columns. ~Open~: ~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree (soft diff a modified file, show a new/one-sided one, fold a directory), ~TAB~ peek inline diff. ~Dired~: ~A~/~B~ jump to dired on the left/right side, ~w~ copy path. ~Diff~: ~D~ diff whole root, ~d~ diff directory at point, ~P~ format patch. ~Sync~: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point.
-- ~Mark~ (~m~) :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), the full left→right mirror set (~* c~/~* a~ — modified + left-only + right-only); ~U~ unmark all.
 
 Every command keeps its direct key binding in ~emeld-mode~ (see below), so the menu hierarchy is only for discovery — you never have to drill through it to reach a command you already know.
 

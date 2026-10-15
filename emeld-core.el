@@ -4523,17 +4523,6 @@ node — see `emeld--node-relpath' for the equivalent slow form."
      (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
     ("x"   "delete marked/at point" emeld-delete)]])
 
-(transient-define-prefix emeld-dispatch-mark ()
-  "Emeld marking."
-  ["Mark"
-   ("m"   "mark"            emeld-mark :transient t)
-   ("u"   "unmark"          emeld-unmark :transient t)
-   ("* m" "modified"        emeld-mark-modified :transient t)
-   ("* l" "left-only (new)" emeld-mark-left-only :transient t)
-   ("* c" "→ mirror right"  emeld-mark-to-copy :transient t)
-   ("* a" "all changed (mirror)" emeld-mark-all :transient t)
-   ("U"   "unmark all"      emeld-unmark-all :transient t)])
-
 (transient-define-prefix emeld-dispatch-filter ()
   "Emeld filename filter groups."
   ["Filter"
@@ -4583,8 +4572,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
      ("G" "git revisions…"    emeld-git-diff)
      ("H" "git history step…" emeld-git-step-history)]
     ["Menus"
-     ("f" "File →"     emeld-dispatch-file)
-     ("m" "Mark →"     emeld-dispatch-mark)]]
+     ("f" "File →"     emeld-dispatch-file)]]
    [["Show"
      ("t" (lambda () (if emeld-show-files "[x] Files" "[ ] Files"))
       (lambda () (interactive) (emeld-toggle-show-files)) :transient t)
@@ -4616,7 +4604,15 @@ node — see `emeld--node-relpath' for the equivalent slow form."
      ("{" "pane narrow"  emeld-shrink-column :transient t)]
     ["Hide (session)"
      ("C-k" "hide node (C-u: unhide all)" emeld-hide-at-point)
-     ("U"   "unhide all"                  emeld-unhide-all)]]])
+     ("r"   "unhide all"                  emeld-unhide-all)]
+    ["Mark"
+     ("m"   "mark"            emeld-mark :transient t)
+     ("u"   "unmark"          emeld-unmark :transient t)
+     ("* m" "modified"        emeld-mark-modified :transient t)
+     ("* l" "left-only (new)" emeld-mark-left-only :transient t)
+     ("* c" "→ mirror right"  emeld-mark-to-copy :transient t)
+     ("* a" "all changed (mirror)" emeld-mark-all :transient t)
+     ("U"   "unmark all"      emeld-unmark-all :transient t)]]])
 
 (define-key emeld-mode-map (kbd "?") #'emeld-dispatch)
 
