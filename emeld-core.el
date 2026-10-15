@@ -4501,41 +4501,6 @@ node — see `emeld--node-relpath' for the equivalent slow form."
   (let ((fn (oref obj dynamic-description)))
     (if fn (funcall fn) (cl-call-next-method))))
 
-(transient-define-prefix emeld-dispatch-view ()
-  "Emeld view, visibility and layout options."
-  [["Show"
-    ("F" (lambda () (if emeld-show-files "[x] Files" "[ ] Files"))
-     (lambda () (interactive) (emeld-toggle-show-files)) :transient t)
-    ("T" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
-     (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
-    ("z" (lambda () (format "density: %s" emeld-tree-density))
-     (lambda () (interactive) (emeld-cycle-tree-density)) :transient t)
-    ("s" (lambda () (if emeld-show-strikethrough "[x] strikethrough" "[ ] strikethrough"))
-     (lambda () (interactive) (emeld-toggle-show-strikethrough)) :transient t)
-    ("I" (lambda () (if emeld-respect-gitignore "[x] gitignore" "[ ] gitignore"))
-     (lambda () (interactive) (emeld-toggle-gitignore)))
-    ("i" (lambda ()
-           (pcase emeld-ignore-whitespace
-             ('change "[-b] ignore ws (amount)")
-             ('all "[-w] ignore ws (all)")
-             (_ "[ ] ignore ws")))
-     (lambda () (interactive) (emeld-toggle-ignore-whitespace)))
-    ("c" (lambda () (if emeld--git-commit-expanded "[x] commit msg" "[ ] commit msg"))
-     (lambda () (interactive) (emeld-git-toggle-commit-message)) :transient t
-     :if (lambda () emeld--git-mode))]
-   ["Layout"
-    ("[" "collapse all"  emeld-collapse-all :transient t)
-    ("]" "expand all"    emeld-expand-all :transient t)
-    ("/" "expand to changes" emeld-expand-changes :transient t)
-    ("<backtab>" "cycle visibility" emeld-cycle-visibility :transient t)
-    (">" "indent more"  emeld-increase-indent :transient t)
-    ("<" "indent less"  emeld-decrease-indent :transient t)
-    ("}" "pane wider"   emeld-grow-column :transient t)
-    ("{" "pane narrow"  emeld-shrink-column :transient t)]
-   ["Hide (session)"
-    ("C-k" "hide node (C-u: unhide all)" emeld-hide-at-point)
-    ("U"   "unhide all"                  emeld-unhide-all)]])
-
 (transient-define-prefix emeld-dispatch-file ()
   "Emeld file actions."
   [["Open"
@@ -4605,22 +4570,53 @@ node — see `emeld--node-relpath' for the equivalent slow form."
 
 (transient-define-prefix emeld-dispatch ()
   "Transient menu for emeld."
-  [["Filename"
-    ("E" "edit .dir-locals.el" emeld-edit-dir-locals)
-    ("&" "filter node at point" emeld-add-filter-at-point)
-    ("F" "Filter →"     emeld-dispatch-filter)]
-   ["Preset"
-    ("s" "save current" emeld-save-preset)
-    ("l" "load…"        emeld-load-preset)
-    ("d" "delete…"      emeld-delete-preset)]
-   ["Version Control"
-    ("G" "git revisions…"    emeld-git-diff)
-    ("H" "git history step…" emeld-git-step-history)]
-   ["Menus"
-    ("v" "View →"     emeld-dispatch-view)
-    ("f" "File →"     emeld-dispatch-file)
-    ("m" "Mark →"     emeld-dispatch-mark)]
-   ])
+  [:class transient-subgroups
+   [["Filename"
+     ("E" "edit .dir-locals.el…" emeld-edit-dir-locals)
+     ("&" "filter node at point" emeld-add-filter-at-point)
+     ("F" "Filter →"     emeld-dispatch-filter)]
+    ["Preset"
+     ("S" "save current" emeld-save-preset)
+     ("l" "load…"        emeld-load-preset)
+     ("d" "delete…"      emeld-delete-preset)]
+    ["Version Control"
+     ("G" "git revisions…"    emeld-git-diff)
+     ("H" "git history step…" emeld-git-step-history)]
+    ["Menus"
+     ("f" "File →"     emeld-dispatch-file)
+     ("m" "Mark →"     emeld-dispatch-mark)]]
+   [["Show"
+     ("t" (lambda () (if emeld-show-files "[x] Files" "[ ] Files"))
+      (lambda () (interactive) (emeld-toggle-show-files)) :transient t)
+     ("T" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
+      (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
+     ("z" (lambda () (format "density: %s" emeld-tree-density))
+      (lambda () (interactive) (emeld-cycle-tree-density)) :transient t)
+     ("s" (lambda () (if emeld-show-strikethrough "[x] strikethrough" "[ ] strikethrough"))
+      (lambda () (interactive) (emeld-toggle-show-strikethrough)) :transient t)
+     ("I" (lambda () (if emeld-respect-gitignore "[x] gitignore" "[ ] gitignore"))
+      (lambda () (interactive) (emeld-toggle-gitignore)))
+     ("i" (lambda ()
+            (pcase emeld-ignore-whitespace
+              ('change "[-b] ignore ws (amount)")
+              ('all "[-w] ignore ws (all)")
+              (_ "[ ] ignore ws")))
+      (lambda () (interactive) (emeld-toggle-ignore-whitespace)))
+     ("c" (lambda () (if emeld--git-commit-expanded "[x] commit msg" "[ ] commit msg"))
+      (lambda () (interactive) (emeld-git-toggle-commit-message)) :transient t
+      :if (lambda () emeld--git-mode))]
+    ["Layout"
+     ("[" "collapse all"  emeld-collapse-all :transient t)
+     ("]" "expand all"    emeld-expand-all :transient t)
+     ("/" "expand to changes" emeld-expand-changes :transient t)
+     ("<backtab>" "cycle visibility" emeld-cycle-visibility :transient t)
+     (">" "indent more"  emeld-increase-indent :transient t)
+     ("<" "indent less"  emeld-decrease-indent :transient t)
+     ("}" "pane wider"   emeld-grow-column :transient t)
+     ("{" "pane narrow"  emeld-shrink-column :transient t)]
+    ["Hide (session)"
+     ("C-k" "hide node (C-u: unhide all)" emeld-hide-at-point)
+     ("U"   "unhide all"                  emeld-unhide-all)]]])
 
 (define-key emeld-mode-map (kbd "?") #'emeld-dispatch)
 
