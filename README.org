@@ -133,12 +133,11 @@ Top level:
 
 - ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~cl~ list all globs.
 - ~Preset~ :: Save the current directory pair (~s~), load a saved pair (~l~), delete one (~d~).
-- ~Menus~ :: Open a sub-menu — ~v~ View, ~n~ Navigate, ~f~ File, ~m~ Mark, ~C~ Compare.
+- ~Menus~ :: Open a sub-menu — ~v~ View, ~f~ File, ~m~ Mark, ~C~ Compare.
 
 Sub-menus (opened from the ~Menus~ column):
 
 - ~View~ (~v~) :: Two columns. ~Show~ toggles what is displayed — files (~F~ hide files, show directories only), tree-lines (~T~), tree density (~z~ cycles compact → extreme → wide), strikethrough (~s~), ~.gitignore~ respect (~I~). ~Layout~ holds bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~/~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), and pane resize (~{~/~}~).
-- ~Navigate~ (~n~) :: Rescan (~G~; ~C-u G~ rescans just the directory at point), stop an in-progress scan (~k~), redraw after a resize (~g~), swap panes (~W~), and jump (~o~ other side).
 - ~File~ (~f~) :: Operate on files, in four columns. ~Open~: ~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree (soft diff a modified file, show a new/one-sided one, fold a directory), ~TAB~ peek inline diff. ~Dired~: ~A~/~B~ jump to dired on the left/right side, ~w~ copy path. ~Diff~: ~D~ diff whole root, ~d~ diff directory at point, ~P~ format patch. ~Sync~: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point.
 - ~Mark~ (~m~) :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), the full left→right mirror set (~* c~/~* a~ — modified + left-only + right-only); ~U~ unmark all.
 - ~Compare~ (~C~) :: Switch comparison source — ~G~ compare two git revisions, ~H~ step through git history one commit at a time.

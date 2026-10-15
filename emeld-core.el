@@ -4520,19 +4520,6 @@ node — see `emeld--node-relpath' for the equivalent slow form."
     ("C-k" "hide node (C-u: unhide all)" emeld-hide-at-point)
     ("U"   "unhide all"                  emeld-unhide-all)]])
 
-(transient-define-prefix emeld-dispatch-navigate ()
-  "Emeld navigation and rescanning."
-  ["Navigate"
-    ("G"   "rescan (C-u: dir at point)" emeld-rescan)
-    ("g"   "reset layout + redraw" emeld-redraw)
-   ("k"   "stop scan"            emeld-stop-scan)
-   ("W"   "swap panes"         emeld-swap-panes)
-   ("o"   "jump other side"    emeld-jump-other-side :transient t)
-   ("," "history: older commit" emeld-git-history-older
-    :transient t :if (lambda () emeld--git-mode))
-   ("." "history: newer commit" emeld-git-history-newer
-    :transient t :if (lambda () emeld--git-mode))])
-
 (transient-define-prefix emeld-dispatch-file ()
   "Emeld file actions."
   [["Open"
@@ -4620,7 +4607,6 @@ node — see `emeld--node-relpath' for the equivalent slow form."
     ("d" "delete…"      emeld-delete-preset)]
    ["Menus"
     ("v" "View →"     emeld-dispatch-view)
-    ("n" "Navigate →" emeld-dispatch-navigate)
     ("f" "File →"     emeld-dispatch-file)
     ("m" "Mark →"     emeld-dispatch-mark)
     ("C" "Compare →"  emeld-dispatch-compare)]
