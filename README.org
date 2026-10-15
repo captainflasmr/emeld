@@ -9,13 +9,13 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Side-by-side view in a single buffer.
 - Recursive glob-based filtering (like Meld) — excluded at the ~diff~ level.
 - ~.gitignore~ support, on by default — ignored files hidden on both sides, toggle with ~I~.  Turning it off shows a ~(!) gitignore off~ note in the header line, since including ignored files is the exception.
-- Instant toggles for Same, New, Modified, and File visibility (~S~/~N~/~M~/~t~).
+- Instant toggles for Same, New, and Modified (~S~/~N~/~M~).
 - Orphan files shown with strikethrough on the missing side (Meld-style, always on).
 - Dired-style, per-side marking (~m~/~u~/~U~): the ~*~ sits in the column of the side you mark, and a node can be marked left, right, or both.  Copy/sync (~C~) makes the *other* side match the side you marked — a node marked on the side that has the file is copied across, while a node marked on its empty (struck-through) side is *deleted* from the other side, so you can resolve a one-sided file either way.  Bulk delete (~x~) deletes from every marked side; bulk-mark by status (~* m~ modified, ~* l~ left-only, ~* c~ the full left→right mirror set — modified + left-only + right-only).
 - Filter groups toggleable from the transient menu.
 - Org-mode-style subtree cycling: ~TAB~ cycles the directory at point (FOLDED → DIRS → SUBTREE).  On a file, ~TAB~ instead peeks an inline diff underneath the row (Magit-style), expandable and collapsible without leaving the tree.
 - File copying between directories (~C~), via rsync when available — asynchronous and delta-efficient, with an optional exact-mirror (~--delete~) mode toggled with ~R~.
-- Recursive ~diff~ buffers for the whole root (~D~) or the directory at point (~d~), and a non-intrusive preview (~=~/~SPC~) that diffs/opens the node at point while keeping point in the tree.
+- Recursive ~diff~ buffers for the directory at point (~d~; at the top level this covers the whole root), and a non-intrusive preview (~=~/~SPC~) that diffs/opens the node at point while keeping point in the tree.
 - Export changes as a unified-diff patch (~P~).
 - Presets: save a directory pair and recall it later for fast repeated comparisons.
 - Side-aware navigation (~n~/~p~) and side-jumping (~o~).
@@ -45,7 +45,7 @@ From inside a git work tree, run ~M-x emeld-git-diff~ (or ~G~ in the transient m
 
 The result is the same side-by-side tree, showing the hierarchy of added, deleted and modified files between the two revisions (renames appear as a deleted old path plus an added new path).  Because the content lives in git history rather than on disk:
 
-- ~RET~ / ~f~ opens a file at its revision (via ~git show~; the working-tree side opens the real file), ~e~ Ediffs the two revisions, ~=~ / ~SPC~ / ~d~ / ~D~ show a ~git diff~, and ~TAB~ peeks an inline diff of a file underneath its row.
+- ~RET~ / ~f~ opens a file at its revision (via ~git show~; the working-tree side opens the real file), ~e~ Ediffs the two revisions, ~=~ / ~SPC~ / ~d~ show a ~git diff~, and ~TAB~ peeks an inline diff of a file underneath its row.
 - ~S~ (show Same) lists the left revision and merges in every unchanged file.
 - A foldable commit-context block sits between the revision header and the tree, in two columns aligned to the panes (left/old commit under the left header, right/new under the right): each shows its short SHA and subject, and ~c~ (or ~RET~ on the block) unfolds the author, date+time and full message.
 - Header ~RET~ re-selects a revision for that side; ~W~ swaps the two revisions; ~G~ re-scans.
@@ -131,12 +131,12 @@ The transient top level has three rows of columns.  The ~Filter~ sub-menu (under
 Top level, first row:
 
 - ~Sync~ :: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point.
-- ~Diff~ :: ~D~ diff whole root, ~d~ diff directory at point, ~P~ format patch.
+- ~Diff~ :: ~d~ diff directory at point (whole root at the top level), ~P~ format patch.
 - ~Filename~ :: Open the ~Filter~ sub-menu (~F~) to toggle groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), edit ~.dir-locals.el~ (~E~), or add the node at point as a filter (~&~).
 
 Top level, second row:
 
-- ~Show~ :: Toggle what is displayed — files (~t~ hide files, show directories only), tree-lines (~T~), tree density (~z~ cycles compact → extreme → wide), ~.gitignore~ respect (~I~), whitespace handling (~i~), commit message (~c~, git mode only), session hide (~C-k~ hide node at point, ~C-u C-k~ unhides all).
+- ~Show~ :: Toggle what is displayed — tree-lines (~t~), tree density (~z~ cycles compact → extreme → wide), ~.gitignore~ respect (~I~), whitespace handling (~i~), commit message (~c~, git mode only), session hide (~C-k~ hide node at point, ~C-u C-k~ unhides all).
 - ~Layout~ :: Indent (~>~/~<~) and pane resize (~{~/~}~).
 - ~Mark~ :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), the full left→right mirror set (~* c~ — modified + left-only + right-only); ~U~ unmark all.
 
@@ -161,8 +161,7 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | f, v      | Find File (Open current side)                     |
 | A         | Dired the left side (node at point, or left root) |
 | B         | Dired the right side (node at point, or right root) |
-| D         | Diff whole root (recursive unified ~diff~ buffer) |
-| d         | Diff directory at point (recursive; file → its dir) |
+| d         | Diff directory at point (recursive; file → its dir, root at top level) |
 | C         | Sync marked nodes to the other side (mark file side → copy, empty/struck side → delete) or node at point |
 | x         | Delete marked nodes (each from its marked side) or node at point |
 | P         | Format as patch (unified diff)                    |
@@ -173,14 +172,13 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | M         | Toggle modified files                             |
 | N         | Toggle added (new) files                          |
 | F         | Open the Filter sub-menu (toggle groups)      |
-| t         | Toggle file visibility (hide files, show dirs only)|
 | m         | Mark file on current side                         |
 | u         | Unmark file on current side                       |
 | U         | Unmark all nodes                                  |
 | * m       | Mark all modified files                           |
 | * l       | Mark all left-only (created) files                |
 | * c       | Mark left→right mirror set (modified + left-only + right-only) |
-| T         | Toggle tree-line display                          |
+| t         | Toggle tree-line display                          |
 | z         | Cycle tree density: compact → extreme → wide      |
 | I         | Toggle ~.gitignore~ respect (rescans)             |
 | &         | Filter node at point → save to ~.dir-locals.el~ and rescan |
@@ -215,7 +213,7 @@ Filter-group toggling (~emeld-toggle-filter-group~) and the preset commands (~em
   | Media           | ~*.jpg~, ~*.gif~, ~*.png~, ~*.bmp~, ~*.wav~, ~*.mp3~, ~*.ogg~, ~*.flac~, ~*.avi~, ~*.mpg~, ~*.xcf~, ~*.xpm~ |
 
 - ~emeld-show-same~: Whether to show identical files (default nil).  When enabled, identical files appear in the tree.
-- ~emeld-show-files~: Whether to show regular files (default t).  When disabled, only directories are displayed — isolate the folder hierarchy with ~t~.
+- ~emeld-show-files~: Whether to show regular files (default t).  When disabled, only directories are displayed.
 - ~emeld-same-files-method~: How toggling ~S~ finds identical files — ~list~ (default, fast: enumerate the left tree and subtract the files the initial scan already classified, avoiding a second content comparison) or ~diff~ (exact: re-run ~diff -rqs~).
 - ~emeld-list-command~: Program + args used by the ~list~ method to enumerate files (default ~("find" "." "-type" "f")~; set to e.g. ~("fd" "--type" "f" "--hidden" "--no-ignore")~ to use fd).
 - ~emeld-show-strikethrough~: Show strikethrough for orphan files on the missing side (default ~t~).  When nil, the missing side shows nothing.  The struck-through cell is also the marking target for deletion: with strikethrough on, marking it (~m~) marks the empty side, so ~C~ (sync) deletes the file from the side that has it.  With strikethrough off, marking a one-sided file snaps to the file side instead (so ~C~ copies it across).

@@ -2413,7 +2413,6 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "C")   #'emeld-copy)
     (define-key map (kbd "w")   #'emeld-copy-path-at-point)
     (define-key map (kbd "x")   #'emeld-delete)
-    (define-key map (kbd "D")   #'emeld-diff-root)
     (define-key map (kbd "d")   #'emeld-diff-dir)
     (define-key map (kbd "c")   #'emeld-git-toggle-commit-message)
     (define-key map (kbd ",")   #'emeld-git-history-older)
@@ -2428,7 +2427,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "S")   #'emeld-toggle-show-same)
     (define-key map (kbd "M")   #'emeld-toggle-show-different)
     (define-key map (kbd "N")   #'emeld-toggle-show-added)
-    (define-key map (kbd "T")   #'emeld-toggle-tree-lines)
+    (define-key map (kbd "t")   #'emeld-toggle-tree-lines)
     (define-key map (kbd "z")   #'emeld-cycle-tree-density)
     (define-key map (kbd "I")   #'emeld-toggle-gitignore)
     (define-key map (kbd "i")   #'emeld-toggle-ignore-whitespace)
@@ -2436,7 +2435,6 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "E")   #'emeld-edit-dir-locals)
     (define-key map (kbd "C-k") #'emeld-hide-at-point)
     (define-key map (kbd "F")   #'emeld-dispatch-filter)
-    (define-key map (kbd "t")   #'emeld-toggle-show-files)
     (define-key map (kbd ">")   #'emeld-increase-indent)
     (define-key map (kbd "<")   #'emeld-decrease-indent)
     (define-key map (kbd "}")   #'emeld-grow-column)
@@ -2627,14 +2625,6 @@ use rsync (see `emeld-copy-method')."
   (interactive)
   (setq emeld-show-added (not emeld-show-added))
   (message "Show new: %s" (if emeld-show-added "on" "off"))
-  (emeld--render))
-
-(defun emeld-toggle-show-files ()
-  "Toggle file visibility to show only the directory hierarchy.
-When disabled, only directories are displayed."
-  (interactive)
-  (setq emeld-show-files (not emeld-show-files))
-  (message "Show files: %s" (if emeld-show-files "on" "off"))
   (emeld--render))
 
 (defun emeld-toggle-gitignore ()
@@ -3324,24 +3314,11 @@ on disk before diffing rather than running a diff that would just error."
      (t
       (message "No directory to diff (%s)" what)))))
 
-(defun emeld-diff-root ()
-  "Show a recursive unified `diff' of the two root directories.
-Differences appear in a `*Diff*' buffer; filter groups and `.gitignore'
-settings are honoured, matching the comparison tree.  See also
-`emeld-diff-dir' for the directory at point."
-  (interactive)
-  (if emeld--git-mode
-      (emeld--git-diff-show nil "root")
-    (progn
-      (unless (and emeld--left-root emeld--right-root)
-        (user-error "No comparison loaded"))
-      (emeld--diff-dirs emeld--left-root emeld--right-root "root"))))
-
 (defun emeld-diff-dir ()
   "Show a recursive unified `diff' of the directory at point.
-If point is on a file, its containing directory is used; above any
-subdirectory this falls back to the root (so it matches
-`emeld-diff-root').  Differences appear in a `*Diff*' buffer."
+If point is on a file, its containing directory is used; at the top
+level this diffs the whole comparison root.  Differences appear in
+a `*Diff*' buffer."
   (interactive)
   (let ((node (get-text-property (point) 'emeld-node)))
     (while (and node (not (emeld-node-is-dir node)))
@@ -3963,7 +3940,7 @@ to the default of dropping them, which needs no flag), and a
 `warning'-faced \"(!) files hidden\" note when `emeld-show-files' is nil,
 since a files-less tree can look empty and be mistaken for
 \"no differences\".  The secondary display
-toggles (Files/Tree-lines/Gitignore) are intentionally
+toggles (Tree-lines/Gitignore) are intentionally
 omitted here to keep the header line uncluttered; they remain reachable
 from the transient (\\[emeld-dispatch])."
   (concat
@@ -4457,7 +4434,6 @@ node — see `emeld--node-relpath' for the equivalent slow form."
       (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
      ("x"   "delete marked/at point" emeld-delete)]
     ["Diff"
-     ("D"   "diff root (recursive)" emeld-diff-root)
      ("d"   "diff dir at point"   emeld-diff-dir)
      ("P"   "format as patch"    emeld-format-patch)]
     ["Filename"
@@ -4465,9 +4441,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
      ("E" "edit .dir-locals.el" emeld-edit-dir-locals)
      ("&" "filter node at point" emeld-add-filter-at-point)]]
    [["Show"
-     ("t" (lambda () (if emeld-show-files "[x] Files" "[ ] Files"))
-      (lambda () (interactive) (emeld-toggle-show-files)) :transient t)
-     ("T" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
+     ("t" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
       (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
      ("z" (lambda () (format "density: %s" emeld-tree-density))
       (lambda () (interactive) (emeld-cycle-tree-density)) :transient t)
