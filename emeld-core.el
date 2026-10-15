@@ -3933,7 +3933,8 @@ hint at the key that toggles it (e.g. \"S\" in \"Same\")."
 (defun emeld--display-state-string ()
   "Return a string showing the primary Same/New/Modified filter states.
 Each label is spelled out with a leading ASCII checkbox.  Scan-affecting
-notes are appended after them: the whitespace mode (-w/-b) when active, a
+notes are appended after them: the whitespace mode (`[ws:amount]' or
+`[ws:all]') when active, a
 `warning'-faced \"(!) gitignore off\" note while `emeld-respect-gitignore'
 is off (git-ignored files are then included in the scan — the exception
 to the default of dropping them, which needs no flag), and a
@@ -3950,7 +3951,7 @@ from the transient (\\[emeld-dispatch])."
    " "
    (emeld--toggle-indicator "Modified" emeld-show-different)
    (when emeld-ignore-whitespace
-     (if (eq emeld-ignore-whitespace 'all) " -w" " -b"))
+     (if (eq emeld-ignore-whitespace 'all) " [ws:all]" " [ws:amount]"))
    ;; Git-ignored files are dropped from the scan by default, so that
    ;; needs no flag; warn only when respect is off (the exception),
    ;; since ignored files are then included.
