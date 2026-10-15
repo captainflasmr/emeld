@@ -127,11 +127,10 @@ Deletions move the files to trash rather than erasing them outright.  When sever
 
 * Transient Menu (~?~)
 
-The transient is a two-level hierarchy.  The top level keeps the menus you reach for most often as full columns, plus a ~Menus~ column whose entries open focused sub-menus.  Pressing ~q~ (or ~C-g~) in a sub-menu returns to the top level.
+The transient is a two-level hierarchy.  The top level keeps the filename filter-group column, plus a ~Menus~ column whose entries open focused sub-menus.  Pressing ~q~ (or ~C-g~) in a sub-menu returns to the top level.
 
 Top level:
 
-- ~File Status~ :: Toggle the primary filters (~S~ same, ~N~ added, ~M~ modified).
 - ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~cl~ list all globs.
 - ~Menus~ :: Open a sub-menu — ~v~ View, ~n~ Navigate, ~f~ File, ~m~ Mark, ~p~ Preset, ~C~ Compare.
 

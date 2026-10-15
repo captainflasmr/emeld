@@ -4581,14 +4581,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
 
 (transient-define-prefix emeld-dispatch ()
   "Transient menu for emeld."
-  [["File Status"
-     ("S" (lambda () (if emeld-show-same "[x] Same" "[ ] Same"))
-     (lambda () (interactive) (emeld-toggle-show-same)) :transient t)
-     ("N" (lambda () (if emeld-show-added "[x] New" "[ ] New"))
-     (lambda () (interactive) (emeld-toggle-show-added)) :transient t)
-     ("M" (lambda () (if emeld-show-different "[x] Modified" "[ ] Modified"))
-     (lambda () (interactive) (emeld-toggle-show-different)) :transient t)]
-   ["Filename"
+  [["Filename"
     :if (lambda () emeld-filter-groups)
     :class transient-column
     :setup-children
