@@ -9,7 +9,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Side-by-side view in a single buffer.
 - Recursive glob-based filtering (like Meld) — excluded at the ~diff~ level.
 - ~.gitignore~ support, on by default — ignored files hidden on both sides, toggle with ~I~.  Turning it off shows a ~(!) gitignore off~ note in the header line, since including ignored files is the exception.
-- Instant toggles for Same, New, Modified, and File visibility (~S~/~N~/~M~/~F~).
+- Instant toggles for Same, New, Modified, and File visibility (~S~/~N~/~M~/~t~).
 - Orphan files shown with strikethrough on the missing side (Meld-style, toggle ~s~).
 - Dired-style, per-side marking (~m~/~u~/~U~): the ~*~ sits in the column of the side you mark, and a node can be marked left, right, or both.  Copy/sync (~C~) makes the *other* side match the side you marked — a node marked on the side that has the file is copied across, while a node marked on its empty (struck-through) side is *deleted* from the other side, so you can resolve a one-sided file either way.  Bulk delete (~x~) deletes from every marked side; bulk-mark by status (~* m~ modified, ~* l~ left-only, ~* c~/~* a~ the full left→right mirror set — modified + left-only + right-only).
 - Filter groups toggleable from the transient menu.
@@ -131,14 +131,14 @@ The transient is a two-level hierarchy.  The top level keeps the filename filter
 
 Top level:
 
-- ~Filename~ :: Two sub-menus — ~Filter~ (~F~) toggles filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks); ~Dir-locals~ (~L~) edits ~.dir-locals.el~ (~e~) or adds the node at point as a filter (~&~).
+- ~Filename~ :: Edit ~.dir-locals.el~ (~E~), add the node at point as a filter (~&~), or open the ~Filter~ sub-menu (~F~) to toggle groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks).
 - ~Preset~ :: Save the current directory pair (~s~), load a saved pair (~l~), delete one (~d~).
 - ~Version Control~ :: Switch comparison source — ~G~ compare two git revisions, ~H~ step through git history one commit at a time.
 - ~Menus~ :: Open a sub-menu — ~v~ View, ~f~ File, ~m~ Mark.
 
 Sub-menus (opened from the ~Menus~ column):
 
-- ~View~ (~v~) :: Two columns. ~Show~ toggles what is displayed — files (~F~ hide files, show directories only), tree-lines (~T~), tree density (~z~ cycles compact → extreme → wide), strikethrough (~s~), ~.gitignore~ respect (~I~). ~Layout~ holds bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~/~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), and pane resize (~{~/~}~).
+- ~View~ (~v~) :: Two columns. ~Show~ toggles what is displayed — files (~t~ hide files, show directories only), tree-lines (~T~), tree density (~z~ cycles compact → extreme → wide), strikethrough (~s~), ~.gitignore~ respect (~I~). ~Layout~ holds bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~/~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), and pane resize (~{~/~}~).
 - ~File~ (~f~) :: Operate on files, in four columns. ~Open~: ~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree (soft diff a modified file, show a new/one-sided one, fold a directory), ~TAB~ peek inline diff. ~Dired~: ~A~/~B~ jump to dired on the left/right side, ~w~ copy path. ~Diff~: ~D~ diff whole root, ~d~ diff directory at point, ~P~ format patch. ~Sync~: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point.
 - ~Mark~ (~m~) :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), the full left→right mirror set (~* c~/~* a~ — modified + left-only + right-only); ~U~ unmark all.
 
@@ -155,6 +155,7 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | /         | Expand only paths to changes                      |
 | RET       | Smart action (Ediff/open file; dired/expand dir)  |
 | e         | Ediff the file at point (left vs right)           |
+| E         | Edit the project ~.dir-locals.el~                 |
 | =         | Preview (point stays in tree): soft diff (modified), show file (new), fold (Dir) |
 | f, v      | Find File (Open current side)                     |
 | A         | Dired the left side (node at point, or left root) |
@@ -170,7 +171,8 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | S         | Toggle same (identical) files                     |
 | M         | Toggle modified files                             |
 | N         | Toggle added (new) files                          |
-| F         | Toggle file visibility (hide files, show dirs only)|
+| F         | Open the Filter sub-menu (toggle groups)      |
+| t         | Toggle file visibility (hide files, show dirs only)|
 | m         | Mark file on current side                         |
 | u         | Unmark file on current side                       |
 | U         | Unmark all nodes                                  |
@@ -214,7 +216,7 @@ Filter-group toggling (~emeld-toggle-filter-group~) and the preset commands (~em
   | Media           | ~*.jpg~, ~*.gif~, ~*.png~, ~*.bmp~, ~*.wav~, ~*.mp3~, ~*.ogg~, ~*.flac~, ~*.avi~, ~*.mpg~, ~*.xcf~, ~*.xpm~ |
 
 - ~emeld-show-same~: Whether to show identical files (default nil).  When enabled, identical files appear in the tree.
-- ~emeld-show-files~: Whether to show regular files (default t).  When disabled, only directories are displayed — isolate the folder hierarchy with ~F~.
+- ~emeld-show-files~: Whether to show regular files (default t).  When disabled, only directories are displayed — isolate the folder hierarchy with ~t~.
 - ~emeld-same-files-method~: How toggling ~S~ finds identical files — ~list~ (default, fast: enumerate the left tree and subtract the files the initial scan already classified, avoiding a second content comparison) or ~diff~ (exact: re-run ~diff -rqs~).
 - ~emeld-list-command~: Program + args used by the ~list~ method to enumerate files (default ~("find" "." "-type" "f")~; set to e.g. ~("fd" "--type" "f" "--hidden" "--no-ignore")~ to use fd).
 - ~emeld-show-strikethrough~: Show strikethrough for orphan files on the missing side (default ~t~).  When nil, the missing side shows nothing.  The struck-through cell is also the marking target for deletion: with strikethrough on, marking it (~m~) marks the empty side, so ~C~ (sync) deletes the file from the side that has it.  With strikethrough off, marking a one-sided file snaps to the file side instead (so ~C~ copies it across).
@@ -304,8 +306,8 @@ Emeld ships with Meld-style default filter groups (see above).  Starting a compa
                             ("Config" nil "*.cfg" "config/*"))))))
 #+end_src
 
-Toggle named groups on/off from the transient menu (~?~ then ~F~) or with ~M-x emeld-toggle-filter-group~.  The header line shows the current display state; review or hand-edit the groups and their globs in ~.dir-locals.el~ with ~M-x emeld-edit-dir-locals~ (~?~ then ~L~ then ~e~), then rescan (~G~) to apply.
+Toggle named groups on/off from the transient menu (~?~ then ~F~) or with ~M-x emeld-toggle-filter-group~.  The header line shows the current display state; review or hand-edit the groups and their globs in ~.dir-locals.el~ with ~M-x emeld-edit-dir-locals~ (~E~), then rescan (~G~) to apply.
 
-You do not have to write ~.dir-locals.el~ by hand.  With point on a file or directory in the tree, ~&~ (~emeld-add-filter-at-point~, also under ~&~ in the transient Dir-locals sub-menu) adds it as a filter and saves it: it prompts for the glob (defaulting to the basename — edit it to e.g. ~*.log~ or a ~sub/dir~ relative path) and the group to add it to (completing over existing names; a new name creates a new, active group), writes the updated ~emeld-filter-groups~ to ~.dir-locals.el~ at the left root, activates the group and rescans so the matching files drop out at once.  Repeat it to progressively tidy up a fresh comparison; the exclusions persist for next time.
+You do not have to write ~.dir-locals.el~ by hand.  With point on a file or directory in the tree, ~&~ (~emeld-add-filter-at-point~, also under ~&~ in the transient Filename column) adds it as a filter and saves it: it prompts for the glob (defaulting to the basename — edit it to e.g. ~*.log~ or a ~sub/dir~ relative path) and the group to add it to (completing over existing names; a new name creates a new, active group), writes the updated ~emeld-filter-groups~ to ~.dir-locals.el~ at the left root, activates the group and rescans so the matching files drop out at once.  Repeat it to progressively tidy up a fresh comparison; the exclusions persist for next time.
 
 For a *temporary* tidy-up that you do not want recorded, ~C-k~ (~emeld-hide-at-point~) hides just the node at point — and, for a directory, its subtree — for this session only.  Nothing is written to ~.dir-locals.el~, and the hide survives a rescan within the session; the header line shows a ~(!) N hidden~ note while anything is tucked away.  Restore everything with ~C-u C-k~ (~emeld-unhide-all~).  Use this when you want to declutter the view but stay interested in the item later; use ~&~ when the exclusion should be permanent.

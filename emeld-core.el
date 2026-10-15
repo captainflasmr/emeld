@@ -2440,8 +2440,10 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "I")   #'emeld-toggle-gitignore)
     (define-key map (kbd "i")   #'emeld-toggle-ignore-whitespace)
     (define-key map (kbd "&")   #'emeld-add-filter-at-point)
+    (define-key map (kbd "E")   #'emeld-edit-dir-locals)
     (define-key map (kbd "C-k") #'emeld-hide-at-point)
-    (define-key map (kbd "F")   #'emeld-toggle-show-files)
+    (define-key map (kbd "F")   #'emeld-dispatch-filter)
+    (define-key map (kbd "t")   #'emeld-toggle-show-files)
     (define-key map (kbd ">")   #'emeld-increase-indent)
     (define-key map (kbd "<")   #'emeld-decrease-indent)
     (define-key map (kbd "}")   #'emeld-grow-column)
@@ -4601,17 +4603,12 @@ node — see `emeld--node-relpath' for the equivalent slow form."
                    suffixes)))
          (nreverse suffixes))))])
 
-(transient-define-prefix emeld-dispatch-dir-locals ()
-  "Emeld `.dir-locals.el' commands."
-  ["Dir-locals"
-   ("e" "edit .dir-locals.el…" emeld-edit-dir-locals)
-   ("&" "filter node at point → .dir-locals…" emeld-add-filter-at-point)])
-
 (transient-define-prefix emeld-dispatch ()
   "Transient menu for emeld."
   [["Filename"
-    ("F" "Filter →"     emeld-dispatch-filter)
-    ("L" "Dir-locals →" emeld-dispatch-dir-locals)]
+    ("E" "edit .dir-locals.el" emeld-edit-dir-locals)
+    ("&" "filter node at point" emeld-add-filter-at-point)
+    ("F" "Filter →"     emeld-dispatch-filter)]
    ["Preset"
     ("s" "save current" emeld-save-preset)
     ("l" "load…"        emeld-load-preset)
