@@ -130,9 +130,9 @@ The transient top level has three rows of columns.  The ~Filter~ sub-menu (under
 
 Top level, first row:
 
-- ~Filename~ :: Open the ~Filter~ sub-menu (~F~) to toggle groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), edit ~.dir-locals.el~ (~E~), or add the node at point as a filter (~&~).
-- ~Diff~ :: ~D~ diff whole root, ~d~ diff directory at point, ~P~ format patch.
 - ~Sync~ :: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point.
+- ~Diff~ :: ~D~ diff whole root, ~d~ diff directory at point, ~P~ format patch.
+- ~Filename~ :: Open the ~Filter~ sub-menu (~F~) to toggle groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), edit ~.dir-locals.el~ (~E~), or add the node at point as a filter (~&~).
 
 Top level, second row:
 

@@ -4451,19 +4451,19 @@ node — see `emeld--node-relpath' for the equivalent slow form."
 (transient-define-prefix emeld-dispatch ()
   "Transient menu for emeld."
   [:class transient-subgroups
-   [["Filename"
-     ("F" "Filter →"     emeld-dispatch-filter)
-     ("E" "edit .dir-locals.el" emeld-edit-dir-locals)
-     ("&" "filter node at point" emeld-add-filter-at-point)]
+   [["Sync"
+     ("C"   "sync to other side (copy/delete)" emeld-copy)
+     ("R" (lambda () (if emeld-copy-mirror "[x] mirror copy (--delete)" "[ ] mirror copy (--delete)"))
+      (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
+     ("x"   "delete marked/at point" emeld-delete)]
     ["Diff"
      ("D"   "diff root (recursive)" emeld-diff-root)
      ("d"   "diff dir at point"   emeld-diff-dir)
      ("P"   "format as patch"    emeld-format-patch)]
-    ["Sync"
-     ("C"   "sync to other side (copy/delete)" emeld-copy)
-     ("R" (lambda () (if emeld-copy-mirror "[x] mirror copy (--delete)" "[ ] mirror copy (--delete)"))
-      (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
-     ("x"   "delete marked/at point" emeld-delete)]]
+    ["Filename"
+     ("F" "Filter →"     emeld-dispatch-filter)
+     ("E" "edit .dir-locals.el" emeld-edit-dir-locals)
+     ("&" "filter node at point" emeld-add-filter-at-point)]]
    [["Show"
      ("t" (lambda () (if emeld-show-files "[x] Files" "[ ] Files"))
       (lambda () (interactive) (emeld-toggle-show-files)) :transient t)
