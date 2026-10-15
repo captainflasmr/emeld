@@ -1354,7 +1354,7 @@ pairs that should be scanned next."
                       :right-path (and (eq kind 'right-only) path)
                       ;; A one-sided directory is shown but its contents are
                       ;; not enumerated here; mark it unscanned so it is drilled
-                      ;; with `C-u g'.
+                      ;; with `C-u G'.
                       :scanned (not is-dir))
                      children)))
             ('common-dir
@@ -2393,8 +2393,8 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "v")   #'emeld-find-file)
     (define-key map (kbd "A")   #'emeld-dired-left)
     (define-key map (kbd "B")   #'emeld-dired-right)
-    (define-key map (kbd "g")   #'emeld-rescan)
-    (define-key map (kbd "G")   #'emeld-redraw)
+    (define-key map (kbd "g")   #'emeld-redraw)
+    (define-key map (kbd "G")   #'emeld-rescan)
     (define-key map (kbd "k")   #'emeld-stop-scan)
     (define-key map (kbd "R")   #'emeld-toggle-mirror)
     (define-key map (kbd "W")   #'emeld-swap-panes)
@@ -2954,20 +2954,20 @@ Synchronous: the diff is scoped to one subtree, so it is bounded."
 
 (defun emeld-refresh-subdir ()
   "Rescan only the directory at point, merging the result into the tree.
-Bound to \\`C-u g' (see `emeld-rescan').  Useful when you know a single
+Bound to \\`C-u G' (see `emeld-rescan').  Useful when you know a single
 subdirectory changed on disk and want to avoid a full rescan
 (\\[emeld-rescan]); the rest of the tree is left untouched.  If point is
 on a file, its containing directory is rescanned."
   (interactive)
   (when emeld--git-mode
-    (user-error "Subdirectory rescan is not used in git mode; press `g' to rescan"))
+    (user-error "Subdirectory rescan is not used in git mode; press `G' to rescan"))
   (unless emeld--root-node (user-error "No comparison loaded"))
   (let* ((node0 (get-text-property (point) 'emeld-node))
          (node (cond ((null node0) (user-error "No node at point"))
                      ((emeld-node-is-dir node0) node0)
                      (t (emeld-node-parent node0)))))
     (when (or (null node) (eq node emeld--root-node))
-      (user-error "Use `g' to rescan the whole comparison"))
+      (user-error "Use `G' to rescan the whole comparison"))
     (let* ((rel (emeld--node-relpath node))
            (left-sub (concat (file-name-as-directory emeld--left-root) rel))
            (right-sub (concat (file-name-as-directory emeld--right-root) rel))
@@ -4523,8 +4523,8 @@ node — see `emeld--node-relpath' for the equivalent slow form."
 (transient-define-prefix emeld-dispatch-navigate ()
   "Emeld navigation and rescanning."
   ["Navigate"
-    ("g"   "rescan (C-u: dir at point)" emeld-rescan)
-    ("G"   "reset layout + redraw" emeld-redraw)
+    ("G"   "rescan (C-u: dir at point)" emeld-rescan)
+    ("g"   "reset layout + redraw" emeld-redraw)
    ("k"   "stop scan"            emeld-stop-scan)
    ("W"   "swap panes"         emeld-swap-panes)
    ("o"   "jump other side"    emeld-jump-other-side :transient t)
