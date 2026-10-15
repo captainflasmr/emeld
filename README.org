@@ -127,14 +127,13 @@ Deletions move the files to trash rather than erasing them outright.  When sever
 
 * Transient Menu (~?~)
 
-The transient top level has two rows of columns, plus a ~File~ sub-menu under ~Menus~ for the longer file command set.  Pressing ~q~ (or ~C-g~) in a sub-menu returns to the top level.
+The transient top level has three rows of columns.  The ~Filter~ sub-menu (under ~Filename~) holds the filter-group toggles; pressing ~q~ (or ~C-g~) there returns to the top level.
 
 Top level, first row:
 
 - ~Filename~ :: Edit ~.dir-locals.el~ (~E~), add the node at point as a filter (~&~), or open the ~Filter~ sub-menu (~F~) to toggle groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks).
-- ~Preset~ :: Save the current directory pair (~S~), load a saved pair (~l~), delete one (~d~).
+- ~Preset~ :: Save the current directory pair (~S~), load a saved pair (~l~), delete one (~X~).
 - ~Version Control~ :: Switch comparison source — ~G~ compare two git revisions, ~H~ step through git history one commit at a time.
-- ~Menus~ :: Open a sub-menu — ~f~ File.
 
 Top level, second row:
 
@@ -143,8 +142,12 @@ Top level, second row:
 - ~Hide (session)~ :: Temporarily hide the node at point (~C-k~, session only; ~C-u C-k~ unhides all) and unhide all (~r~).
 - ~Mark~ :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), the full left→right mirror set (~* c~/~* a~ — modified + left-only + right-only); ~U~ unmark all.
 
-Sub-menus (opened from the ~Menus~ column):
-- ~File~ (~f~) :: Operate on files, in four columns. ~Open~: ~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree (soft diff a modified file, show a new/one-sided one, fold a directory), ~TAB~ peek inline diff. ~Dired~: ~A~/~B~ jump to dired on the left/right side, ~w~ copy path. ~Diff~: ~D~ diff whole root, ~d~ diff directory at point, ~P~ format patch. ~Sync~: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point.
+Top level, third row:
+
+- ~Open~ :: ~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree (soft diff a modified file, show a new/one-sided one, fold a directory), ~TAB~ peek inline diff.
+- ~Dired~ :: ~A~/~B~ jump to dired on the left/right side, ~w~ copy path.
+- ~Diff~ :: ~D~ diff whole root, ~d~ diff directory at point, ~P~ format patch.
+- ~Sync~ :: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point.
 
 Every command keeps its direct key binding in ~emeld-mode~ (see below), so the menu hierarchy is only for discovery — you never have to drill through it to reach a command you already know.
 
@@ -274,7 +277,7 @@ Frequently-compared directory pairs can be saved and recalled:
 
 - ~M-x emeld-save-preset~ (or ~S~ in the transient) — name and save the current comparison's left/right directories.
 - ~M-x emeld-load-preset~ (or ~l~) — pick a saved pair via completion (annotated with its directories) and start the comparison.  This is autoloaded, so it works as an entry point even before any comparison is open.
-- ~M-x emeld-delete-preset~ (~d~) — remove a saved pair.
+- ~M-x emeld-delete-preset~ (~X~) — remove a saved pair.
 
 Presets are stored in ~emeld-presets~, which emeld registers with ~savehist-additional-variables~.  With ~savehist-mode~ enabled they persist across sessions automatically; without it they last only for the current session.
 

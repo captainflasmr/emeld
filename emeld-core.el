@@ -4501,28 +4501,6 @@ node — see `emeld--node-relpath' for the equivalent slow form."
   (let ((fn (oref obj dynamic-description)))
     (if fn (funcall fn) (cl-call-next-method))))
 
-(transient-define-prefix emeld-dispatch-file ()
-  "Emeld file actions."
-  [["Open"
-    ("RET" "action (smart)"     emeld-action)
-    ("e"   "ediff"              emeld-ediff)
-    ("="   "diff / open / fold" emeld-soft-diff)
-    ("SPC" "diff / open / fold" emeld-soft-diff)
-    ("TAB" "peek inline diff (file)" emeld-toggle-inline-diff :transient t)]
-   ["Dired"
-    ("A"   "dired left side"    emeld-dired-left)
-    ("B"   "dired right side"   emeld-dired-right)
-    ("w"   "copy path"          emeld-copy-path-at-point)]
-   ["Diff"
-    ("D"   "diff root (recursive)" emeld-diff-root)
-    ("d"   "diff dir at point"   emeld-diff-dir)
-    ("P"   "format as patch"    emeld-format-patch)]
-   ["Sync"
-    ("C"   "sync to other side (copy/delete)" emeld-copy)
-    ("R" (lambda () (if emeld-copy-mirror "[x] mirror copy (--delete)" "[ ] mirror copy (--delete)"))
-     (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
-    ("x"   "delete marked/at point" emeld-delete)]])
-
 (transient-define-prefix emeld-dispatch-filter ()
   "Emeld filename filter groups."
   ["Filter"
@@ -4567,12 +4545,10 @@ node — see `emeld--node-relpath' for the equivalent slow form."
     ["Preset"
      ("S" "save current" emeld-save-preset)
      ("l" "load…"        emeld-load-preset)
-     ("d" "delete…"      emeld-delete-preset)]
+     ("X" "delete…"      emeld-delete-preset)]
     ["Version Control"
      ("G" "git revisions…"    emeld-git-diff)
-     ("H" "git history step…" emeld-git-step-history)]
-    ["Menus"
-     ("f" "File →"     emeld-dispatch-file)]]
+     ("H" "git history step…" emeld-git-step-history)]]
    [["Show"
      ("t" (lambda () (if emeld-show-files "[x] Files" "[ ] Files"))
       (lambda () (interactive) (emeld-toggle-show-files)) :transient t)
@@ -4612,7 +4588,26 @@ node — see `emeld--node-relpath' for the equivalent slow form."
      ("* l" "left-only (new)" emeld-mark-left-only :transient t)
      ("* c" "→ mirror right"  emeld-mark-to-copy :transient t)
      ("* a" "all changed (mirror)" emeld-mark-all :transient t)
-     ("U"   "unmark all"      emeld-unmark-all :transient t)]]])
+     ("U"   "unmark all"      emeld-unmark-all :transient t)]]
+   [["Open"
+     ("RET" "action (smart)"     emeld-action)
+     ("e"   "ediff"              emeld-ediff)
+     ("="   "diff / open / fold" emeld-soft-diff)
+     ("SPC" "diff / open / fold" emeld-soft-diff)
+     ("TAB" "peek inline diff (file)" emeld-toggle-inline-diff :transient t)]
+    ["Dired"
+     ("A"   "dired left side"    emeld-dired-left)
+     ("B"   "dired right side"   emeld-dired-right)
+     ("w"   "copy path"          emeld-copy-path-at-point)]
+    ["Diff"
+     ("D"   "diff root (recursive)" emeld-diff-root)
+     ("d"   "diff dir at point"   emeld-diff-dir)
+     ("P"   "format as patch"    emeld-format-patch)]
+    ["Sync"
+     ("C"   "sync to other side (copy/delete)" emeld-copy)
+     ("R" (lambda () (if emeld-copy-mirror "[x] mirror copy (--delete)" "[ ] mirror copy (--delete)"))
+      (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
+     ("x"   "delete marked/at point" emeld-delete)]]])
 
 (define-key emeld-mode-map (kbd "?") #'emeld-dispatch)
 
