@@ -4539,9 +4539,12 @@ node — see `emeld--node-relpath' for the equivalent slow form."
   "Transient menu for emeld."
   [:class transient-subgroups
    [["Filename"
-     ("E" "edit .dir-locals.el…" emeld-edit-dir-locals)
-     ("&" "filter node at point" emeld-add-filter-at-point)
-     ("F" "Filter →"     emeld-dispatch-filter)]
+     ("F" "Filter →"     emeld-dispatch-filter)
+     ("E" "edit .dir-locals.el" emeld-edit-dir-locals)
+     ("&" "filter node at point" emeld-add-filter-at-point)]
+    ["Hide (session)"
+     ("C-k" "hide node (C-u: unhide all)" emeld-hide-at-point)
+     ("r"   "unhide all"                  emeld-unhide-all)]
     ["Preset"
      ("S" "save current" emeld-save-preset)
      ("l" "load…"        emeld-load-preset)
@@ -4578,9 +4581,6 @@ node — see `emeld--node-relpath' for the equivalent slow form."
      ("<" "indent less"  emeld-decrease-indent :transient t)
      ("}" "pane wider"   emeld-grow-column :transient t)
      ("{" "pane narrow"  emeld-shrink-column :transient t)]
-    ["Hide (session)"
-     ("C-k" "hide node (C-u: unhide all)" emeld-hide-at-point)
-     ("r"   "unhide all"                  emeld-unhide-all)]
     ["Mark"
      ("m"   "mark"            emeld-mark :transient t)
      ("u"   "unmark"          emeld-unmark :transient t)
