@@ -131,7 +131,7 @@ The transient is a two-level hierarchy.  The top level keeps the filename filter
 
 Top level:
 
-- ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~cl~ list all globs.
+- ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~e~ edit ~.dir-locals.el~.
 - ~Preset~ :: Save the current directory pair (~s~), load a saved pair (~l~), delete one (~d~).
 - ~Menus~ :: Open a sub-menu — ~v~ View, ~f~ File, ~m~ Mark, ~C~ Compare.
 
@@ -293,7 +293,7 @@ It records to ~BENCHMARKS.org~ by default.  Set ~EMELD_BENCH_SAME=1~ to also run
 
 * Per-Project Configuration with ~.dir-locals.el~
 
-Emeld ships with Meld-style default filter groups (see above).  To override them per project, place a ~.dir-locals.el~ file above the left directory:
+Emeld ships with Meld-style default filter groups (see above).  Starting a comparison creates a ~.dir-locals.el~ at the left directory with those defaults when none exists yet, so there is always a populated file to jump to (~e~) — an existing file is never touched.  To override the defaults per project, edit that file:
 
 #+begin_src elisp
 ;;; .dir-locals.el
@@ -304,7 +304,7 @@ Emeld ships with Meld-style default filter groups (see above).  To override them
                             ("Config" nil "*.cfg" "config/*"))))))
 #+end_src
 
-Toggle named groups on/off from the transient menu (~?~) or with ~M-x emeld-toggle-filter-group~.  The header line shows the current display state; review which groups are active and their globs with ~M-x emeld-list-filter-groups~ (~cl~ in the transient).
+Toggle named groups on/off from the transient menu (~?~) or with ~M-x emeld-toggle-filter-group~.  The header line shows the current display state; review or hand-edit the groups and their globs in ~.dir-locals.el~ with ~M-x emeld-edit-dir-locals~ (~e~ in the transient), then rescan (~G~) to apply.
 
 You do not have to write ~.dir-locals.el~ by hand.  With point on a file or directory in the tree, ~&~ (~emeld-add-filter-at-point~, also under ~&~ in the transient filter column) adds it as a filter and saves it: it prompts for the glob (defaulting to the basename — edit it to e.g. ~*.log~ or a ~sub/dir~ relative path) and the group to add it to (completing over existing names; a new name creates a new, active group), writes the updated ~emeld-filter-groups~ to ~.dir-locals.el~ at the left root, activates the group and rescans so the matching files drop out at once.  Repeat it to progressively tidy up a fresh comparison; the exclusions persist for next time.
 

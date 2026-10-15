@@ -270,6 +270,29 @@ presets persist across sessions when `savehist-mode' is enabled."
   "Apply .dir-locals.el from `default-directory' to the current buffer."
   (hack-dir-local-variables-non-file-buffer))
 
+(defun emeld--ensure-dir-locals (root)
+  "Create `.dir-locals.el' at ROOT holding the default filter groups.
+Only acts when no such file exists directly at ROOT; an existing
+file is never touched.  The written value is the current
+`emeld-filter-groups', so a fresh comparison always has a populated
+file for `emeld-edit-dir-locals' to jump to.  Failures (e.g. a
+read-only directory) only warn; the comparison proceeds with the
+in-memory defaults."
+  (let ((file (expand-file-name dir-locals-file root)))
+    (unless (file-exists-p file)
+      (condition-case err
+          (progn
+            (with-temp-file file
+              (insert ";;; Directory Local Variables\n"
+                      ";;; See Info node `(emacs) Directory Variables' for more information.\n\n")
+              (pp `((nil . ((emeld-filter-groups . ,emeld-filter-groups))))
+                  (current-buffer)))
+            (message "Created %s with default filters"
+                     (abbreviate-file-name file)))
+        (error (message "Could not create %s: %s"
+                        (abbreviate-file-name file)
+                        (error-message-string err)))))))
+
 (cl-defstruct (emeld-node
                (:constructor emeld-node-create))
   name
@@ -2037,30 +2060,19 @@ GROUP is the name of a group defined in `emeld-filter-groups'."
     (message "Filter group \"%s\" enabled" group))
   (emeld-refresh))
 
-(defun emeld-list-filter-groups ()
-  "Display all filter groups and their glob patterns in an org-mode buffer."
+(defun emeld-edit-dir-locals ()
+  "Open the project's `.dir-locals.el' to review filter groups by hand.
+Opens the file at `emeld--left-root' — the same file
+`emeld-add-filter-at-point' persists new filters to.  Edit the
+`emeld-filter-groups' value there, save, then rescan (`emeld-rescan')
+to apply the change.  Visits a new file when none exists yet; nothing
+is written until you save."
   (interactive)
-  (let ((active-groups emeld--active-filter-groups))
-    (with-current-buffer (get-buffer-create "*emeld filter groups*")
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (org-mode)
-        (setq-local buffer-read-only t)
-        (insert "#+TITLE: Emeld Filter Groups\n\n"
-                "* Overview\n"
-                "Filter groups are toggled from the transient menu (~ca~, ~cb~, ...) or with ~M-x emeld-toggle-filter-group~.\n\n")
-        (dolist (g emeld-filter-groups)
-          (let ((name (car g))
-                (active (member (car g) active-groups))
-                (globs (emeld--group-globs g)))
-            (insert (format "* %s  %s\n"
-                            name
-                            (if active "[x]" "[ ]")))
-            (dolist (glob globs)
-              (insert (format "  - ~%s~\n" glob)))
-            (insert "\n")))
-        (goto-char (point-min))))
-    (pop-to-buffer "*emeld filter groups*")))
+  (unless emeld--left-root (user-error "No comparison loaded"))
+  (let ((file (expand-file-name dir-locals-file emeld--left-root)))
+    (unless (file-exists-p file)
+      (message "No %s yet — saving will create it" (abbreviate-file-name file)))
+    (find-file file)))
 
 (defun emeld-add-filter-at-point (glob group)
   "Add GLOB to filter GROUP and persist it to the project `.dir-locals.el'.
@@ -2174,6 +2186,7 @@ recursive compare would block on deep I/O."
       (emeld-mode)
       (setq default-directory (file-name-as-directory (expand-file-name dir1)))
       (setq emeld--scan-max-depth depth)
+      (emeld--ensure-dir-locals default-directory)
       (emeld--apply-dir-locals)
       (setq emeld--active-filter-groups
             (cl-loop for g in emeld-filter-groups
@@ -4593,7 +4606,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
                     suffixes)))
           (push (transient-parse-suffix
                  'emeld-dispatch
-                 (list "cl" "list all globs..." 'emeld-list-filter-groups))
+                 (list "e" "edit .dir-locals.el…" 'emeld-edit-dir-locals))
                 suffixes)
           (push (transient-parse-suffix
                  'emeld-dispatch

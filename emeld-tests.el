@@ -34,6 +34,35 @@
   (should (equal (emeld--group-globs '("Explicit" nil "*.o"))
                  '("*.o"))))
 
+(ert-deftest emeld-ensure-dir-locals-creates-defaults ()
+  "A missing `.dir-locals.el' is created with the default filter groups."
+  (let ((dir (make-temp-file "emeld-locals" t)))
+    (unwind-protect
+        (let ((file (expand-file-name dir-locals-file dir)))
+          (should-not (file-exists-p file))
+          (emeld--ensure-dir-locals (file-name-as-directory dir))
+          (should (file-exists-p file))
+          ;; The written value reads back as the defaults.
+          (with-temp-buffer
+            (insert-file-contents file)
+            (let ((vars (cdar (read (current-buffer)))))
+              (should (equal (cdr (assq 'emeld-filter-groups vars))
+                             emeld-filter-groups)))))
+      (delete-directory dir t))))
+
+(ert-deftest emeld-ensure-dir-locals-keeps-existing ()
+  "An existing `.dir-locals.el' is never overwritten."
+  (let ((dir (make-temp-file "emeld-locals" t)))
+    (unwind-protect
+        (let ((file (expand-file-name dir-locals-file dir)))
+          (with-temp-file file (insert "((nil . ((some-var . 1))))\n"))
+          (emeld--ensure-dir-locals (file-name-as-directory dir))
+          (with-temp-buffer
+            (insert-file-contents file)
+            (should (equal (read (current-buffer))
+                           '((nil . ((some-var . 1))))))))
+      (delete-directory dir t))))
+
 (ert-deftest emeld-read-gitignore-simple-patterns ()
   "Test extracting simple glob patterns from .gitignore.
 Patterns with leading/trailing slashes are stripped; those with

@@ -63,6 +63,7 @@ delete are disabled, since history cannot be written to."
             emeld--git-repo repo
             emeld--git-left-rev left-rev
             emeld--git-right-rev right-rev)
+      (emeld--ensure-dir-locals default-directory)
       (emeld--apply-dir-locals)
       (setq emeld--active-filter-groups
             (cl-loop for g in emeld-filter-groups
@@ -122,6 +123,7 @@ revision, ediff against the parent, fold the commit message, etc."
               emeld--git-repo repo
               emeld--git-history history
               emeld--git-history-index 0)
+        (emeld--ensure-dir-locals default-directory)
         (emeld--apply-dir-locals)
         (setq emeld--active-filter-groups
               (cl-loop for g in emeld-filter-groups
