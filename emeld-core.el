@@ -2428,7 +2428,6 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "* m") #'emeld-mark-modified)
     (define-key map (kbd "* l") #'emeld-mark-left-only)
     (define-key map (kbd "* c") #'emeld-mark-to-copy)
-    (define-key map (kbd "* a") #'emeld-mark-all)
     (define-key map (kbd "S")   #'emeld-toggle-show-same)
     (define-key map (kbd "M")   #'emeld-toggle-show-different)
     (define-key map (kbd "N")   #'emeld-toggle-show-added)
@@ -3570,14 +3569,6 @@ empty left side, which `emeld-copy' reads as \"delete from the right\")."
   (interactive)
   (emeld--mark-and-report '(different left-only right-only) "file to sync"))
 
-(defun emeld-mark-all ()
-  "Mark all changed files for a left→right mirror sync.
-Modified, left-only and right-only files; the marked set can then be
-applied with `emeld-copy' to make the right match the left (copies plus
-deletions of right-only files).  Same file set as `emeld-mark-to-copy'."
-  (interactive)
-  (emeld--mark-and-report '(different left-only right-only) "changed file"))
-
 (defun emeld-copy-path-at-point (arg)
   "Copy the filename at point to the kill ring.
 With prefix ARG, copy the full absolute path.
@@ -4571,7 +4562,6 @@ node — see `emeld--node-relpath' for the equivalent slow form."
      ("* m" "modified"        emeld-mark-modified :transient t)
      ("* l" "left-only (new)" emeld-mark-left-only :transient t)
      ("* c" "→ mirror right"  emeld-mark-to-copy :transient t)
-     ("* a" "all changed (mirror)" emeld-mark-all :transient t)
      ("U"   "unmark all"      emeld-unmark-all :transient t)]]
    [["Open"
      ("RET" "action (smart)"     emeld-action)

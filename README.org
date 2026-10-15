@@ -11,7 +11,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - ~.gitignore~ support, on by default — ignored files hidden on both sides, toggle with ~I~.  Turning it off shows a ~(!) gitignore off~ note in the header line, since including ignored files is the exception.
 - Instant toggles for Same, New, Modified, and File visibility (~S~/~N~/~M~/~t~).
 - Orphan files shown with strikethrough on the missing side (Meld-style, toggle ~s~).
-- Dired-style, per-side marking (~m~/~u~/~U~): the ~*~ sits in the column of the side you mark, and a node can be marked left, right, or both.  Copy/sync (~C~) makes the *other* side match the side you marked — a node marked on the side that has the file is copied across, while a node marked on its empty (struck-through) side is *deleted* from the other side, so you can resolve a one-sided file either way.  Bulk delete (~x~) deletes from every marked side; bulk-mark by status (~* m~ modified, ~* l~ left-only, ~* c~/~* a~ the full left→right mirror set — modified + left-only + right-only).
+- Dired-style, per-side marking (~m~/~u~/~U~): the ~*~ sits in the column of the side you mark, and a node can be marked left, right, or both.  Copy/sync (~C~) makes the *other* side match the side you marked — a node marked on the side that has the file is copied across, while a node marked on its empty (struck-through) side is *deleted* from the other side, so you can resolve a one-sided file either way.  Bulk delete (~x~) deletes from every marked side; bulk-mark by status (~* m~ modified, ~* l~ left-only, ~* c~ the full left→right mirror set — modified + left-only + right-only).
 - Filter groups toggleable from the transient menu.
 - Org-mode-style visibility cycling: ~S-TAB~ cycles the whole tree (TOP → DIRS → CHANGES), ~TAB~ does the equivalent for the subtree at point.  On a file, ~TAB~ instead peeks an inline diff underneath the row (Magit-style), expandable and collapsible without leaving the tree.
 - Bulk expand: ~/~ expand only paths leading to changes.
@@ -140,7 +140,7 @@ Top level, second row:
 
 - ~Show~ :: Toggle what is displayed — files (~t~ hide files, show directories only), tree-lines (~T~), tree density (~z~ cycles compact → extreme → wide), strikethrough (~s~), ~.gitignore~ respect (~I~), whitespace handling (~i~), commit message (~c~, git mode only).
 - ~Layout~ :: Expand to changes (~/~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), and pane resize (~{~/~}~).
-- ~Mark~ :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), the full left→right mirror set (~* c~/~* a~ — modified + left-only + right-only); ~U~ unmark all.
+- ~Mark~ :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), the full left→right mirror set (~* c~ — modified + left-only + right-only); ~U~ unmark all.
 
 Top level, third row:
 
@@ -184,7 +184,6 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | * m       | Mark all modified files                           |
 | * l       | Mark all left-only (created) files                |
 | * c       | Mark left→right mirror set (modified + left-only + right-only) |
-| * a       | Mark all changed for left→right mirror (modified + left-only + right-only) |
 | s         | Toggle strikethrough display                      |
 | T         | Toggle tree-line display                          |
 | z         | Cycle tree density: compact → extreme → wide      |
