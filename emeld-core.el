@@ -4042,11 +4042,12 @@ hint at the key that toggles it (e.g. \"S\" in \"Same\")."
   "Return a string showing the primary Same/New/Modified filter states.
 Each label is spelled out with a leading ASCII checkbox.  Scan-affecting
 notes are appended after them: the whitespace mode (-w/-b) when active, a
-`warning'-faced \"(!) gitignore\" note while `emeld-respect-gitignore' is
-on (git-ignored files are dropped from the scan, which can silently hide
-whole subtrees), and a `warning'-faced \"(!) files hidden\" note when
-`emeld-show-files' is nil, since a files-less tree can look empty and be
-mistaken for \"no differences\".  The secondary display
+`warning'-faced \"(!) gitignore off\" note while `emeld-respect-gitignore'
+is off (git-ignored files are then included in the scan — the exception
+to the default of dropping them, which needs no flag), and a
+`warning'-faced \"(!) files hidden\" note when `emeld-show-files' is nil,
+since a files-less tree can look empty and be mistaken for
+\"no differences\".  The secondary display
 toggles (Files/Tree-lines/Strikethrough/Gitignore) are intentionally
 omitted here to keep the header line uncluttered; they remain reachable
 from the transient (\\[emeld-dispatch])."
@@ -4058,11 +4059,11 @@ from the transient (\\[emeld-dispatch])."
    (emeld--toggle-indicator "Modified" emeld-show-different)
    (when emeld-ignore-whitespace
      (if (eq emeld-ignore-whitespace 'all) " -w" " -b"))
-   ;; Git-ignored files are silently dropped from the scan, which can hide
-   ;; whole subtrees (e.g. anything under a `.git/info/exclude' entry).
-   ;; Flag it only while active so the omission is never a surprise.
-   (when emeld-respect-gitignore
-     (propertize " (!) gitignore" 'face 'warning))
+   ;; Git-ignored files are dropped from the scan by default, so that
+   ;; needs no flag; warn only when respect is off (the exception),
+   ;; since ignored files are then included.
+   (unless emeld-respect-gitignore
+     (propertize " (!) gitignore off" 'face 'warning))
    (unless emeld-show-files
      (propertize " (!) files hidden" 'face 'warning))
    ;; Session-only temporary hides (`emeld-hide-at-point'); flag the count so
