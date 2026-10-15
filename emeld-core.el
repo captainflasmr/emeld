@@ -2430,7 +2430,6 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "N")   #'emeld-toggle-show-added)
     (define-key map (kbd "T")   #'emeld-toggle-tree-lines)
     (define-key map (kbd "z")   #'emeld-cycle-tree-density)
-    (define-key map (kbd "s")   #'emeld-toggle-show-strikethrough)
     (define-key map (kbd "I")   #'emeld-toggle-gitignore)
     (define-key map (kbd "i")   #'emeld-toggle-ignore-whitespace)
     (define-key map (kbd "&")   #'emeld-add-filter-at-point)
@@ -2587,16 +2586,6 @@ use rsync (see `emeld-copy-method')."
   (setq emeld-copy-mirror (not emeld-copy-mirror))
   (force-mode-line-update)
   (message "Copy mirror (rsync --delete): %s" (if emeld-copy-mirror "ON" "off")))
-
-(defun emeld-toggle-show-strikethrough ()
-  "Toggle strikethrough display for orphan files on the missing side.
-When enabled, orphan files are shown with strikethrough on the side
-where they are missing (Meld-style).  When disabled, the missing side
-shows nothing for the orphan."
-  (interactive)
-  (setq emeld-show-strikethrough (not emeld-show-strikethrough))
-  (message "Strikethrough: %s" (if emeld-show-strikethrough "on" "off"))
-  (emeld--render))
 
 (defun emeld-increase-indent ()
   "Increase the directory indentation."
@@ -3974,7 +3963,7 @@ to the default of dropping them, which needs no flag), and a
 `warning'-faced \"(!) files hidden\" note when `emeld-show-files' is nil,
 since a files-less tree can look empty and be mistaken for
 \"no differences\".  The secondary display
-toggles (Files/Tree-lines/Strikethrough/Gitignore) are intentionally
+toggles (Files/Tree-lines/Gitignore) are intentionally
 omitted here to keep the header line uncluttered; they remain reachable
 from the transient (\\[emeld-dispatch])."
   (concat
@@ -4474,10 +4463,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
      ("C"   "sync to other side (copy/delete)" emeld-copy)
      ("R" (lambda () (if emeld-copy-mirror "[x] mirror copy (--delete)" "[ ] mirror copy (--delete)"))
       (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
-     ("x"   "delete marked/at point" emeld-delete)]
-    ["Hide (session)"
-     ("C-k" "hide node (C-u: unhide all)" emeld-hide-at-point)
-     ("r"   "unhide all"                  emeld-unhide-all)]]
+     ("x"   "delete marked/at point" emeld-delete)]]
    [["Show"
      ("t" (lambda () (if emeld-show-files "[x] Files" "[ ] Files"))
       (lambda () (interactive) (emeld-toggle-show-files)) :transient t)
@@ -4485,8 +4471,6 @@ node — see `emeld--node-relpath' for the equivalent slow form."
       (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
      ("z" (lambda () (format "density: %s" emeld-tree-density))
       (lambda () (interactive) (emeld-cycle-tree-density)) :transient t)
-     ("s" (lambda () (if emeld-show-strikethrough "[x] strikethrough" "[ ] strikethrough"))
-      (lambda () (interactive) (emeld-toggle-show-strikethrough)) :transient t)
      ("I" (lambda () (if emeld-respect-gitignore "[x] gitignore" "[ ] gitignore"))
       (lambda () (interactive) (emeld-toggle-gitignore)))
      ("i" (lambda ()
@@ -4497,7 +4481,8 @@ node — see `emeld--node-relpath' for the equivalent slow form."
       (lambda () (interactive) (emeld-toggle-ignore-whitespace)))
      ("c" (lambda () (if emeld--git-commit-expanded "[x] commit msg" "[ ] commit msg"))
       (lambda () (interactive) (emeld-git-toggle-commit-message)) :transient t
-      :if (lambda () emeld--git-mode))]
+      :if (lambda () emeld--git-mode))
+     ("C-k" "hide node (C-u: unhide all)" emeld-hide-at-point)]
     ["Layout"
      (">" "indent more"  emeld-increase-indent :transient t)
      ("<" "indent less"  emeld-decrease-indent :transient t)
