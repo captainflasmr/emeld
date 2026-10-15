@@ -4566,13 +4566,6 @@ node — see `emeld--node-relpath' for the equivalent slow form."
    ("* a" "all changed (mirror)" emeld-mark-all :transient t)
    ("U"   "unmark all"      emeld-unmark-all :transient t)])
 
-(transient-define-prefix emeld-dispatch-preset ()
-  "Emeld presets (saved directory pairs)."
-  ["Preset"
-   ("s" "save current" emeld-save-preset)
-   ("l" "load…"        emeld-load-preset)
-   ("d" "delete…"      emeld-delete-preset)])
-
 (transient-define-prefix emeld-dispatch-compare ()
   "Emeld comparison sources."
   ["Compare"
@@ -4621,12 +4614,15 @@ node — see `emeld--node-relpath' for the equivalent slow form."
                        'emeld-add-filter-at-point))
                 suffixes)
           (nreverse suffixes))))]
+   ["Preset"
+    ("s" "save current" emeld-save-preset)
+    ("l" "load…"        emeld-load-preset)
+    ("d" "delete…"      emeld-delete-preset)]
    ["Menus"
     ("v" "View →"     emeld-dispatch-view)
     ("n" "Navigate →" emeld-dispatch-navigate)
     ("f" "File →"     emeld-dispatch-file)
     ("m" "Mark →"     emeld-dispatch-mark)
-    ("p" "Preset →"   emeld-dispatch-preset)
     ("C" "Compare →"  emeld-dispatch-compare)]
    ])
 
