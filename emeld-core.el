@@ -2369,7 +2369,7 @@ Mimics Meld's display of missing files."
   :group 'emeld)
 
 (defface emeld-header-face
-  '((t :inherit font-lock-function-name-face :weight bold :underline t))
+  '((t :inherit font-lock-function-name-face :weight bold))
   "Face for the directory headers."
   :group 'emeld)
 
@@ -4240,10 +4240,9 @@ reflects the live scan counters without needing to be re-installed."
                             'face 'emeld-header-face))
         (add-text-properties header-start (point) '(emeld-header t mouse-face highlight)))
       (insert "\n")
-      ;; Git mode: a foldable block of commit context between the revision
-      ;; header and the separator.
+      ;; Git mode: a foldable block of commit context below the revision
+      ;; header.
       (when emeld--git-mode (emeld--insert-git-commit-block))
-      (insert (make-string (* 2 emeld--column-width) ?-) "\n")
       ;; Root node (collapsible) — draws even with no children so the
       ;; directory structure stays visible for visual reference.  The seek
       ;; vars let the render itself note where the target node landed (O3).
@@ -4259,7 +4258,7 @@ reflects the live scan counters without needing to be re-installed."
                    (move-to-column current-col))
           (goto-char (point-min))
           (forward-line (1- (min fallback-line (count-lines (point-min) (point-max)))))
-          ;; The line we landed on may be a header/separator (e.g. the copied
+          ;; The line we landed on may be a header (e.g. the copied
           ;; node dropped out of the visible tree); snap to the nearest node
           ;; line so point always rests on a node, not a structural line.
           (unless (get-text-property (point) 'emeld-node)
