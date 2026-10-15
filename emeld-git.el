@@ -23,10 +23,9 @@ to continue."
 (defcustom emeld-git-history-auto-expand t
   "When non-nil, auto-expand changed directories after a history step.
 Each step of `emeld-git-history-older' / `emeld-git-history-newer'
-rebuilds the tree, then expands the directories leading to a change (as
-`emeld-expand-changes' does) so the whole commit's hierarchy is opened
-out without a manual expand.  Set to nil to keep the saved expansion
-state across steps instead."
+rebuilds the tree, then expands the directories leading to a change
+so the whole commit's hierarchy is opened out without a manual expand.
+Set to nil to keep the saved expansion state across steps instead."
   :type 'boolean
   :group 'emeld)
 

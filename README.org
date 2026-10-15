@@ -13,8 +13,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Orphan files shown with strikethrough on the missing side (Meld-style, toggle ~s~).
 - Dired-style, per-side marking (~m~/~u~/~U~): the ~*~ sits in the column of the side you mark, and a node can be marked left, right, or both.  Copy/sync (~C~) makes the *other* side match the side you marked — a node marked on the side that has the file is copied across, while a node marked on its empty (struck-through) side is *deleted* from the other side, so you can resolve a one-sided file either way.  Bulk delete (~x~) deletes from every marked side; bulk-mark by status (~* m~ modified, ~* l~ left-only, ~* c~ the full left→right mirror set — modified + left-only + right-only).
 - Filter groups toggleable from the transient menu.
-- Org-mode-style visibility cycling: ~S-TAB~ cycles the whole tree (TOP → DIRS → CHANGES), ~TAB~ does the equivalent for the subtree at point.  On a file, ~TAB~ instead peeks an inline diff underneath the row (Magit-style), expandable and collapsible without leaving the tree.
-- Bulk expand: ~/~ expand only paths leading to changes.
+- Org-mode-style subtree cycling: ~TAB~ cycles the directory at point (FOLDED → DIRS → SUBTREE).  On a file, ~TAB~ instead peeks an inline diff underneath the row (Magit-style), expandable and collapsible without leaving the tree.
 - File copying between directories (~C~), via rsync when available — asynchronous and delta-efficient, with an optional exact-mirror (~--delete~) mode toggled with ~R~.
 - Recursive ~diff~ buffers for the whole root (~D~) or the directory at point (~d~), and a non-intrusive preview (~=~/~SPC~) that diffs/opens the node at point while keeping point in the tree.
 - Export changes as a unified-diff patch (~P~).
@@ -132,22 +131,22 @@ The transient top level has three rows of columns.  The ~Filter~ sub-menu (under
 Top level, first row:
 
 - ~Filename~ :: Open the ~Filter~ sub-menu (~F~) to toggle groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), edit ~.dir-locals.el~ (~E~), or add the node at point as a filter (~&~).
+- ~Diff~ :: ~D~ diff whole root, ~d~ diff directory at point, ~P~ format patch.
+- ~Sync~ :: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point.
 - ~Hide (session)~ :: Temporarily hide the node at point (~C-k~, session only; ~C-u C-k~ unhides all) and unhide all (~r~).
-- ~Preset~ :: Save the current directory pair (~S~), load a saved pair (~l~), delete one (~X~).
-- ~Version Control~ :: Switch comparison source — ~G~ compare two git revisions, ~H~ step through git history one commit at a time.
 
 Top level, second row:
 
 - ~Show~ :: Toggle what is displayed — files (~t~ hide files, show directories only), tree-lines (~T~), tree density (~z~ cycles compact → extreme → wide), strikethrough (~s~), ~.gitignore~ respect (~I~), whitespace handling (~i~), commit message (~c~, git mode only).
-- ~Layout~ :: Expand to changes (~/~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), and pane resize (~{~/~}~).
+- ~Layout~ :: Indent (~>~/~<~) and pane resize (~{~/~}~).
 - ~Mark~ :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), the full left→right mirror set (~* c~ — modified + left-only + right-only); ~U~ unmark all.
 
 Top level, third row:
 
 - ~Open~ :: ~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree (soft diff a modified file, show a new/one-sided one, fold a directory), ~TAB~ peek inline diff.
 - ~Dired~ :: ~A~/~B~ jump to dired on the left/right side, ~w~ copy path.
-- ~Diff~ :: ~D~ diff whole root, ~d~ diff directory at point, ~P~ format patch.
-- ~Sync~ :: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point.
+- ~Version Control~ :: Switch comparison source — ~G~ compare two git revisions, ~H~ step through git history one commit at a time.
+- ~Preset~ :: Save the current directory pair (~S~), load a saved pair (~l~), delete one (~X~).
 
 Every command keeps its direct key binding in ~emeld-mode~ (see below), so the menu hierarchy is only for discovery — you never have to drill through it to reach a command you already know.
 
@@ -156,8 +155,6 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 |-----------+---------------------------------------------------|
 | ?         | Transient menu                                    |
 | TAB       | Dir: cycle subtree (FOLDED → DIRS → SUBTREE); File: peek inline diff |
-| S-TAB     | Cycle whole tree: TOP → DIRS → CHANGES            |
-| /         | Expand only paths to changes                      |
 | RET       | Smart action (Ediff/open file; dired/expand dir)  |
 | e         | Ediff the file at point (left vs right)           |
 | E         | Edit the project ~.dir-locals.el~                 |

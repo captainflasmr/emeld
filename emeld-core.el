@@ -2394,9 +2394,6 @@ Mimics Meld's display of missing files."
 (defvar emeld-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "TAB") #'emeld-cycle-subtree)
-    (define-key map (kbd "<backtab>") #'emeld-cycle-visibility)
-    (define-key map (kbd "S-TAB")     #'emeld-cycle-visibility)
-    (define-key map (kbd "/")   #'emeld-expand-changes)
     (define-key map (kbd "RET") #'emeld-action)
     (define-key map (kbd "e")   #'emeld-ediff)
     (define-key map (kbd "=")   #'emeld-soft-diff)
@@ -2715,16 +2712,6 @@ Shows the directory skeleton without revealing the file leaves inside."
           (throw 'unexpanded nil))))
     t))
 
-(defun emeld-expand-dirs-only ()
-  "Expand intermediate directories; collapse leaf directories.
-Reveals the directory skeleton without showing the file leaves inside.
-A directory is considered a leaf when none of its children are dirs."
-  (interactive)
-  (when emeld--root-node
-    (dolist (child (emeld-node-children emeld--root-node))
-      (emeld--walk-set-dirs-only child))
-    (emeld--render)))
-
 (defun emeld--set-expanded-changes ()
   "Expand directories leading to a change, collapse those that don't.
 Mutates the `:expanded' slots under `emeld--root-node' without rendering;
@@ -2739,16 +2726,6 @@ callers redisplay.  A directory is expanded when its `diff-status' is not
                       (walk child)))))
       (dolist (child (emeld-node-children emeld--root-node))
         (walk child)))))
-
-(defun emeld-expand-changes ()
-  "Expand directories that lead to a change, collapse those that don't.
-A directory is expanded when its `diff-status' is not `same' — i.e. it
-contains a modified, added, or removed descendant.  Useful for focusing
-the view, e.g. after toggling same files on."
-  (interactive)
-  (when emeld--root-node
-    (emeld--set-expanded-changes)
-    (emeld--render)))
 
 (defun emeld-cycle-subtree ()
   "Cycle the subtree at point through FOLDED → DIRS → SUBTREE, org-mode style.
@@ -2792,36 +2769,6 @@ naturally."
     (let ((pos (point)))
       (emeld--render)
       (goto-char pos))))
-
-(defvar-local emeld--cycle-state nil
-  "Most recent state from `emeld-cycle-visibility'.
-One of `top', `dirs', `changes', or nil.")
-
-(defun emeld-cycle-visibility ()
-  "Cycle the tree's expansion state in three steps, like org-mode's `S-TAB'.
-
-Order:
-- TOP: only the root's immediate child directories visible (rest collapsed).
-- DIRS: every intermediate directory expanded, leaf directories collapsed
-  so the directory skeleton is shown without the file leaves inside.
-- CHANGES: every directory that leads to a change expanded; identical
-  subtrees collapsed.  File leaves are visible under leaf dirs.
-
-Repeated invocations cycle TOP → DIRS → CHANGES → TOP."
-  (interactive)
-  (let ((next (pcase emeld--cycle-state
-                ('top 'dirs)
-                ('dirs 'changes)
-                (_ 'top))))
-    (setq emeld--cycle-state next)
-    (pcase next
-      ('top     (when emeld--root-node
-                  (dolist (child (emeld-node-children emeld--root-node))
-                    (emeld--walk-set-expanded child nil)))
-                (emeld--render)
-                (message "Visibility: TOP (top-level dirs)"))
-      ('dirs    (emeld-expand-dirs-only) (message "Visibility: DIRS (directory skeleton)"))
-      ('changes (emeld-expand-changes)   (message "Visibility: CHANGES (modified files)")))))
 
 (defun emeld--stop-scan ()
   "Cancel the active async scan and clean up processes.
@@ -4519,16 +4466,18 @@ node — see `emeld--node-relpath' for the equivalent slow form."
      ("F" "Filter →"     emeld-dispatch-filter)
      ("E" "edit .dir-locals.el" emeld-edit-dir-locals)
      ("&" "filter node at point" emeld-add-filter-at-point)]
+    ["Diff"
+     ("D"   "diff root (recursive)" emeld-diff-root)
+     ("d"   "diff dir at point"   emeld-diff-dir)
+     ("P"   "format as patch"    emeld-format-patch)]
+    ["Sync"
+     ("C"   "sync to other side (copy/delete)" emeld-copy)
+     ("R" (lambda () (if emeld-copy-mirror "[x] mirror copy (--delete)" "[ ] mirror copy (--delete)"))
+      (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
+     ("x"   "delete marked/at point" emeld-delete)]
     ["Hide (session)"
      ("C-k" "hide node (C-u: unhide all)" emeld-hide-at-point)
-     ("r"   "unhide all"                  emeld-unhide-all)]
-    ["Preset"
-     ("S" "save current" emeld-save-preset)
-     ("l" "load…"        emeld-load-preset)
-     ("X" "delete…"      emeld-delete-preset)]
-    ["Version Control"
-     ("G" "git revisions…"    emeld-git-diff)
-     ("H" "git history step…" emeld-git-step-history)]]
+     ("r"   "unhide all"                  emeld-unhide-all)]]
    [["Show"
      ("t" (lambda () (if emeld-show-files "[x] Files" "[ ] Files"))
       (lambda () (interactive) (emeld-toggle-show-files)) :transient t)
@@ -4550,8 +4499,6 @@ node — see `emeld--node-relpath' for the equivalent slow form."
       (lambda () (interactive) (emeld-git-toggle-commit-message)) :transient t
       :if (lambda () emeld--git-mode))]
     ["Layout"
-     ("/" "expand to changes" emeld-expand-changes :transient t)
-     ("<backtab>" "cycle visibility" emeld-cycle-visibility :transient t)
      (">" "indent more"  emeld-increase-indent :transient t)
      ("<" "indent less"  emeld-decrease-indent :transient t)
      ("}" "pane wider"   emeld-grow-column :transient t)
@@ -4573,15 +4520,13 @@ node — see `emeld--node-relpath' for the equivalent slow form."
      ("A"   "dired left side"    emeld-dired-left)
      ("B"   "dired right side"   emeld-dired-right)
      ("w"   "copy path"          emeld-copy-path-at-point)]
-    ["Diff"
-     ("D"   "diff root (recursive)" emeld-diff-root)
-     ("d"   "diff dir at point"   emeld-diff-dir)
-     ("P"   "format as patch"    emeld-format-patch)]
-    ["Sync"
-     ("C"   "sync to other side (copy/delete)" emeld-copy)
-     ("R" (lambda () (if emeld-copy-mirror "[x] mirror copy (--delete)" "[ ] mirror copy (--delete)"))
-      (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
-     ("x"   "delete marked/at point" emeld-delete)]]])
+    ["Version Control"
+     ("G" "git revisions…"    emeld-git-diff)
+     ("H" "git history step…" emeld-git-step-history)]
+    ["Preset"
+     ("S" "save current" emeld-save-preset)
+     ("l" "load…"        emeld-load-preset)
+     ("X" "delete…"      emeld-delete-preset)]]])
 
 (define-key emeld-mode-map (kbd "?") #'emeld-dispatch)
 
