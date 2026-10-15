@@ -42,7 +42,7 @@ For very large trees or slow filesystems (SMB/NFS), give ~emeld-diff~ a prefix a
 
 ** Comparing git revisions
 
-From inside a git work tree, run ~M-x emeld-git-diff~ (or ~C~ then ~G~ in the transient menu — Compare → git revisions) to compare two revisions instead of two directories.  You are prompted for a left (old) and right (new) revision; completion offers branches, tags and recent commits, plus ~[working tree]~ and ~[index]~.  The default compares ~HEAD~ against the working tree, i.e. "what have I changed since the last commit".
+From inside a git work tree, run ~M-x emeld-git-diff~ (or ~G~ in the transient menu — Version Control → git revisions) to compare two revisions instead of two directories.  You are prompted for a left (old) and right (new) revision; completion offers branches, tags and recent commits, plus ~[working tree]~ and ~[index]~.  The default compares ~HEAD~ against the working tree, i.e. "what have I changed since the last commit".
 
 The result is the same side-by-side tree, showing the hierarchy of added, deleted and modified files between the two revisions (renames appear as a deleted old path plus an added new path).  Because the content lives in git history rather than on disk:
 
@@ -56,7 +56,7 @@ The header line shows ~[git OLD→NEW]~ with the chosen revision labels; a revis
 
 *** Stepping through history
 
-~M-x emeld-git-step-history~ (or ~C~ then ~H~ in the transient — Compare → git history step) walks the history one commit at a time.  You pick a starting revision (default ~HEAD~); the buffer shows what that commit changed — its first parent on the left, the commit on the right — and you step through:
+~M-x emeld-git-step-history~ (or ~H~ in the transient — Version Control → git history step) walks the history one commit at a time.  You pick a starting revision (default ~HEAD~); the buffer shows what that commit changed — its first parent on the left, the commit on the right — and you step through:
 
 - ~,~ — move to the *older* commit (back in time)
 - ~.~ — move to the *newer* commit (forward, back toward the start)
@@ -133,14 +133,14 @@ Top level:
 
 - ~Filename~ :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), ~e~ edit ~.dir-locals.el~.
 - ~Preset~ :: Save the current directory pair (~s~), load a saved pair (~l~), delete one (~d~).
-- ~Menus~ :: Open a sub-menu — ~v~ View, ~f~ File, ~m~ Mark, ~C~ Compare.
+- ~Version Control~ :: Switch comparison source — ~G~ compare two git revisions, ~H~ step through git history one commit at a time.
+- ~Menus~ :: Open a sub-menu — ~v~ View, ~f~ File, ~m~ Mark.
 
 Sub-menus (opened from the ~Menus~ column):
 
 - ~View~ (~v~) :: Two columns. ~Show~ toggles what is displayed — files (~F~ hide files, show directories only), tree-lines (~T~), tree density (~z~ cycles compact → extreme → wide), strikethrough (~s~), ~.gitignore~ respect (~I~). ~Layout~ holds bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~/~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), and pane resize (~{~/~}~).
 - ~File~ (~f~) :: Operate on files, in four columns. ~Open~: ~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree (soft diff a modified file, show a new/one-sided one, fold a directory), ~TAB~ peek inline diff. ~Dired~: ~A~/~B~ jump to dired on the left/right side, ~w~ copy path. ~Diff~: ~D~ diff whole root, ~d~ diff directory at point, ~P~ format patch. ~Sync~: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point.
 - ~Mark~ (~m~) :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), the full left→right mirror set (~* c~/~* a~ — modified + left-only + right-only); ~U~ unmark all.
-- ~Compare~ (~C~) :: Switch comparison source — ~G~ compare two git revisions, ~H~ step through git history one commit at a time.
 
 Every command keeps its direct key binding in ~emeld-mode~ (see below), so the menu hierarchy is only for discovery — you never have to drill through it to reach a command you already know.
 

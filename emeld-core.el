@@ -4566,12 +4566,6 @@ node — see `emeld--node-relpath' for the equivalent slow form."
    ("* a" "all changed (mirror)" emeld-mark-all :transient t)
    ("U"   "unmark all"      emeld-unmark-all :transient t)])
 
-(transient-define-prefix emeld-dispatch-compare ()
-  "Emeld comparison sources."
-  ["Compare"
-   ("G" "git revisions…"    emeld-git-diff)
-   ("H" "git history step…" emeld-git-step-history)])
-
 (transient-define-prefix emeld-dispatch ()
   "Transient menu for emeld."
   [["Filename"
@@ -4618,11 +4612,13 @@ node — see `emeld--node-relpath' for the equivalent slow form."
     ("s" "save current" emeld-save-preset)
     ("l" "load…"        emeld-load-preset)
     ("d" "delete…"      emeld-delete-preset)]
+   ["Version Control"
+    ("G" "git revisions…"    emeld-git-diff)
+    ("H" "git history step…" emeld-git-step-history)]
    ["Menus"
     ("v" "View →"     emeld-dispatch-view)
     ("f" "File →"     emeld-dispatch-file)
-    ("m" "Mark →"     emeld-dispatch-mark)
-    ("C" "Compare →"  emeld-dispatch-compare)]
+    ("m" "Mark →"     emeld-dispatch-mark)]
    ])
 
 (define-key emeld-mode-map (kbd "?") #'emeld-dispatch)
