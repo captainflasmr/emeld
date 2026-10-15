@@ -2400,8 +2400,6 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "W")   #'emeld-swap-panes)
     (define-key map (kbd "n")   #'emeld-next-line)
     (define-key map (kbd "p")   #'emeld-previous-line)
-    (define-key map (kbd "M-n") #'emeld-next-change)
-    (define-key map (kbd "M-p") #'emeld-previous-change)
     (define-key map (kbd "o")   #'emeld-jump-other-side)
     (define-key map (kbd "P")   #'emeld-format-patch)
     (define-key map (kbd "C")   #'emeld-copy)
@@ -2506,52 +2504,6 @@ If the current side is empty but the other has a file, snap to it."
                           (< (point) new-limit)
                           (looking-at "[]* └├│─[+-]"))
                 (forward-char 1)))))))))
-
-(defun emeld--change-status-p (node)
-  "Return non-nil if NODE represents a change (different, added, or removed)."
-  (memq (emeld-node-diff-status node) '(different left-only right-only)))
-
-(defun emeld-next-change ()
-  "Move to the next change (different, added, or removed node)."
-  (interactive)
-  (let* ((width (emeld--effective-column-width))
-         (on-right (>= (current-column) width))
-         (found nil)
-         (orig (point)))
-    (forward-line 1)
-    (while (and (not found) (not (eobp)))
-      (let ((node (get-text-property (point) 'emeld-node)))
-        (if (and node (emeld--change-status-p node) (not (emeld-node-is-dir node))
-                 ;; Skip inline-diff body lines: they share the file's node, so
-                 ;; landing on them would stall on the file we started from.
-                 (not (get-text-property (point) 'emeld-inline-diff)))
-            (setq found t)
-          (forward-line 1))))
-    (if found
-        (emeld--move-to-node-name on-right)
-      (goto-char orig)
-      (message "No next change"))))
-
-(defun emeld-previous-change ()
-  "Move to the previous change (different, added, or removed node)."
-  (interactive)
-  (let* ((width (emeld--effective-column-width))
-         (on-right (>= (current-column) width))
-         (found nil)
-         (orig (point)))
-    (forward-line -1)
-    (while (and (not found) (not (bobp)))
-      (let ((node (get-text-property (point) 'emeld-node)))
-        (if (and node (emeld--change-status-p node) (not (emeld-node-is-dir node))
-                 ;; Skip inline-diff body lines: they share the file's node, so
-                 ;; landing on them would stall on the file we started from.
-                 (not (get-text-property (point) 'emeld-inline-diff)))
-            (setq found t)
-          (forward-line -1))))
-    (if found
-        (emeld--move-to-node-name on-right)
-      (goto-char orig)
-      (message "No previous change"))))
 
 (defun emeld-next-line ()
   "Move to the next line and align to node name."
@@ -4576,8 +4528,6 @@ node — see `emeld--node-relpath' for the equivalent slow form."
    ("k"   "stop scan"            emeld-stop-scan)
    ("W"   "swap panes"         emeld-swap-panes)
    ("o"   "jump other side"    emeld-jump-other-side :transient t)
-   ("M-n" "next change"        emeld-next-change :transient t)
-   ("M-p" "previous change"    emeld-previous-change :transient t)
    ("," "history: older commit" emeld-git-history-older
     :transient t :if (lambda () emeld--git-mode))
    ("." "history: newer commit" emeld-git-history-newer

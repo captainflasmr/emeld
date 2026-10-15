@@ -138,7 +138,7 @@ Top level:
 Sub-menus (opened from the ~Menus~ column):
 
 - ~View~ (~v~) :: Two columns. ~Show~ toggles what is displayed — files (~F~ hide files, show directories only), tree-lines (~T~), tree density (~z~ cycles compact → extreme → wide), strikethrough (~s~), ~.gitignore~ respect (~I~). ~Layout~ holds bulk expand/collapse (~[~ collapse all, ~]~ expand all, ~/~ expand to changes, ~<backtab>~ cycle visibility), indent (~>~/~<~), and pane resize (~{~/~}~).
-- ~Navigate~ (~n~) :: Rescan (~G~; ~C-u G~ rescans just the directory at point), stop an in-progress scan (~k~), redraw after a resize (~g~), swap panes (~W~), and jump (~o~ other side, ~M-n~/~M-p~ next/prev change).
+- ~Navigate~ (~n~) :: Rescan (~G~; ~C-u G~ rescans just the directory at point), stop an in-progress scan (~k~), redraw after a resize (~g~), swap panes (~W~), and jump (~o~ other side).
 - ~File~ (~f~) :: Operate on files, in four columns. ~Open~: ~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree (soft diff a modified file, show a new/one-sided one, fold a directory), ~TAB~ peek inline diff. ~Dired~: ~A~/~B~ jump to dired on the left/right side, ~w~ copy path. ~Diff~: ~D~ diff whole root, ~d~ diff directory at point, ~P~ format patch. ~Sync~: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point.
 - ~Mark~ (~m~) :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), the full left→right mirror set (~* c~/~* a~ — modified + left-only + right-only); ~U~ unmark all.
 - ~Preset~ (~p~) :: Save the current directory pair (~s~), load a saved pair (~l~), delete one (~d~).
@@ -192,7 +192,6 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | R         | Toggle mirror copy (rsync ~--delete~; shows ~[Mirror]~ in header) |
 | g         | Reset layout (indent + pane split + density) to defaults and redraw |
 | n/p       | Navigation (Side-aware)                           |
-| M-n/M-p   | Jump to next/previous file change                 |
 | { / }     | Shrink/grow left pane width                       |
 
 Filter-group toggling (~emeld-toggle-filter-group~) and the preset commands (~emeld-save-preset~, ~emeld-load-preset~, ~emeld-delete-preset~) are not bound to keys by default — invoke them from the transient menu (~?~) or ~M-x~, or bind them yourself, e.g.:
