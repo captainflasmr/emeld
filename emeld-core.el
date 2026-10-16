@@ -4537,7 +4537,6 @@ node — see `emeld--node-relpath' for the equivalent slow form."
 (transient-define-prefix emeld-dispatch-open ()
   "Open, preview, or jump."
   [["Open"
-    ("RET" "action (smart)"     emeld-action)
     ("e"   "ediff"              emeld-ediff)
     ("="   "diff / open / fold (SPC)" emeld-soft-diff)
     ("TAB" "peek inline diff (file)" emeld-toggle-inline-diff :transient t)
@@ -4550,14 +4549,15 @@ node — see `emeld--node-relpath' for the equivalent slow form."
 (transient-define-prefix emeld-dispatch ()
   "Transient menu for emeld."
   ["Transient commands"
-   ("d" "compare" emeld-dispatch-compare)
-   ("T" "git"     emeld-dispatch-git)
-   ("h" "diff"    emeld-dispatch-diff)
-   ("s" "sync"    emeld-dispatch-sync)
-   ("F" "filter"  emeld-dispatch-filter)
-   ("v" "view"    emeld-dispatch-view)
-   ("r" "mark"    emeld-dispatch-mark)
-   ("O" "open"    emeld-dispatch-open)]
+   :class transient-columns
+   [("d" "compare" emeld-dispatch-compare)
+    ("T" "git"     emeld-dispatch-git)
+    ("h" "diff"    emeld-dispatch-diff)]
+   [("s" "sync"    emeld-dispatch-sync)
+    ("F" "filter"  emeld-dispatch-filter)
+    ("v" "view"    emeld-dispatch-view)]
+   [("r" "mark"    emeld-dispatch-mark)
+    ("O" "open"    emeld-dispatch-open)]]
   ["Show"
    ("S" (lambda () (if emeld-show-same "[x] same" "[ ] same"))
     (lambda () (interactive) (emeld-toggle-show-same)) :transient t)
@@ -4569,9 +4569,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
    ("C"   "sync to other side (copy/delete)" emeld-copy)
    ("m"   "mark"            emeld-mark)
    ("o"   "hop to other pane" emeld-jump-other-side)
-   ("RET" "action (smart)"  emeld-action)
-   ("e"   "ediff"           emeld-ediff)
-   ("x"   "delete marked/at point" emeld-delete)])
+   ("e"   "ediff"           emeld-ediff)])
 
 (define-key emeld-mode-map (kbd "?") #'emeld-dispatch)
 

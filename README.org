@@ -137,7 +137,7 @@ Top-level row 2 is ~Show~ :: toggle file kinds — same (~S~), new (~N~), modifi
 - ~Act — Filter~ (~F~) :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), edit ~.dir-locals.el~ (~E~), or add the node at point as a filter (~&~).
 - ~Inspect — View~ (~v~) :: Toggle what is displayed — tree-lines (~t~), tree density (~z~ cycles compact → extreme → wide), ~.gitignore~ respect (~I~), whitespace handling (~i~), commit message (~c~, git mode only), session hide (~C-k~ hide node at point, ~C-u C-k~ unhides all); pane resize (~<~/~>~) and indent (~{~/~}~).
 - ~Inspect — Mark~ (~r~) :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), the full left→right mirror set (~* c~ — modified + left-only + right-only); ~U~ unmark all.
-- ~Inspect — Open~ (~O~) :: ~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree (soft diff a modified file, show a new/one-sided one, fold a directory), ~TAB~ peek inline diff, ~o~ hop to other pane; ~A~/~B~ jump to dired on the left/right side, ~w~ copy path.
+- ~Inspect — Open~ (~O~) :: ~e~ ediff, ~=~/~SPC~ preview without leaving the tree (soft diff a modified file, show a new/one-sided one, fold a directory), ~TAB~ peek inline diff, ~o~ hop to other pane; ~A~/~B~ jump to dired on the left/right side, ~w~ copy path.
 
 Most commands keep a direct key binding in ~emeld-mode~ (see below); the sub-menu keys (~d~ ~T~ ~h~ ~s~ ~F~ ~v~ ~r~ ~O~) open their menu from the tree, and everything inside stays one more keystroke away (e.g. ~h d~ to diff a directory) — so the hierarchy stays discoverable without losing keyboard access.
 
