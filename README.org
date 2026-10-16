@@ -141,7 +141,7 @@ Top level, second row:
 Top level, third row:
 
 - ~Show~ :: Toggle what is displayed — tree-lines (~t~), tree density (~z~ cycles compact → extreme → wide), ~.gitignore~ respect (~I~), whitespace handling (~i~), commit message (~c~, git mode only), session hide (~C-k~ hide node at point, ~C-u C-k~ unhides all).
-- ~Layout~ :: Indent (~>~/~<~) and pane resize (~{~/~}~).
+- ~Layout~ :: Pane resize (~<~/~>~) and indent (~{~/~}~).
 - ~Mark~ :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), the full left→right mirror set (~* c~ — modified + left-only + right-only); ~U~ unmark all.
 
 Top level, fourth row:
@@ -194,7 +194,8 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | R         | Toggle mirror copy (rsync ~--delete~; shows ~[Mirror]~ in header) |
 | g         | Reset layout (indent + pane split + density) to defaults and redraw |
 | n/p       | Navigation (Side-aware)                           |
-| { / }     | Shrink/grow left pane width                       |
+| < / >     | Shrink/grow left pane width                       |
+| { / }     | Decrease/increase tree indent                     |
 
 Filter-group toggling (~emeld-toggle-filter-group~) and the preset commands (~emeld-save-preset~, ~emeld-load-preset~, ~emeld-delete-preset~) are not bound to keys by default — invoke them from the transient menu (~?~) or ~M-x~, or bind them yourself, e.g.:
 

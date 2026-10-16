@@ -2436,10 +2436,10 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "E")   #'emeld-edit-dir-locals)
     (define-key map (kbd "C-k") #'emeld-hide-at-point)
     (define-key map (kbd "F")   #'emeld-dispatch-filter)
-    (define-key map (kbd ">")   #'emeld-increase-indent)
-    (define-key map (kbd "<")   #'emeld-decrease-indent)
-    (define-key map (kbd "}")   #'emeld-grow-column)
-    (define-key map (kbd "{")   #'emeld-shrink-column)
+    (define-key map (kbd ">")   #'emeld-grow-column)
+    (define-key map (kbd "<")   #'emeld-shrink-column)
+    (define-key map (kbd "}")   #'emeld-increase-indent)
+    (define-key map (kbd "{")   #'emeld-decrease-indent)
     map)
   "Keymap for `emeld-mode'.")
 
@@ -4484,10 +4484,10 @@ node — see `emeld--node-relpath' for the equivalent slow form."
       :if (lambda () emeld--git-mode))
      ("C-k" "hide node (C-u: unhide all)" emeld-hide-at-point)]
     ["Layout"
-     (">" "indent more"  emeld-increase-indent :transient t)
-     ("<" "indent less"  emeld-decrease-indent :transient t)
-     ("}" "pane wider"   emeld-grow-column :transient t)
-     ("{" "pane narrow"  emeld-shrink-column :transient t)]
+     (">" "pane wider"   emeld-grow-column :transient t)
+     ("<" "pane narrow"  emeld-shrink-column :transient t)
+     ("}" "indent more"  emeld-increase-indent :transient t)
+     ("{" "indent less"  emeld-decrease-indent :transient t)]
     ["Mark"
      ("m"   "mark"            emeld-mark :transient t)
      ("u"   "unmark"          emeld-unmark :transient t)
