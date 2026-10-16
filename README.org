@@ -126,32 +126,17 @@ Deletions move the files to trash rather than erasing them outright.  When sever
 
 * Transient Menu (~?~)
 
-The transient top level has four rows of columns.  The ~Filter~ row sits on its own at the top; its ~Filter~ sub-menu holds the filter-group toggles; pressing ~q~ (or ~C-g~) there returns to the top level.
+Magit-style: the top level is a single ~Transient commands~ group listing the seven sub-menu entry points, one keystroke each, with an ~Essential commands~ group below it for the most-used direct actions.  The group keys (~d~ ~T~ ~s~ ~F~ ~v~ ~r~ ~O~) also work directly from the tree — pressing one opens its sub-menu without going through ~?~ first.  Pressing ~q~ (or ~C-g~) inside a sub-menu returns to the top level.
 
-Top level, first row:
+- ~Compare~ (~d~) :: Start or re-scan.  ~d~ compare two directories, ~w~ dwim (guess from dired), presets (~l~ load, ~S~ save, ~X~ delete), ~g~ rescan, ~s~ rescan dir at point, ~k~ stop scan.
+- ~Git~ (~T~) :: ~G~ git revisions, ~H~ step git history (`,` older / `.` newer).
+- ~Act — Sync~ (~s~) :: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point, ~D~ delete at point (this pane); ~d~ diff directory at point, ~P~ format patch.
+- ~Act — Filter~ (~F~) :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), edit ~.dir-locals.el~ (~E~), or add the node at point as a filter (~&~).
+- ~Inspect — View~ (~v~) :: Toggle what is displayed — tree-lines (~t~), tree density (~z~ cycles compact → extreme → wide), ~.gitignore~ respect (~I~), whitespace handling (~i~), commit message (~c~, git mode only), session hide (~C-k~ hide node at point, ~C-u C-k~ unhides all); pane resize (~<~/~>~) and indent (~{~/~}~).
+- ~Inspect — Mark~ (~r~) :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), the full left→right mirror set (~* c~ — modified + left-only + right-only); ~U~ unmark all.
+- ~Inspect — Open~ (~O~) :: ~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree (soft diff a modified file, show a new/one-sided one, fold a directory), ~TAB~ peek inline diff, ~o~ hop to other pane; ~A~/~B~ jump to dired on the left/right side, ~w~ copy path.
 
-- ~Filter~ :: Open the ~Filter~ sub-menu (~F~) to toggle groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks).
-
-Top level, second row:
-
-- ~Sync~ :: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point, ~D~ delete at point (this pane).
-- ~Diff~ :: ~d~ diff directory at point (whole root at the top level), ~P~ format patch.
-- ~Filter~ :: Edit ~.dir-locals.el~ (~E~), or add the node at point as a filter (~&~).
-
-Top level, third row:
-
-- ~Show~ :: Toggle what is displayed — tree-lines (~t~), tree density (~z~ cycles compact → extreme → wide), ~.gitignore~ respect (~I~), whitespace handling (~i~), commit message (~c~, git mode only), session hide (~C-k~ hide node at point, ~C-u C-k~ unhides all).
-- ~Layout~ :: Pane resize (~<~/~>~) and indent (~{~/~}~).
-- ~Mark~ :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), the full left→right mirror set (~* c~ — modified + left-only + right-only); ~U~ unmark all.
-
-Top level, fourth row:
-
-- ~Open~ :: ~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree (soft diff a modified file, show a new/one-sided one, fold a directory), ~TAB~ peek inline diff, ~o~ hop to other pane.
-- ~Dired~ :: ~A~/~B~ jump to dired on the left/right side, ~w~ copy path.
-- ~Version Control~ :: Switch comparison source — ~G~ compare two git revisions, ~H~ step through git history one commit at a time.
-- ~Preset~ :: Save the current directory pair (~S~), load a saved pair (~l~), delete one (~X~).
-
-Every command keeps its direct key binding in ~emeld-mode~ (see below), so the menu hierarchy is only for discovery — you never have to drill through it to reach a command you already know.
+Most commands keep a direct key binding in ~emeld-mode~ (see below); the sub-menu keys (~d~ ~T~ ~s~ ~F~ ~v~ ~r~ ~O~) open their menu from the tree, and everything inside stays one more keystroke away (e.g. ~s d~ to diff a directory) — so the hierarchy stays discoverable without losing keyboard access.
 
 * Key Bindings
 | Key       | Action                                            |
@@ -162,22 +147,27 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | e         | Ediff the file at point (left vs right)           |
 | E         | Edit the project ~.dir-locals.el~                 |
 | =         | Preview (point stays in tree): soft diff (modified), show file (new), fold (Dir) |
-| f, v      | Find File (Open current side)                     |
+| f         | Find File (Open current side)                     |
+| v         | View sub-menu (toggles and layout)                |
 | A         | Dired the left side (node at point, or left root) |
 | B         | Dired the right side (node at point, or right root) |
-| d         | Diff directory at point (recursive; file → its dir, root at top level) |
+| d         | Compare sub-menu (dirs, dwim, git, presets, rescan; diff-dir now under Sync) |
 | C         | Sync marked nodes to the other side (mark file side → copy, empty/struck side → delete) or node at point |
+| s         | Sync sub-menu (copy, delete, diff-dir)              |
 | x         | Delete marked nodes (each from its marked side) or node at point |
 | D         | Delete node at point on current side (ignores marks) |
 | P         | Format as patch (unified diff)                    |
 | w         | Copy filename (C-u w for full path)               |
 | SPC       | Preview (point stays in tree): fold (Dir), soft diff (modified), show file (new) |
 | o         | Jump to the other side                            |
+| O         | Open sub-menu (ediff, preview, dired)             |
+| T         | Git sub-menu (revisions, history)               |
 | S         | Toggle same (identical) files                     |
 | M         | Toggle modified files                             |
 | N         | Toggle added (new) files                          |
 | F         | Open the Filter sub-menu (toggle groups)      |
 | m         | Mark file on current side                         |
+| r         | Mark sub-menu (bulk mark/unmark)                  |
 | u         | Unmark file on current side                       |
 | U         | Unmark all nodes                                  |
 | * m       | Mark all modified files                           |
@@ -311,6 +301,6 @@ Emeld ships with Meld-style default filter groups (see above).  Starting a compa
 
 Toggle named groups on/off from the transient menu (~?~ then ~F~) or with ~M-x emeld-toggle-filter-group~.  The header line shows the current display state; review or hand-edit the groups and their globs in ~.dir-locals.el~ with ~M-x emeld-edit-dir-locals~ (~E~), then rescan (~G~) to apply.
 
-You do not have to write ~.dir-locals.el~ by hand.  With point on a file or directory in the tree, ~&~ (~emeld-add-filter-at-point~, also under ~&~ in the transient Filter row) adds it as a filter and saves it: it prompts for the glob (defaulting to the basename — edit it to e.g. ~*.log~ or a ~sub/dir~ relative path) and the group to add it to (completing over existing names; a new name creates a new, active group), writes the updated ~emeld-filter-groups~ to ~.dir-locals.el~ at the left root, activates the group and rescans so the matching files drop out at once.  Repeat it to progressively tidy up a fresh comparison; the exclusions persist for next time.
+You do not have to write ~.dir-locals.el~ by hand.  With point on a file or directory in the tree, ~&~ (~emeld-add-filter-at-point~, also under ~&~ in the transient Filter sub-menu) adds it as a filter and saves it: it prompts for the glob (defaulting to the basename — edit it to e.g. ~*.log~ or a ~sub/dir~ relative path) and the group to add it to (completing over existing names; a new name creates a new, active group), writes the updated ~emeld-filter-groups~ to ~.dir-locals.el~ at the left root, activates the group and rescans so the matching files drop out at once.  Repeat it to progressively tidy up a fresh comparison; the exclusions persist for next time.
 
 For a *temporary* tidy-up that you do not want recorded, ~C-k~ (~emeld-hide-at-point~) hides just the node at point — and, for a directory, its subtree — for this session only.  Nothing is written to ~.dir-locals.el~, and the hide survives a rescan within the session; the header line shows a ~(!) N hidden~ note while anything is tucked away.  Restore everything with ~C-u C-k~ (~emeld-unhide-all~).  Use this when you want to declutter the view but stay interested in the item later; use ~&~ when the exclusion should be permanent.

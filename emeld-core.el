@@ -2398,7 +2398,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "e")   #'emeld-ediff)
     (define-key map (kbd "=")   #'emeld-soft-diff)
     (define-key map (kbd "f")   #'emeld-find-file)
-    (define-key map (kbd "v")   #'emeld-find-file)
+    (define-key map (kbd "v")   #'emeld-dispatch-view)
     (define-key map (kbd "A")   #'emeld-dired-left)
     (define-key map (kbd "B")   #'emeld-dired-right)
     (define-key map (kbd "g")   #'emeld-redraw)
@@ -2414,7 +2414,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "w")   #'emeld-copy-path-at-point)
     (define-key map (kbd "x")   #'emeld-delete)
     (define-key map (kbd "D")   #'emeld-delete-at-point)
-    (define-key map (kbd "d")   #'emeld-diff-dir)
+    (define-key map (kbd "d")   #'emeld-dispatch-compare)
     (define-key map (kbd "c")   #'emeld-git-toggle-commit-message)
     (define-key map (kbd ",")   #'emeld-git-history-older)
     (define-key map (kbd ".")   #'emeld-git-history-newer)
@@ -2436,6 +2436,10 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "E")   #'emeld-edit-dir-locals)
     (define-key map (kbd "C-k") #'emeld-hide-at-point)
     (define-key map (kbd "F")   #'emeld-dispatch-filter)
+    (define-key map (kbd "s")   #'emeld-dispatch-sync)
+    (define-key map (kbd "r")   #'emeld-dispatch-mark)
+    (define-key map (kbd "O")   #'emeld-dispatch-open)
+    (define-key map (kbd "T")   #'emeld-dispatch-git)
     (define-key map (kbd ">")   #'emeld-grow-column)
     (define-key map (kbd "<")   #'emeld-shrink-column)
     (define-key map (kbd "}")   #'emeld-increase-indent)
@@ -4418,100 +4422,144 @@ node — see `emeld--node-relpath' for the equivalent slow form."
 (transient-define-prefix emeld-dispatch-filter ()
   "Emeld filename filter groups."
   ["Filter"
-   :if (lambda () emeld-filter-groups)
    :class transient-column
    :setup-children
    (lambda (&rest _)
-     (when emeld-filter-groups
-       (let ((idx 0)
-             (suffixes nil)
-             (max-len (apply #'max (mapcar (lambda (g) (length (car g)))
-                                           emeld-filter-groups))))
-         (dolist (g emeld-filter-groups)
-           (let* ((group-name (car g))
-                  (key (format "c%c" (+ ?a idx)))
-                  (cmd (let ((g-name group-name))
-                         (lambda ()
-                           (interactive)
-                           (emeld-toggle-filter-group g-name))))
-                  (desc-func (let ((g-name group-name) (len max-len))
-                               (lambda ()
-                                 (format (concat "[%c] %-" (number-to-string len) "s")
-                                         (if (member g-name emeld--active-filter-groups) ?x ?\s)
-                                         g-name)))))
-             (setq idx (1+ idx))
-             (push (transient-parse-suffix
-                    'emeld-dispatch-filter
-                    (list key "" cmd
-                          :class 'emeld-dynamic-suffix
-                          :dynamic-description desc-func
-                          :transient t))
-                   suffixes)))
-         (nreverse suffixes))))])
+     (let ((suffixes
+            (when emeld-filter-groups
+              (let ((idx 0)
+                    (out nil)
+                    (max-len (apply #'max (mapcar (lambda (g) (length (car g)))
+                                                  emeld-filter-groups))))
+                (dolist (g emeld-filter-groups)
+                  (let* ((group-name (car g))
+                         (key (format "c%c" (+ ?a idx)))
+                         (cmd (let ((g-name group-name))
+                                (lambda ()
+                                  (interactive)
+                                  (emeld-toggle-filter-group g-name))))
+                         (desc-func (let ((g-name group-name) (len max-len))
+                                      (lambda ()
+                                        (format (concat "[%c] %-" (number-to-string len) "s")
+                                                (if (member g-name emeld--active-filter-groups) ?x ?\s)
+                                                g-name)))))
+                    (setq idx (1+ idx))
+                    (push (transient-parse-suffix
+                           'emeld-dispatch-filter
+                           (list key "" cmd
+                                 :class 'emeld-dynamic-suffix
+                                 :dynamic-description desc-func
+                                 :transient t))
+                          out)))
+                (nreverse out)))))
+       (append suffixes
+               (list (transient-parse-suffix
+                      'emeld-dispatch-filter
+                      (list "E" "edit .dir-locals.el" 'emeld-edit-dir-locals))
+                     (transient-parse-suffix
+                      'emeld-dispatch-filter
+                      (list "&" "filter node at point" 'emeld-add-filter-at-point))))))])
+
+(transient-define-prefix emeld-dispatch-compare ()
+  "Start, switch, or re-scan an emeld comparison."
+  [:class transient-subgroups
+   [["New"
+     ("d" "directories…"        emeld-diff)
+     ("w" "dwim (guess from dired)…" emeld-diff-dwim)]
+    ["Preset"
+     ("l" "load…"        emeld-load-preset)
+     ("S" "save current" emeld-save-preset)
+     ("X" "delete…"      emeld-delete-preset)]]
+   [["Refresh"
+     ("g" "rescan"                emeld-rescan)
+     ("s" "rescan dir at point"   emeld-refresh-subdir)
+     ("k" "stop scan"             emeld-stop-scan)]]])
+
+(transient-define-prefix emeld-dispatch-git ()
+  "Compare git revisions and step through history."
+  ["Git"
+   ("G" "revisions…"    emeld-git-diff)
+   ("H" "history step…" emeld-git-step-history)
+   ("," "history older" emeld-git-history-older)
+   ("." "history newer" emeld-git-history-newer)])
+
+(transient-define-prefix emeld-dispatch-sync ()
+  "Sync, delete, or diff nodes."
+  [["Sync"
+    ("C"   "sync to other side (copy/delete)" emeld-copy)
+    ("R" (lambda () (if emeld-copy-mirror "[x] mirror copy (--delete)" "[ ] mirror copy (--delete)"))
+     (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
+    ("x"   "delete marked/at point" emeld-delete)
+    ("D"   "delete at point (this pane)" emeld-delete-at-point)]
+   ["Diff"
+    ("d"   "diff dir at point"   emeld-diff-dir)
+    ("P"   "format as patch"    emeld-format-patch)]])
+
+(transient-define-prefix emeld-dispatch-view ()
+  "Show, hide, and layout options."
+  [["Show"
+    ("t" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
+     (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
+    ("z" (lambda () (format "density: %s" emeld-tree-density))
+     (lambda () (interactive) (emeld-cycle-tree-density)) :transient t)
+    ("I" (lambda () (if emeld-respect-gitignore "[x] gitignore" "[ ] gitignore"))
+     (lambda () (interactive) (emeld-toggle-gitignore)))
+    ("i" (lambda ()
+           (pcase emeld-ignore-whitespace
+             ('change "[-b] ignore ws (amount)")
+             ('all "[-w] ignore ws (all)")
+             (_ "[ ] ignore ws")))
+     (lambda () (interactive) (emeld-toggle-ignore-whitespace)))
+    ("c" (lambda () (if emeld--git-commit-expanded "[x] commit msg" "[ ] commit msg"))
+     (lambda () (interactive) (emeld-git-toggle-commit-message)) :transient t
+     :if (lambda () emeld--git-mode))
+    ("C-k" "hide node (C-u: unhide all)" emeld-hide-at-point)]
+   ["Layout"
+    (">" "pane wider"   emeld-grow-column :transient t)
+    ("<" "pane narrow"  emeld-shrink-column :transient t)
+    ("}" "indent more"  emeld-increase-indent :transient t)
+    ("{" "indent less"  emeld-decrease-indent :transient t)]])
+
+(transient-define-prefix emeld-dispatch-mark ()
+  "Mark nodes, per side."
+  ["Mark"
+   ("m"   "mark"            emeld-mark :transient t)
+   ("u"   "unmark"          emeld-unmark :transient t)
+   ("* m" "modified"        emeld-mark-modified :transient t)
+   ("* l" "left-only (new)" emeld-mark-left-only :transient t)
+   ("* c" "→ mirror right"  emeld-mark-to-copy :transient t)
+   ("U"   "unmark all"      emeld-unmark-all :transient t)])
+
+(transient-define-prefix emeld-dispatch-open ()
+  "Open, preview, or jump."
+  [["Open"
+    ("RET" "action (smart)"     emeld-action)
+    ("e"   "ediff"              emeld-ediff)
+    ("="   "diff / open / fold (SPC)" emeld-soft-diff)
+    ("TAB" "peek inline diff (file)" emeld-toggle-inline-diff :transient t)
+    ("o" "hop to other pane" emeld-jump-other-side :transient t)]
+   ["Dired"
+    ("A"   "dired left side"    emeld-dired-left)
+    ("B"   "dired right side"   emeld-dired-right)
+    ("w"   "copy path"          emeld-copy-path-at-point)]])
 
 (transient-define-prefix emeld-dispatch ()
   "Transient menu for emeld."
-  [:class transient-subgroups
-   [["Filter"
-     ("F" "Filter →"     emeld-dispatch-filter)]]
-   [["Sync"
-     ("C"   "sync to other side (copy/delete)" emeld-copy)
-     ("R" (lambda () (if emeld-copy-mirror "[x] mirror copy (--delete)" "[ ] mirror copy (--delete)"))
-      (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
-     ("x"   "delete marked/at point" emeld-delete)
-     ("D"   "delete at point (this pane)" emeld-delete-at-point)]
-    ["Diff"
-     ("d"   "diff dir at point"   emeld-diff-dir)
-     ("P"   "format as patch"    emeld-format-patch)]
-    ["Filter"
-     ("E" "edit .dir-locals.el" emeld-edit-dir-locals)
-     ("&" "filter node at point" emeld-add-filter-at-point)]]
-   [["Show"
-     ("t" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
-      (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
-     ("z" (lambda () (format "density: %s" emeld-tree-density))
-      (lambda () (interactive) (emeld-cycle-tree-density)) :transient t)
-     ("I" (lambda () (if emeld-respect-gitignore "[x] gitignore" "[ ] gitignore"))
-      (lambda () (interactive) (emeld-toggle-gitignore)))
-     ("i" (lambda ()
-            (pcase emeld-ignore-whitespace
-              ('change "[-b] ignore ws (amount)")
-              ('all "[-w] ignore ws (all)")
-              (_ "[ ] ignore ws")))
-      (lambda () (interactive) (emeld-toggle-ignore-whitespace)))
-     ("c" (lambda () (if emeld--git-commit-expanded "[x] commit msg" "[ ] commit msg"))
-      (lambda () (interactive) (emeld-git-toggle-commit-message)) :transient t
-      :if (lambda () emeld--git-mode))
-     ("C-k" "hide node (C-u: unhide all)" emeld-hide-at-point)]
-    ["Layout"
-     (">" "pane wider"   emeld-grow-column :transient t)
-     ("<" "pane narrow"  emeld-shrink-column :transient t)
-     ("}" "indent more"  emeld-increase-indent :transient t)
-     ("{" "indent less"  emeld-decrease-indent :transient t)]
-    ["Mark"
-     ("m"   "mark"            emeld-mark :transient t)
-     ("u"   "unmark"          emeld-unmark :transient t)
-     ("* m" "modified"        emeld-mark-modified :transient t)
-     ("* l" "left-only (new)" emeld-mark-left-only :transient t)
-     ("* c" "→ mirror right"  emeld-mark-to-copy :transient t)
-     ("U"   "unmark all"      emeld-unmark-all :transient t)]]
-   [["Open"
-     ("RET" "action (smart)"     emeld-action)
-     ("e"   "ediff"              emeld-ediff)
-     ("="   "diff / open / fold (SPC)" emeld-soft-diff)
-     ("TAB" "peek inline diff (file)" emeld-toggle-inline-diff :transient t)
-     ("o" "hop to other pane" emeld-jump-other-side :transient t)]
-    ["Dired"
-     ("A"   "dired left side"    emeld-dired-left)
-     ("B"   "dired right side"   emeld-dired-right)
-     ("w"   "copy path"          emeld-copy-path-at-point)]
-    ["Version Control"
-     ("G" "git revisions…"    emeld-git-diff)
-     ("H" "git history step…" emeld-git-step-history)]
-    ["Preset"
-     ("S" "save current" emeld-save-preset)
-     ("l" "load…"        emeld-load-preset)
-     ("X" "delete…"      emeld-delete-preset)]]])
+  ["Transient commands"
+   ("d" "compare →" emeld-dispatch-compare)
+   ("T" "git →"     emeld-dispatch-git)
+   ("s" "sync →"    emeld-dispatch-sync)
+   ("F" "filter →"  emeld-dispatch-filter)
+   ("v" "view →"    emeld-dispatch-view)
+   ("r" "mark →"    emeld-dispatch-mark)
+   ("O" "open →"    emeld-dispatch-open)]
+  ["Essential commands"
+   ("C"   "sync to other side (copy/delete)" emeld-copy)
+   ("m"   "mark"            emeld-mark)
+   ("o"   "hop to other pane" emeld-jump-other-side)
+   ("RET" "action (smart)"  emeld-action)
+   ("e"   "ediff"           emeld-ediff)
+   ("x"   "delete marked/at point" emeld-delete)])
 
 (define-key emeld-mode-map (kbd "?") #'emeld-dispatch)
 
