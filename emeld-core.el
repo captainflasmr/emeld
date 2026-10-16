@@ -4558,6 +4558,13 @@ node — see `emeld--node-relpath' for the equivalent slow form."
    ("v" "view"    emeld-dispatch-view)
    ("r" "mark"    emeld-dispatch-mark)
    ("O" "open"    emeld-dispatch-open)]
+  ["Show"
+   ("S" (lambda () (if emeld-show-same "[x] same" "[ ] same"))
+    (lambda () (interactive) (emeld-toggle-show-same)) :transient t)
+   ("N" (lambda () (if emeld-show-added "[x] new" "[ ] new"))
+    (lambda () (interactive) (emeld-toggle-show-added)) :transient t)
+   ("M" (lambda () (if emeld-show-different "[x] modified" "[ ] modified"))
+    (lambda () (interactive) (emeld-toggle-show-different)) :transient t)]
   ["Essential commands"
    ("C"   "sync to other side (copy/delete)" emeld-copy)
    ("m"   "mark"            emeld-mark)

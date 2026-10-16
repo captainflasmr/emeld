@@ -126,7 +126,9 @@ Deletions move the files to trash rather than erasing them outright.  When sever
 
 * Transient Menu (~?~)
 
-Magit-style: the top level is a single ~Transient commands~ group listing the eight sub-menu entry points, one keystroke each, with an ~Essential commands~ group below it for the most-used direct actions.  The group keys (~d~ ~T~ ~h~ ~s~ ~F~ ~v~ ~r~ ~O~) also work directly from the tree — pressing one opens its sub-menu without going through ~?~ first.  Pressing ~q~ (or ~C-g~) inside a sub-menu returns to the top level.
+Magit-style: the top level has three rows — a ~Transient commands~ group with the eight sub-menu entry points, a ~Show~ row with the file-kind toggles, and an ~Essential commands~ group for the most-used direct actions.  The group keys (~d~ ~T~ ~h~ ~s~ ~F~ ~v~ ~r~ ~O~) also work directly from the tree — pressing one opens its sub-menu without going through ~?~ first.  Pressing ~q~ (or ~C-g~) inside a sub-menu returns to the top level.
+
+Top-level row 2 is ~Show~ :: toggle file kinds — same (~S~), new (~N~), modified (~M~).
 
 - ~Compare~ (~d~) :: Start or re-scan.  ~d~ compare two directories, ~w~ dwim (guess from dired), presets (~l~ load, ~S~ save, ~X~ delete), ~g~ rescan, ~s~ rescan dir at point, ~k~ stop scan.
 - ~Git~ (~T~) :: ~G~ git revisions, ~H~ step git history (`,` older / `.` newer).
