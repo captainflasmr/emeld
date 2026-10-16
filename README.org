@@ -126,21 +126,25 @@ Deletions move the files to trash rather than erasing them outright.  When sever
 
 * Transient Menu (~?~)
 
-The transient top level has three rows of columns.  The ~Filter~ sub-menu (under ~Filename~) holds the filter-group toggles; pressing ~q~ (or ~C-g~) there returns to the top level.
+The transient top level has four rows of columns.  The ~Filter~ row sits on its own at the top; its ~Filter~ sub-menu holds the filter-group toggles; pressing ~q~ (or ~C-g~) there returns to the top level.
 
 Top level, first row:
 
-- ~Sync~ :: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point.
-- ~Diff~ :: ~d~ diff directory at point (whole root at the top level), ~P~ format patch.
-- ~Filename~ :: Open the ~Filter~ sub-menu (~F~) to toggle groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), edit ~.dir-locals.el~ (~E~), or add the node at point as a filter (~&~).
+- ~Filter~ :: Open the ~Filter~ sub-menu (~F~) to toggle groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks).
 
 Top level, second row:
+
+- ~Sync~ :: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point.
+- ~Diff~ :: ~d~ diff directory at point (whole root at the top level), ~P~ format patch.
+- ~Filter~ :: Edit ~.dir-locals.el~ (~E~), or add the node at point as a filter (~&~).
+
+Top level, third row:
 
 - ~Show~ :: Toggle what is displayed — tree-lines (~t~), tree density (~z~ cycles compact → extreme → wide), ~.gitignore~ respect (~I~), whitespace handling (~i~), commit message (~c~, git mode only), session hide (~C-k~ hide node at point, ~C-u C-k~ unhides all).
 - ~Layout~ :: Indent (~>~/~<~) and pane resize (~{~/~}~).
 - ~Mark~ :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), the full left→right mirror set (~* c~ — modified + left-only + right-only); ~U~ unmark all.
 
-Top level, third row:
+Top level, fourth row:
 
 - ~Open~ :: ~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree (soft diff a modified file, show a new/one-sided one, fold a directory), ~TAB~ peek inline diff.
 - ~Dired~ :: ~A~/~B~ jump to dired on the left/right side, ~w~ copy path.
@@ -305,6 +309,6 @@ Emeld ships with Meld-style default filter groups (see above).  Starting a compa
 
 Toggle named groups on/off from the transient menu (~?~ then ~F~) or with ~M-x emeld-toggle-filter-group~.  The header line shows the current display state; review or hand-edit the groups and their globs in ~.dir-locals.el~ with ~M-x emeld-edit-dir-locals~ (~E~), then rescan (~G~) to apply.
 
-You do not have to write ~.dir-locals.el~ by hand.  With point on a file or directory in the tree, ~&~ (~emeld-add-filter-at-point~, also under ~&~ in the transient Filename column) adds it as a filter and saves it: it prompts for the glob (defaulting to the basename — edit it to e.g. ~*.log~ or a ~sub/dir~ relative path) and the group to add it to (completing over existing names; a new name creates a new, active group), writes the updated ~emeld-filter-groups~ to ~.dir-locals.el~ at the left root, activates the group and rescans so the matching files drop out at once.  Repeat it to progressively tidy up a fresh comparison; the exclusions persist for next time.
+You do not have to write ~.dir-locals.el~ by hand.  With point on a file or directory in the tree, ~&~ (~emeld-add-filter-at-point~, also under ~&~ in the transient Filter row) adds it as a filter and saves it: it prompts for the glob (defaulting to the basename — edit it to e.g. ~*.log~ or a ~sub/dir~ relative path) and the group to add it to (completing over existing names; a new name creates a new, active group), writes the updated ~emeld-filter-groups~ to ~.dir-locals.el~ at the left root, activates the group and rescans so the matching files drop out at once.  Repeat it to progressively tidy up a fresh comparison; the exclusions persist for next time.
 
 For a *temporary* tidy-up that you do not want recorded, ~C-k~ (~emeld-hide-at-point~) hides just the node at point — and, for a directory, its subtree — for this session only.  Nothing is written to ~.dir-locals.el~, and the hide survives a rescan within the session; the header line shows a ~(!) N hidden~ note while anything is tucked away.  Restore everything with ~C-u C-k~ (~emeld-unhide-all~).  Use this when you want to declutter the view but stay interested in the item later; use ~&~ when the exclusion should be permanent.

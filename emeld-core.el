@@ -4429,6 +4429,8 @@ node — see `emeld--node-relpath' for the equivalent slow form."
 (transient-define-prefix emeld-dispatch ()
   "Transient menu for emeld."
   [:class transient-subgroups
+   [["Filter"
+     ("F" "Filter →"     emeld-dispatch-filter)]]
    [["Sync"
      ("C"   "sync to other side (copy/delete)" emeld-copy)
      ("R" (lambda () (if emeld-copy-mirror "[x] mirror copy (--delete)" "[ ] mirror copy (--delete)"))
@@ -4437,8 +4439,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
     ["Diff"
      ("d"   "diff dir at point"   emeld-diff-dir)
      ("P"   "format as patch"    emeld-format-patch)]
-    ["Filename"
-     ("F" "Filter →"     emeld-dispatch-filter)
+    ["Filter"
      ("E" "edit .dir-locals.el" emeld-edit-dir-locals)
      ("&" "filter node at point" emeld-add-filter-at-point)]]
    [["Show"
