@@ -2440,6 +2440,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "r")   #'emeld-dispatch-mark)
     (define-key map (kbd "O")   #'emeld-dispatch-open)
     (define-key map (kbd "T")   #'emeld-dispatch-git)
+    (define-key map (kbd "h")   #'emeld-dispatch-diff)
     (define-key map (kbd ">")   #'emeld-grow-column)
     (define-key map (kbd "<")   #'emeld-shrink-column)
     (define-key map (kbd "}")   #'emeld-increase-indent)
@@ -4484,16 +4485,19 @@ node — see `emeld--node-relpath' for the equivalent slow form."
    ("." "history newer" emeld-git-history-newer)])
 
 (transient-define-prefix emeld-dispatch-sync ()
-  "Sync, delete, or diff nodes."
-  [["Sync"
-    ("C"   "sync to other side (copy/delete)" emeld-copy)
-    ("R" (lambda () (if emeld-copy-mirror "[x] mirror copy (--delete)" "[ ] mirror copy (--delete)"))
-     (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
-    ("x"   "delete marked/at point" emeld-delete)
-    ("D"   "delete at point (this pane)" emeld-delete-at-point)]
-   ["Diff"
-    ("d"   "diff dir at point"   emeld-diff-dir)
-    ("P"   "format as patch"    emeld-format-patch)]])
+  "Sync files or delete nodes."
+  ["Sync"
+   ("C"   "sync to other side (copy/delete)" emeld-copy)
+   ("R" (lambda () (if emeld-copy-mirror "[x] mirror copy (--delete)" "[ ] mirror copy (--delete)"))
+    (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
+   ("x"   "delete marked/at point" emeld-delete)
+   ("D"   "delete at point (this pane)" emeld-delete-at-point)])
+
+(transient-define-prefix emeld-dispatch-diff ()
+  "Diff a directory or export a patch."
+  ["Diff"
+   ("d"   "diff dir at point"   emeld-diff-dir)
+   ("P"   "format as patch"    emeld-format-patch)])
 
 (transient-define-prefix emeld-dispatch-view ()
   "Show, hide, and layout options."
@@ -4527,7 +4531,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
    ("u"   "unmark"          emeld-unmark :transient t)
    ("* m" "modified"        emeld-mark-modified :transient t)
    ("* l" "left-only (new)" emeld-mark-left-only :transient t)
-   ("* c" "→ mirror right"  emeld-mark-to-copy :transient t)
+   ("* c" "mirror right"  emeld-mark-to-copy :transient t)
    ("U"   "unmark all"      emeld-unmark-all :transient t)])
 
 (transient-define-prefix emeld-dispatch-open ()
@@ -4546,13 +4550,14 @@ node — see `emeld--node-relpath' for the equivalent slow form."
 (transient-define-prefix emeld-dispatch ()
   "Transient menu for emeld."
   ["Transient commands"
-   ("d" "compare →" emeld-dispatch-compare)
-   ("T" "git →"     emeld-dispatch-git)
-   ("s" "sync →"    emeld-dispatch-sync)
-   ("F" "filter →"  emeld-dispatch-filter)
-   ("v" "view →"    emeld-dispatch-view)
-   ("r" "mark →"    emeld-dispatch-mark)
-   ("O" "open →"    emeld-dispatch-open)]
+   ("d" "compare" emeld-dispatch-compare)
+   ("T" "git"     emeld-dispatch-git)
+   ("h" "diff"    emeld-dispatch-diff)
+   ("s" "sync"    emeld-dispatch-sync)
+   ("F" "filter"  emeld-dispatch-filter)
+   ("v" "view"    emeld-dispatch-view)
+   ("r" "mark"    emeld-dispatch-mark)
+   ("O" "open"    emeld-dispatch-open)]
   ["Essential commands"
    ("C"   "sync to other side (copy/delete)" emeld-copy)
    ("m"   "mark"            emeld-mark)

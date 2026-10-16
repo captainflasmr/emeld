@@ -126,17 +126,18 @@ Deletions move the files to trash rather than erasing them outright.  When sever
 
 * Transient Menu (~?~)
 
-Magit-style: the top level is a single ~Transient commands~ group listing the seven sub-menu entry points, one keystroke each, with an ~Essential commands~ group below it for the most-used direct actions.  The group keys (~d~ ~T~ ~s~ ~F~ ~v~ ~r~ ~O~) also work directly from the tree — pressing one opens its sub-menu without going through ~?~ first.  Pressing ~q~ (or ~C-g~) inside a sub-menu returns to the top level.
+Magit-style: the top level is a single ~Transient commands~ group listing the eight sub-menu entry points, one keystroke each, with an ~Essential commands~ group below it for the most-used direct actions.  The group keys (~d~ ~T~ ~h~ ~s~ ~F~ ~v~ ~r~ ~O~) also work directly from the tree — pressing one opens its sub-menu without going through ~?~ first.  Pressing ~q~ (or ~C-g~) inside a sub-menu returns to the top level.
 
 - ~Compare~ (~d~) :: Start or re-scan.  ~d~ compare two directories, ~w~ dwim (guess from dired), presets (~l~ load, ~S~ save, ~X~ delete), ~g~ rescan, ~s~ rescan dir at point, ~k~ stop scan.
 - ~Git~ (~T~) :: ~G~ git revisions, ~H~ step git history (`,` older / `.` newer).
-- ~Act — Sync~ (~s~) :: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point, ~D~ delete at point (this pane); ~d~ diff directory at point, ~P~ format patch.
+- ~Act — Sync~ (~s~) :: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point, ~D~ delete at point (this pane).
+- ~Act — Diff~ (~h~) :: ~d~ diff directory at point (whole root at the top level), ~P~ format patch.
 - ~Act — Filter~ (~F~) :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), edit ~.dir-locals.el~ (~E~), or add the node at point as a filter (~&~).
 - ~Inspect — View~ (~v~) :: Toggle what is displayed — tree-lines (~t~), tree density (~z~ cycles compact → extreme → wide), ~.gitignore~ respect (~I~), whitespace handling (~i~), commit message (~c~, git mode only), session hide (~C-k~ hide node at point, ~C-u C-k~ unhides all); pane resize (~<~/~>~) and indent (~{~/~}~).
 - ~Inspect — Mark~ (~r~) :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), the full left→right mirror set (~* c~ — modified + left-only + right-only); ~U~ unmark all.
 - ~Inspect — Open~ (~O~) :: ~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree (soft diff a modified file, show a new/one-sided one, fold a directory), ~TAB~ peek inline diff, ~o~ hop to other pane; ~A~/~B~ jump to dired on the left/right side, ~w~ copy path.
 
-Most commands keep a direct key binding in ~emeld-mode~ (see below); the sub-menu keys (~d~ ~T~ ~s~ ~F~ ~v~ ~r~ ~O~) open their menu from the tree, and everything inside stays one more keystroke away (e.g. ~s d~ to diff a directory) — so the hierarchy stays discoverable without losing keyboard access.
+Most commands keep a direct key binding in ~emeld-mode~ (see below); the sub-menu keys (~d~ ~T~ ~h~ ~s~ ~F~ ~v~ ~r~ ~O~) open their menu from the tree, and everything inside stays one more keystroke away (e.g. ~h d~ to diff a directory) — so the hierarchy stays discoverable without losing keyboard access.
 
 * Key Bindings
 | Key       | Action                                            |
@@ -151,7 +152,8 @@ Most commands keep a direct key binding in ~emeld-mode~ (see below); the sub-men
 | v         | View sub-menu (toggles and layout)                |
 | A         | Dired the left side (node at point, or left root) |
 | B         | Dired the right side (node at point, or right root) |
-| d         | Compare sub-menu (dirs, dwim, git, presets, rescan; diff-dir now under Sync) |
+| d         | Compare sub-menu (dirs, dwim, presets, rescan; diff-dir now under Diff) |
+| h         | Diff sub-menu (diff dir at point, format patch) |
 | C         | Sync marked nodes to the other side (mark file side → copy, empty/struck side → delete) or node at point |
 | s         | Sync sub-menu (copy, delete, diff-dir)              |
 | x         | Delete marked nodes (each from its marked side) or node at point |
