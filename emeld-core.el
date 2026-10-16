@@ -2413,6 +2413,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "C")   #'emeld-copy)
     (define-key map (kbd "w")   #'emeld-copy-path-at-point)
     (define-key map (kbd "x")   #'emeld-delete)
+    (define-key map (kbd "D")   #'emeld-delete-at-point)
     (define-key map (kbd "d")   #'emeld-diff-dir)
     (define-key map (kbd "c")   #'emeld-git-toggle-commit-message)
     (define-key map (kbd ",")   #'emeld-git-history-older)
@@ -3875,6 +3876,28 @@ point is deleted from the current side (the column point is in)."
                 (message "Deleted %s from %s side" (emeld-node-name node) side))
             (error (message "Delete failed: %s" (error-message-string err)))))))))
 
+(defun emeld-delete-at-point ()
+  "Delete the file/directory at point on the current side (Dired-style).
+Unlike `emeld-delete', any marks are ignored: only the node at point is
+deleted, from the side (pane) point is in."
+  (interactive)
+  (when emeld--git-mode
+    (user-error "Delete is not available when comparing git revisions"))
+  (let* ((on-left (< (current-column) emeld--column-width))
+         (side (if on-left "left" "right"))
+         (node (get-text-property (point) 'emeld-node))
+         (path (and node (if on-left (emeld-node-left-path node)
+                           (emeld-node-right-path node)))))
+    (unless node (user-error "No node at point"))
+    (unless path (user-error "No file on %s side to delete" side))
+    (when (yes-or-no-p (format "Delete %s from %s side?" (emeld-node-name node) side))
+      (condition-case err
+          (progn
+            (emeld--delete-one path)
+            (emeld--update-after-copy (list (emeld--node-relpath node)))
+            (message "Deleted %s from %s side" (emeld-node-name node) side))
+        (error (message "Delete failed: %s" (error-message-string err)))))))
+
 (defun emeld-swap-panes ()
   "Swap the left and right comparison directories and flip all node paths.
 In git mode the two revisions are swapped and the comparison re-scanned."
@@ -4435,7 +4458,8 @@ node — see `emeld--node-relpath' for the equivalent slow form."
      ("C"   "sync to other side (copy/delete)" emeld-copy)
      ("R" (lambda () (if emeld-copy-mirror "[x] mirror copy (--delete)" "[ ] mirror copy (--delete)"))
       (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
-     ("x"   "delete marked/at point" emeld-delete)]
+     ("x"   "delete marked/at point" emeld-delete)
+     ("D"   "delete at point (this pane)" emeld-delete-at-point)]
     ["Diff"
      ("d"   "diff dir at point"   emeld-diff-dir)
      ("P"   "format as patch"    emeld-format-patch)]
@@ -4474,9 +4498,9 @@ node — see `emeld--node-relpath' for the equivalent slow form."
    [["Open"
      ("RET" "action (smart)"     emeld-action)
      ("e"   "ediff"              emeld-ediff)
-     ("="   "diff / open / fold" emeld-soft-diff)
-     ("SPC" "diff / open / fold" emeld-soft-diff)
-     ("TAB" "peek inline diff (file)" emeld-toggle-inline-diff :transient t)]
+     ("="   "diff / open / fold (SPC)" emeld-soft-diff)
+     ("TAB" "peek inline diff (file)" emeld-toggle-inline-diff :transient t)
+     ("o" "hop to other pane" emeld-jump-other-side :transient t)]
     ["Dired"
      ("A"   "dired left side"    emeld-dired-left)
      ("B"   "dired right side"   emeld-dired-right)

@@ -134,7 +134,7 @@ Top level, first row:
 
 Top level, second row:
 
-- ~Sync~ :: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point.
+- ~Sync~ :: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point, ~D~ delete at point (this pane).
 - ~Diff~ :: ~d~ diff directory at point (whole root at the top level), ~P~ format patch.
 - ~Filter~ :: Edit ~.dir-locals.el~ (~E~), or add the node at point as a filter (~&~).
 
@@ -146,7 +146,7 @@ Top level, third row:
 
 Top level, fourth row:
 
-- ~Open~ :: ~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree (soft diff a modified file, show a new/one-sided one, fold a directory), ~TAB~ peek inline diff.
+- ~Open~ :: ~RET~ smart action, ~e~ ediff, ~=~/~SPC~ preview without leaving the tree (soft diff a modified file, show a new/one-sided one, fold a directory), ~TAB~ peek inline diff, ~o~ hop to other pane.
 - ~Dired~ :: ~A~/~B~ jump to dired on the left/right side, ~w~ copy path.
 - ~Version Control~ :: Switch comparison source — ~G~ compare two git revisions, ~H~ step through git history one commit at a time.
 - ~Preset~ :: Save the current directory pair (~S~), load a saved pair (~l~), delete one (~X~).
@@ -168,6 +168,7 @@ Every command keeps its direct key binding in ~emeld-mode~ (see below), so the m
 | d         | Diff directory at point (recursive; file → its dir, root at top level) |
 | C         | Sync marked nodes to the other side (mark file side → copy, empty/struck side → delete) or node at point |
 | x         | Delete marked nodes (each from its marked side) or node at point |
+| D         | Delete node at point on current side (ignores marks) |
 | P         | Format as patch (unified diff)                    |
 | w         | Copy filename (C-u w for full path)               |
 | SPC       | Preview (point stays in tree): fold (Dir), soft diff (modified), show file (new) |
