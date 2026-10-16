@@ -355,6 +355,49 @@ must reuse them rather than create siblings with the same name."
     (emeld--set-mark "x" 'right nil)
     (should-not (gethash "x" emeld--marked-paths))))
 
+(ert-deftest emeld-file-meta-string ()
+  "`emeld--file-meta-string' annotates existing files only, in dir mode."
+  (let ((f (make-temp-file "emeld-meta" nil ".txt")))
+    (unwind-protect
+        (progn
+          (with-temp-file f (insert "hello"))
+          ;; Off by default.
+          (let ((emeld-show-file-meta nil) (emeld--git-mode nil))
+            (should-not (emeld--file-meta-string f nil)))
+          ;; On: size tag with the meta face.
+          (let ((emeld-show-file-meta t) (emeld--git-mode nil))
+            (let ((s (emeld--file-meta-string f nil)))
+              (should (string-match-p "(5 " s))
+              (should (eq (get-text-property 0 'face s) 'emeld-meta-face)))
+            ;; Directories, missing paths, and git mode give nil.
+            (should-not (emeld--file-meta-string f t))
+            (should-not (emeld--file-meta-string "/nonexistent-emeld" nil)))
+          (let ((emeld-show-file-meta t) (emeld--git-mode t))
+            (should-not (emeld--file-meta-string f nil))))
+      (delete-file f))))
+
+(ert-deftest emeld-render-file-meta ()
+  "Rendered file rows carry per-side size tags when enabled."
+  (let ((l (make-temp-file "emeld-meta-l" nil ".txt"))
+        (r (make-temp-file "emeld-meta-r" nil ".txt")))
+    (unwind-protect
+        (progn
+          (with-temp-file l (insert "twelve-bytes!"))
+          (with-temp-file r (insert "six!"))
+          (with-temp-buffer
+            (setq-local emeld--marked-paths (make-hash-table :test #'equal))
+            (setq-local emeld--git-mode nil)
+            (let ((emeld-show-file-meta t)
+                  (emeld-show-strikethrough t)
+                  (node (emeld-node-create :name "f.txt" :left-path l
+                                           :right-path r
+                                           :diff-status 'different)))
+              (emeld--render-nodes (list node) "" 60)
+              (should (string-match-p "(13 " (buffer-string)))
+              (should (string-match-p "(4 " (buffer-string))))))
+      (delete-file l)
+      (delete-file r))))
+
 (ert-deftest emeld-same-list-exclusions ()
   "The `list' same-merge keeps only genuinely-identical left files.
 Existing file nodes and files under a left-only directory are excluded;

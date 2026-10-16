@@ -166,6 +166,17 @@ When nil, only the directory hierarchy is displayed."
   :type 'boolean
   :group 'emeld)
 
+(defcustom emeld-show-file-meta nil
+  "Whether to annotate files with size and modification time.
+When non-nil, each file row shows a dim \"(SIZE MM-DD HH:MM)\" tag
+after the name on every side where the file exists.  Directories
+never show it, and it is hidden in git-revision comparisons (where
+the on-disk work tree does not reflect the compared content).
+Needs one `file-attributes' call per visible file per render, so it
+can slow down very large trees — leave it off unless wanted."
+  :type 'boolean
+  :group 'emeld)
+
 (defcustom emeld-column-ratio 50
   "Width of the left column as a percentage of the window width (10-90).
 Defaults to 50 for equal-width panes."
@@ -2391,6 +2402,11 @@ Mimics Meld's display of missing files."
   "Face for directory names (overrides diff-status faces)."
   :group 'emeld)
 
+(defface emeld-meta-face
+  '((t :inherit shadow))
+  "Face for the file size/mtime annotations (`emeld-show-file-meta')."
+  :group 'emeld)
+
 (defvar emeld-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "TAB") #'emeld-cycle-subtree)
@@ -2631,6 +2647,13 @@ use rsync (see `emeld-copy-method')."
   (interactive)
   (setq emeld-show-added (not emeld-show-added))
   (message "Show new: %s" (if emeld-show-added "on" "off"))
+  (emeld--render))
+
+(defun emeld-toggle-show-file-meta ()
+  "Toggle size/mtime annotations on file rows (`emeld-show-file-meta')."
+  (interactive)
+  (setq emeld-show-file-meta (not emeld-show-file-meta))
+  (message "Show file meta: %s" (if emeld-show-file-meta "on" "off"))
   (emeld--render))
 
 (defun emeld-toggle-gitignore ()
@@ -4074,6 +4097,23 @@ reflects the live scan counters without needing to be re-installed."
 (defvar emeld--render-seek-pos nil
   "Line start of the matched seek node, set by `emeld--render-nodes'.")
 
+(defun emeld--file-meta-string (path is-dir)
+  "Return a dim \" (SIZE MM-DD HH:MM)\" tag for PATH, or nil.
+Returns nil unless `emeld-show-file-meta' is on, PATH names an
+existing file, NODE is not a directory (IS-DIR nil), and the buffer
+is not comparing git revisions (where on-disk attributes would
+describe the work tree, not the compared content)."
+  (when (and emeld-show-file-meta path (not is-dir) (not emeld--git-mode))
+    (let ((attrs (file-attributes path)))
+      (when attrs
+        (propertize (format " (%s %s)"
+                            (file-size-human-readable
+                             (file-attribute-size attrs))
+                            (format-time-string
+                             "%m-%d %H:%M"
+                             (file-attribute-modification-time attrs)))
+                    'face 'emeld-meta-face)))))
+
 (defun emeld--render ()
   "Render the current visible tree into the comparison buffer, preserving point."
   (let* ((inhibit-read-only t)
@@ -4352,6 +4392,9 @@ node — see `emeld--node-relpath' for the equivalent slow form."
                 (progn
                   (insert dir-indicator)
                   (insert (propertize (emeld-node-name node) 'face name-face))
+                  (insert (or (emeld--file-meta-string (emeld-node-left-path node)
+                                                       (emeld-node-is-dir node))
+                              ""))
                   (insert scan-marker))
               (when (and emeld-show-strikethrough (eq status 'right-only))
                 (insert dir-indicator)
@@ -4373,6 +4416,9 @@ node — see `emeld--node-relpath' for the equivalent slow form."
                   (insert (propertize (or (emeld-node-name-right node)
                                           (emeld-node-name node))
                                       'face name-face))
+                  (insert (or (emeld--file-meta-string (emeld-node-right-path node)
+                                                       (emeld-node-is-dir node))
+                              ""))
                   (insert scan-marker))
               (when (and emeld-show-strikethrough (eq status 'left-only))
                 (insert dir-indicator)
@@ -4517,7 +4563,9 @@ node — see `emeld--node-relpath' for the equivalent slow form."
     ("c" (lambda () (if emeld--git-commit-expanded "[x] commit msg" "[ ] commit msg"))
      (lambda () (interactive) (emeld-git-toggle-commit-message)) :transient t
      :if (lambda () emeld--git-mode))
-    ("C-k" "hide node (C-u: unhide all)" emeld-hide-at-point)]
+    ("C-k" "hide node (C-u: unhide all)" emeld-hide-at-point)
+    ("f" (lambda () (if emeld-show-file-meta "[x] file meta" "[ ] file meta"))
+     (lambda () (interactive) (emeld-toggle-show-file-meta)) :transient t)]
    ["Layout"
     (">" "pane wider"   emeld-grow-column :transient t)
     ("<" "pane narrow"  emeld-shrink-column :transient t)
