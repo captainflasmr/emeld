@@ -4031,6 +4031,49 @@ deleted, from the side (pane) point is in.  Undo with
             (message "Deleted %s from %s side" (emeld-node-name node) side))
         (error (message "Delete failed: %s" (error-message-string err)))))))
 
+(defun emeld--apply-undo (op)
+  "Reverse op-log entry OP in the current emeld buffer.
+Returns `done' when the entry was reversed or is permanently
+un-restorable (drop it), or `keep' when blocked but retryable.
+Messages describe the outcome and the affected node is refreshed."
+  (pcase (plist-get op :type)
+    ('delete
+     (let ((orig (plist-get op :path))
+           (trash (plist-get op :trash)))
+       (cond
+        ((not (and trash (file-exists-p trash)))
+         (message "Cannot undo delete of %s: no longer in trash"
+                  (file-name-nondirectory orig))
+         'gone)
+        ((file-exists-p orig)
+         (message "Cannot undo: %s already exists (entry kept for retry)" orig)
+         'keep)
+        (t
+         (make-directory (file-name-directory orig) t)
+         (rename-file trash orig)
+         ;; A restore can resurrect dropped nodes or flip rows
+         ;; between one-sided and identical (hidden while Same
+         ;; is off) — transitions the surgical update cannot
+         ;; represent — so rescan the whole comparison.
+         (emeld-refresh)
+         (message "Restored %s" orig)
+         'done))))
+    ('copy
+     (let ((dest (plist-get op :dest)))
+       (cond
+        ((not (file-exists-p dest))
+         (message "Copied file already gone: %s" dest)
+         'gone)
+        (t
+         (emeld--delete-one dest)
+         (emeld--update-after-copy (list (emeld--rel-from-abs dest)))
+         (message "Removed copied %s (to trash)%s" dest
+                  (if (plist-get op :mirror)
+                      " — files pruned by mirroring are not restored"
+                    ""))
+         'done))))
+    (_ (message "Unknown operation, dropped") 'gone)))
+
 (defun emeld-undo-last-op ()
   "Undo the most recent logged delete or copy in this comparison.
 A delete restores the file from trash to its original path
@@ -4045,40 +4088,90 @@ See `emeld--op-log'."
     (user-error "No operations to undo"))
   (let ((op (pop emeld--op-log)))
     (condition-case err
-        (pcase (plist-get op :type)
-          ('delete
-           (let ((orig (plist-get op :path))
-                 (trash (plist-get op :trash)))
-             (cond
-              ((not (and trash (file-exists-p trash)))
-               (message "Cannot undo delete of %s: no longer in trash"
-                        (file-name-nondirectory orig)))
-              ((file-exists-p orig)
-               (user-error "Cannot undo: %s already exists" orig))
-              (t
-               (make-directory (file-name-directory orig) t)
-               (rename-file trash orig)
-               ;; A restore can resurrect dropped nodes or flip rows
-               ;; between one-sided and identical (hidden while Same
-               ;; is off) — transitions the surgical update cannot
-               ;; represent — so rescan the whole comparison.
-               (emeld-refresh)
-               (message "Restored %s" orig)))))
-          ('copy
-           (let ((dest (plist-get op :dest)))
-             (cond
-              ((not (file-exists-p dest))
-               (message "Copied file already gone: %s" dest))
-              (t
-               (emeld--delete-one dest)
-               (emeld--update-after-copy (list (emeld--rel-from-abs dest)))
-               (message "Removed copied %s (to trash)%s" dest
-                        (if (plist-get op :mirror)
-                            " — files pruned by mirroring are not restored"
-                          ""))))))
-          (_ (message "Unknown operation, dropped")))
+        (when (eq (emeld--apply-undo op) 'keep)
+          (push op emeld--op-log))
       (error (push op emeld--op-log)
              (message "Undo failed: %s" (error-message-string err))))))
+
+(defun emeld--op-row (op)
+  "Tabulated row vector describing op-log entry OP."
+  (vector (format-time-string "%m-%d %H:%M" (plist-get op :time))
+          (symbol-name (plist-get op :type))
+          (pcase (plist-get op :type)
+            ('delete (format "%s (in trash)" (plist-get op :path)))
+            ('copy (format "%s to %s%s"
+                           (plist-get op :src) (plist-get op :dest)
+                           (if (plist-get op :mirror) " [mirror]" "")))
+            (_ "?"))))
+
+(defvar-local emeld--op-source-buffer nil
+  "In an `emeld-operations-mode' buffer, the comparison it lists.")
+
+(defvar emeld-operations-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "u") #'emeld-operations-undo)
+    (define-key map (kbd "RET") #'emeld-operations-undo)
+    (define-key map (kbd "g") #'revert-buffer)
+    map)
+  "Keymap for `emeld-operations-mode'.")
+
+(define-derived-mode emeld-operations-mode tabulated-list-mode "Emeld-Ops"
+  "List an emeld comparison's undoable operations, newest first.
+`u' (or RET) undoes the entry at point; `g' refreshes; `q' quits."
+  (setq tabulated-list-format [("Time" 12 t) ("Op" 8 t) ("Detail" 0 nil)])
+  (setq tabulated-list-sort-key nil)
+  (tabulated-list-init-header))
+
+(defun emeld--operations-refresh ()
+  "Re-list `emeld--op-log' from the source comparison buffer."
+  (let ((src (and (boundp 'emeld--op-source-buffer)
+                  emeld--op-source-buffer)))
+    (setq tabulated-list-entries
+          (if (buffer-live-p src)
+              (let ((i -1))
+                (mapcar (lambda (op)
+                          (setq i (1+ i))
+                          (list i (emeld--op-row op)))
+                        (buffer-local-value 'emeld--op-log src)))
+            (message "Comparison buffer is gone")
+            nil))
+    (tabulated-list-print t)))
+
+(defun emeld-list-operations ()
+  "List this comparison's undoable operations (`emeld--op-log').
+`u' (or RET) on a line undoes that entry; each entry carries its
+own safety checks, so out-of-order undo is safe."
+  (interactive)
+  (let ((src (current-buffer)))
+    (with-current-buffer (get-buffer-create "*emeld-operations*")
+      (emeld-operations-mode)
+      (setq-local emeld--op-source-buffer src)
+      (setq-local revert-buffer-function #'emeld--operations-revert)
+      (emeld--operations-refresh)))
+  (switch-to-buffer "*emeld-operations*"))
+
+(defun emeld--operations-revert (&rest _ignore)
+  "Revert function for `emeld-operations-mode'."
+  (emeld--operations-refresh))
+
+(defun emeld-operations-undo ()
+  "Undo the operation on the current line of `emeld-list-operations'."
+  (interactive)
+  (let ((src emeld--op-source-buffer))
+    (unless (buffer-live-p src)
+      (user-error "Comparison buffer is gone"))
+    (let* ((id (tabulated-list-get-id))
+           (op (and (integerp id)
+                    (with-current-buffer src
+                      (nth id emeld--op-log)))))
+      (unless op
+        (user-error "No operation on this line"))
+      (condition-case err
+          (with-current-buffer src
+            (unless (eq (emeld--apply-undo op) 'keep)
+              (setq emeld--op-log (delq op emeld--op-log))))
+        (error (message "Undo failed: %s" (error-message-string err)))))
+    (emeld--operations-refresh)))
 
 (defun emeld-swap-panes ()
   "Swap the left and right comparison directories and flip all node paths.
@@ -4691,7 +4784,8 @@ node — see `emeld--node-relpath' for the equivalent slow form."
    ("R" (lambda () (if emeld-copy-mirror "[x] mirror copy (--delete)" "[ ] mirror copy (--delete)"))
     (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
    ("x"   "delete marked/at point" emeld-delete)
-   ("D"   "delete at point (this pane)" emeld-delete-at-point)])
+   ("D"   "delete at point (this pane)" emeld-delete-at-point)
+   ("l"   "list operations" emeld-list-operations)])
 
 (transient-define-prefix emeld-dispatch-diff ()
   "Diff a directory or export a patch."

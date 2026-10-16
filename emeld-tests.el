@@ -479,6 +479,55 @@ must reuse them rather than create siblings with the same name."
     (setq-local emeld--op-log nil)
     (should-error (emeld-undo-last-op))))
 
+(ert-deftest emeld-list-operations-shows-log ()
+  "`emeld-list-operations' renders one row per logged entry."
+  (let ((src (generate-new-buffer " *emeld-ops-src*")))
+    (unwind-protect
+        (progn
+          (with-current-buffer src
+            (setq-local emeld--op-log
+                        (list (list :type 'delete :path "/l/gone.txt"
+                                    :trash "/trash/gone.txt"
+                                    :time (current-time) :is-dir nil)
+                              (list :type 'copy :src "/l/a.txt" :dest "/r/a.txt"
+                                    :time (current-time) :is-dir nil
+                                    :mirror nil)))
+            (emeld-list-operations))
+          (with-current-buffer "*emeld-operations*"
+            (should (eq major-mode 'emeld-operations-mode))
+            (goto-char (point-min))
+            (search-forward "gone.txt")
+            (goto-char (point-min))
+            (search-forward "a.txt"))
+          (kill-buffer "*emeld-operations*"))
+      (when (buffer-live-p src) (kill-buffer src)))))
+
+(ert-deftest emeld-operations-undo-from-point ()
+  "Undoing a viewer row reverses that entry and drains it from the log."
+  (let* ((tmp (make-temp-file "emeld-ops" t))
+         (trash-directory (expand-file-name "TRASH" tmp))
+         (dest (expand-file-name "copied.txt" tmp))
+         (src (generate-new-buffer " *emeld-ops-src*")))
+    (unwind-protect
+        (progn
+          (with-temp-file dest (insert "copied"))
+          (with-current-buffer src
+            (setq-local emeld--left-root tmp
+                        emeld--right-root tmp
+                        emeld--op-log (list (list :type 'copy :src "/elsewhere/a.txt"
+                                                 :dest dest :time (current-time)
+                                                 :is-dir nil :mirror nil)))
+            (emeld-list-operations))
+          (with-current-buffer "*emeld-operations*"
+            (goto-char (point-min))
+            (cl-letf (((symbol-function 'emeld-refresh) (lambda () nil)))
+              (emeld-operations-undo)))
+          (should-not (file-exists-p dest))
+          (should (null (buffer-local-value 'emeld--op-log src)))
+          (kill-buffer "*emeld-operations*"))
+      (when (buffer-live-p src) (kill-buffer src))
+      (delete-directory tmp t))))
+
 (ert-deftest emeld-copy-sync-logs ()
   "Synchronous copies push undoable log entries."
   (let* ((left (make-temp-file "emeldL" t))
