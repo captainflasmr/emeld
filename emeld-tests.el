@@ -398,6 +398,109 @@ must reuse them rather than create siblings with the same name."
       (delete-file l)
       (delete-file r))))
 
+(ert-deftest emeld-delete-one-captures-trash ()
+  "`emeld--delete-one' returns the trash location it moved PATH to."
+  (let* ((tmp (make-temp-file "emeld-trash" t))
+         (trash-directory (expand-file-name "TRASH" tmp))
+         (f (expand-file-name "v.txt" tmp)))
+    (unwind-protect
+        (progn
+          (with-temp-file f (insert "x"))
+          (let ((trash (emeld--delete-one f)))
+            (should-not (file-exists-p f))
+            (should (stringp trash))
+            (should (file-exists-p trash))))
+      (delete-directory tmp t))))
+
+(ert-deftest emeld-delete-at-point-logs-and-undo-restores ()
+  "Deleting at point logs a restorable entry; undo brings the file back."
+  (let* ((left (make-temp-file "emeldL" t))
+         (right (make-temp-file "emeldR" t))
+         (tmp (make-temp-file "emeld-trash" t))
+         (trash-directory (expand-file-name "TRASH" tmp)))
+    (unwind-protect
+        (progn
+          (with-temp-file (expand-file-name "v.txt" left) (insert "data"))
+          (with-temp-buffer
+            (setq-local emeld--left-root left
+                        emeld--right-root right
+                        emeld--column-width 40
+                        emeld--marked-paths (make-hash-table :test #'equal)
+                        emeld--op-log nil)
+            (let ((node (emeld-node-create :name "v.txt"
+                                           :left-path (expand-file-name "v.txt" left)
+                                           :right-path nil))
+                  (refreshed 0))
+              (insert (propertize "v" 'emeld-node node))
+              (goto-char (point-min))
+              (cl-letf (((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+                        ((symbol-function 'emeld-refresh)
+                         (lambda (&rest _) (setq refreshed (1+ refreshed)))))
+                (emeld-delete-at-point)
+                (should-not (file-exists-p (expand-file-name "v.txt" left)))
+                (should (= 1 (length emeld--op-log)))
+                (let ((before refreshed))
+                  (emeld-undo-last-op)
+                  ;; Undoing a delete rescans the whole comparison so the
+                  ;; restored file shows up.
+                  (should (> refreshed before)))
+                (should (file-exists-p (expand-file-name "v.txt" left)))
+                (should (equal "data" (with-temp-buffer
+                                        (insert-file-contents (expand-file-name "v.txt" left))
+                                        (buffer-string))))
+                (should (null emeld--op-log))))))
+      (delete-directory left t)
+      (delete-directory right t)
+      (delete-directory tmp t))))
+
+(ert-deftest emeld-undo-copy-removes-dest ()
+  "Undoing a copy entry trashes the copied destination."
+  (let* ((tmp (make-temp-file "emeld-undo" t))
+         (trash-directory (expand-file-name "TRASH" tmp))
+         (dest (expand-file-name "copied.txt" tmp)))
+    (unwind-protect
+        (progn
+          (with-temp-file dest (insert "copied"))
+          (with-temp-buffer
+            (setq-local emeld--left-root tmp
+                        emeld--right-root tmp
+                        emeld--op-log (list (list :type 'copy :src "/elsewhere/a.txt"
+                                                 :dest dest :time (current-time)
+                                                 :is-dir nil :mirror nil)))
+            (cl-letf (((symbol-function 'emeld-refresh) (lambda () nil)))
+              (emeld-undo-last-op)
+              (should-not (file-exists-p dest))
+              (should (null emeld--op-log)))))
+      (delete-directory tmp t))))
+
+(ert-deftest emeld-undo-empty-errors ()
+  "Undo with an empty log signals an error."
+  (with-temp-buffer
+    (setq-local emeld--op-log nil)
+    (should-error (emeld-undo-last-op))))
+
+(ert-deftest emeld-copy-sync-logs ()
+  "Synchronous copies push undoable log entries."
+  (let* ((left (make-temp-file "emeldL" t))
+         (right (make-temp-file "emeldR" t)))
+    (unwind-protect
+        (progn
+          (with-temp-file (expand-file-name "a.txt" left) (insert "x"))
+          (with-temp-buffer
+            (setq-local emeld--left-root left
+                        emeld--right-root right
+                        emeld--marked-paths (make-hash-table :test #'equal)
+                        emeld--op-log nil)
+            (cl-letf (((symbol-function 'emeld-refresh) (lambda () nil)))
+              (emeld--copy-sync
+               (list (cons (expand-file-name "a.txt" left) right))
+               '("a.txt"))
+              (should (file-exists-p (expand-file-name "a.txt" right)))
+              (should (= 1 (length emeld--op-log)))
+              (should (eq 'copy (plist-get (car emeld--op-log) :type))))))
+      (delete-directory left t)
+      (delete-directory right t))))
+
 (ert-deftest emeld-same-list-exclusions ()
   "The `list' same-merge keeps only genuinely-identical left files.
 Existing file nodes and files under a left-only directory are excluded;

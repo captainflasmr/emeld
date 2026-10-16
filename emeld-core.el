@@ -3581,18 +3581,20 @@ directories."
             (delete-file dest))
           (copy-directory source dest t t))
       (copy-file source dest t))
-    (message "Copied %s" (file-name-nondirectory (directory-file-name source)))))
+    (message "Copied %s" (file-name-nondirectory (directory-file-name source)))
+    dest))
 
 (defun emeld--find-node (rel)
   "Return the tree node whose relative path is REL, or nil.
 Descends from `emeld--root-node' matching each path component against
-child node names."
-  (let ((node emeld--root-node))
-    (catch 'done
-      (dolist (part (split-string rel "/" t) node)
-        (setq node (cl-find part (emeld-node-children node)
-                            :key #'emeld-node-name :test #'string=))
-        (unless node (throw 'done nil))))))
+child node names.  Returns nil when REL is nil or no tree is loaded."
+  (when (and rel emeld--root-node)
+    (let ((node emeld--root-node))
+      (catch 'done
+        (dolist (part (split-string rel "/" t) node)
+          (setq node (cl-find part (emeld-node-children node)
+                              :key #'emeld-node-name :test #'string=))
+          (unless node (throw 'done nil)))))))
 
 (defun emeld--rel-from-abs (abs)
   "Return ABS relative to whichever comparison root contains it, else nil."
@@ -3673,13 +3675,15 @@ located in the tree."
           (setq ok nil))))
     (if ok (emeld--render) (emeld-refresh))))
 
-(defun emeld--copy-async (jobs rels)
+(defun emeld--copy-async (jobs rels mirror)
   "Copy JOBS via rsync, one at a time, asynchronously.
 JOBS is a list of (SOURCE . DEST-ROOT).  RELS are the relative paths the
 overall sync touched (copies and any deletions already performed); on
 completion only those nodes are updated in place (`emeld--update-after-copy'),
-marks are cleared and a summary is reported.  rsync output is logged to
-the hidden buffer ` *emeld-rsync*'."
+marks are cleared and a summary is reported.  MIRROR non-nil records that
+destination-only files may have been pruned (not restorable by undo).
+Successful copies are pushed to `emeld--op-log' for `emeld-undo-last-op'.
+rsync output is logged to the hidden buffer ` *emeld-rsync*'."
   (when (and emeld--copy-proc (process-live-p emeld--copy-proc))
     (user-error "A copy is already in progress"))
   (let* ((buf (current-buffer))
@@ -3721,7 +3725,16 @@ the hidden buffer ` *emeld-rsync*'."
                                     (lambda (p _event)
                                       (when (memq (process-status p) '(exit signal))
                                         (if (eq (process-exit-status p) 0)
-                                            (cl-incf count)
+                                            (progn
+                                              (cl-incf count)
+                                              (when (buffer-live-p buf)
+                                                (with-current-buffer buf
+                                                  (emeld--log-op
+                                                   (list :type 'copy
+                                                         :src src :dest dest
+                                                         :time (current-time)
+                                                         :is-dir (file-directory-p src)
+                                                         :mirror mirror)))))
                                           (cl-incf errors))
                                         (funcall run-next (cdr remaining)))))))
                         (with-current-buffer buf (setq emeld--copy-proc proc))
@@ -3740,7 +3753,12 @@ are updated in place afterwards (`emeld--update-after-copy')."
     (dolist (job jobs)
       (if (file-exists-p (car job))
           (condition-case nil
-              (progn (emeld--copy-one (car job) (cdr job)) (cl-incf count))
+              (let ((dest (emeld--copy-one (car job) (cdr job))))
+                (cl-incf count)
+                (emeld--log-op (list :type 'copy :src (car job) :dest dest
+                                     :time (current-time)
+                                     :is-dir (file-directory-p (car job))
+                                     :mirror nil)))
             (error (cl-incf errors)))
         (cl-incf errors)))
     (clrhash emeld--marked-paths)
@@ -3837,20 +3855,97 @@ state without the whole tree flashing (see `emeld--update-after-copy')."
       ;; drops those now-absent nodes from the tree.
       (dolist (j deletes)
         (let ((path (cdr j)))
-          (when (file-exists-p path) (ignore-errors (emeld--delete-one path)))))
+          (when (file-exists-p path)
+            (let ((is-dir (file-directory-p path))
+                  (trash (ignore-errors (emeld--delete-one path))))
+              (when trash
+                (emeld--log-op (list :type 'delete :path path :trash trash
+                                     :time (current-time) :is-dir is-dir)))))))
       (cond
        (copies (if use-rsync
-                   (emeld--copy-async copies rels)
+                   (emeld--copy-async copies rels mirror)
                  (emeld--copy-sync copies rels)))
        (t (clrhash emeld--marked-paths)
           (emeld--update-after-copy rels)
           (message "Deleted %d node(s) to sync" nd))))))
 
+(defvar-local emeld--op-log nil
+  "Stack of undoable file operations in this comparison (newest first).
+Each entry is a plist: `(:type delete :path ORIG :trash TRASH :time TIME
+:is-dir BOOL)' for a trashed file, or `(:type copy :src SRC :dest DEST
+:time TIME :is-dir BOOL :mirror BOOL)' for a completed copy.
+Only operations whose effect can be reversed are logged (a delete
+whose trash location could not be captured is not logged).
+See `emeld-undo-last-op'.  Kept to `emeld-op-log-max' entries.")
+
+(defcustom emeld-op-log-max 50
+  "Maximum number of operations kept in `emeld--op-log' per buffer."
+  :type 'integer
+  :group 'emeld)
+
+(defun emeld--log-op (entry)
+  "Push ENTRY onto `emeld--op-log', pruning to `emeld-op-log-max'."
+  (push entry emeld--op-log)
+  (when (> (length emeld--op-log) emeld-op-log-max)
+    (setq emeld--op-log (cl-subseq emeld--op-log 0 emeld-op-log-max)))
+  entry)
+
+(defun emeld--trash-dirs ()
+  "Candidate trash file-directories on this system.
+Covers an explicit `trash-directory', the freedesktop home trash,
+and the macOS home trash; only existing directories are returned."
+  (let ((dirs nil))
+    (when (bound-and-true-p trash-directory)
+      (push (directory-file-name (expand-file-name trash-directory)) dirs))
+    (push (directory-file-name
+           (expand-file-name "Trash/files"
+                             (or (getenv "XDG_DATA_HOME") "~/.local/share")))
+          dirs)
+    (push (directory-file-name (expand-file-name ".Trash" "~")) dirs)
+    (cl-remove-duplicates (cl-remove-if-not #'file-directory-p dirs)
+                          :test #'string=)))
+
+(defun emeld--trash-entries (dir)
+  "Basenames currently in trash DIR, excluding `.` and `..`.
+Dotfiles are kept: only the two structural entries are dropped, so
+snapshot diffing in `emeld--trash-locate' is exact."
+  (cl-set-difference (directory-files dir) '("." "..") :test #'string=))
+
+(defun emeld--trash-snapshot ()
+  "Snapshot current trash contents as an alist of (DIR . BASENAMES)."
+  (mapcar (lambda (dir) (cons dir (emeld--trash-entries dir)))
+          (emeld--trash-dirs)))
+
+(defun emeld--trash-locate (before)
+  "Find the single file newly trashed since the BEFORE snapshot.
+BEFORE is an `emeld--trash-snapshot' alist.  Trash directories that
+only came into existence through the deletion itself (and so are
+absent from BEFORE) count all their contents as new.  Returns the
+full trash path when exactly one new entry appeared across all
+watched trash directories, else nil (ambiguous or nothing found —
+never guess)."
+  (let ((found nil))
+    (dolist (dir (cl-remove-duplicates
+                  (append (mapcar #'car before) (emeld--trash-dirs))
+                  :test #'string=))
+      (let ((old (cdr (assoc dir before))))
+        (when (file-directory-p dir)
+          (dolist (base (emeld--trash-entries dir))
+            (unless (member base old)
+              (push (expand-file-name base dir) found))))))
+    (when (= (length found) 1)
+      (car found))))
+
 (defun emeld--delete-one (path)
-  "Delete the file or directory at PATH recursively, moving it to trash."
-  (if (file-directory-p path)
-      (delete-directory path t t)
-    (delete-file path t)))
+  "Move the file or directory at PATH to trash.
+Calls `move-file-to-trash' directly (rather than `delete-file' with
+a trash flag, which does not report where the file went) so the
+trash location can be captured for `emeld-undo-last-op'.
+Returns the trash location when it can be determined, else nil.
+Callers that ignore the return value behave exactly as before."
+  (let ((before (emeld--trash-snapshot)))
+    (move-file-to-trash path)
+    (emeld--trash-locate before)))
 
 (defun emeld-delete ()
   "Delete files/directories on their marked side(s).
@@ -3879,7 +3974,13 @@ point is deleted from the current side (the column point is in)."
                                                       emeld--right-root))))
                     (if (file-exists-p path)
                         (condition-case nil
-                            (progn (emeld--delete-one path) (cl-incf count))
+                            (let ((is-dir (file-directory-p path))
+                                  (trash (emeld--delete-one path)))
+                              (cl-incf count)
+                              (when trash
+                                (emeld--log-op
+                                 (list :type 'delete :path path :trash trash
+                                       :time (current-time) :is-dir is-dir))))
                           (error (cl-incf errors)))
                       (cl-incf missing)))))
               ;; Update only the affected nodes in place (no full rescan/flash);
@@ -3907,7 +4008,8 @@ point is deleted from the current side (the column point is in)."
 (defun emeld-delete-at-point ()
   "Delete the file/directory at point on the current side (Dired-style).
 Unlike `emeld-delete', any marks are ignored: only the node at point is
-deleted, from the side (pane) point is in."
+deleted, from the side (pane) point is in.  Undo with
+`emeld-undo-last-op'."
   (interactive)
   (when emeld--git-mode
     (user-error "Delete is not available when comparing git revisions"))
@@ -3920,11 +4022,63 @@ deleted, from the side (pane) point is in."
     (unless path (user-error "No file on %s side to delete" side))
     (when (yes-or-no-p (format "Delete %s from %s side?" (emeld-node-name node) side))
       (condition-case err
-          (progn
-            (emeld--delete-one path)
+          (let ((is-dir (file-directory-p path))
+                (trash (emeld--delete-one path)))
+            (when trash
+              (emeld--log-op (list :type 'delete :path path :trash trash
+                                   :time (current-time) :is-dir is-dir)))
             (emeld--update-after-copy (list (emeld--node-relpath node)))
             (message "Deleted %s from %s side" (emeld-node-name node) side))
         (error (message "Delete failed: %s" (error-message-string err)))))))
+
+(defun emeld-undo-last-op ()
+  "Undo the most recent logged delete or copy in this comparison.
+A delete restores the file from trash to its original path
+(recreating parents) and rescans the whole comparison so the
+restored file shows up; this refuses when something already occupies
+the path or the trash entry is gone.  A copy removes the copied
+destination (to trash); files pruned by a mirror copy are not
+restorable.  The affected node is refreshed afterwards.
+See `emeld--op-log'."
+  (interactive)
+  (unless emeld--op-log
+    (user-error "No operations to undo"))
+  (let ((op (pop emeld--op-log)))
+    (condition-case err
+        (pcase (plist-get op :type)
+          ('delete
+           (let ((orig (plist-get op :path))
+                 (trash (plist-get op :trash)))
+             (cond
+              ((not (and trash (file-exists-p trash)))
+               (message "Cannot undo delete of %s: no longer in trash"
+                        (file-name-nondirectory orig)))
+              ((file-exists-p orig)
+               (user-error "Cannot undo: %s already exists" orig))
+              (t
+               (make-directory (file-name-directory orig) t)
+               (rename-file trash orig)
+               ;; A restore can resurrect dropped nodes or flip rows
+               ;; between one-sided and identical (hidden while Same
+               ;; is off) — transitions the surgical update cannot
+               ;; represent — so rescan the whole comparison.
+               (emeld-refresh)
+               (message "Restored %s" orig)))))
+          ('copy
+           (let ((dest (plist-get op :dest)))
+             (cond
+              ((not (file-exists-p dest))
+               (message "Copied file already gone: %s" dest))
+              (t
+               (emeld--delete-one dest)
+               (emeld--update-after-copy (list (emeld--rel-from-abs dest)))
+               (message "Removed copied %s (to trash)%s" dest
+                        (if (plist-get op :mirror)
+                            " — files pruned by mirroring are not restored"
+                          ""))))))
+          (_ (message "Unknown operation, dropped")))
+      (error (push op emeld--op-log)
+             (message "Undo failed: %s" (error-message-string err))))))
 
 (defun emeld-swap-panes ()
   "Swap the left and right comparison directories and flip all node paths.
@@ -4617,7 +4771,9 @@ node — see `emeld--node-relpath' for the equivalent slow form."
    ("C"   "sync to other side (copy/delete)" emeld-copy)
    ("m"   "mark"            emeld-mark)
    ("o"   "hop to other pane" emeld-jump-other-side)
-   ("e"   "ediff"           emeld-ediff)])
+   ("e"   "ediff"           emeld-ediff)
+   ("G"   "rescan"          emeld-rescan)
+   ("u"   "undo last delete/copy" emeld-undo-last-op)])
 
 (define-key emeld-mode-map (kbd "?") #'emeld-dispatch)
 
