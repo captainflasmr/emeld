@@ -132,7 +132,7 @@ Top-level row 2 is ~Show~ :: toggle file kinds — same (~S~), new (~N~), modifi
 
 Top-level row 3 is ~Essential commands~ :: copy (~C~), mark (~m~), hop pane (~o~), ediff (~e~), rescan (~G~), undo (~u~).
 
-- ~Compare~ (~d~) :: Start or re-scan.  ~d~ compare two directories, ~w~ dwim (guess from dired), presets (~l~ load, ~S~ save, ~X~ delete), ~g~ rescan, ~s~ rescan dir at point, ~k~ stop scan.
+- ~Compare~ (~d~) :: Start or re-scan.  ~d~ compare two directories, ~w~ dwim (guess from dired), ~r~ reopen a recent comparison, presets (~l~ load, ~S~ save, ~X~ delete), ~g~ rescan, ~s~ rescan dir at point, ~k~ stop scan.
 - ~Git~ (~T~) :: ~G~ git revisions, ~H~ step git history (`,` older / `.` newer).
 - ~Act — Sync~ (~s~) :: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point, ~D~ delete at point (this pane), ~l~ list undoable operations.
 - ~Act — Diff~ (~h~) :: ~d~ diff directory at point (whole root at the top level), ~P~ format patch.
@@ -274,6 +274,8 @@ Frequently-compared directory pairs can be saved and recalled:
 - ~M-x emeld-delete-preset~ (~X~) — remove a saved pair.
 
 Presets are stored in ~emeld-presets~, which emeld registers with ~savehist-additional-variables~.  With ~savehist-mode~ enabled they persist across sessions automatically; without it they last only for the current session.
+
+Ad-hoc pairs need no saving: every comparison (directory, git-revision, or history walk) is also recorded in ~emeld-recent~ (capped by ~emeld-recent-max~, default 20, persisted the same way).  ~M-x emeld-recent~ (or ~r~ in the transient Compare menu) reopens one via completion, skipping entries whose directories are gone.
 
 * Benchmarking and Regression Tracking
 

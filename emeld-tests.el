@@ -479,6 +479,73 @@ must reuse them rather than create siblings with the same name."
     (setq-local emeld--op-log nil)
     (should-error (emeld-undo-last-op))))
 
+(ert-deftest emeld-recent-push-dedupes-and-caps ()
+  "Recent pushes move to front, drop duplicates, and honor the cap."
+  (let ((emeld-recent nil)
+        (emeld-recent-max 3))
+    (emeld--recent-push '(dir "/a" "/b" nil))
+    (emeld--recent-push '(dir "/c" "/d" nil))
+    (emeld--recent-push '(dir "/a" "/b" nil))
+    (should (equal emeld-recent '((dir "/a" "/b" nil) (dir "/c" "/d" nil))))
+    (emeld--recent-push '(dir "/e" "/f" nil))
+    (emeld--recent-push '(dir "/g" "/h" nil))
+    (should (= 3 (length emeld-recent)))
+    (should (equal (car emeld-recent) '(dir "/g" "/h" nil)))))
+
+(ert-deftest emeld-recent-valid-and-label ()
+  "Validity drops missing dirs; labels describe each entry kind."
+  (let ((left (make-temp-file "emeldL" t))
+        (right (make-temp-file "emeldR" t)))
+    (unwind-protect
+        (progn
+          (should (emeld--recent-valid-p (list 'dir left right nil)))
+          (should-not (emeld--recent-valid-p (list 'dir left "/nonexistent-emeld")))
+          (should (emeld--recent-valid-p (list 'git left "HEAD" 'working)))
+          (should-not (emeld--recent-valid-p '(nonsense)))
+          (should (string-match-p "<->" (emeld--recent-label (list 'dir left right nil))))
+          (should (string-match-p "working" (emeld--recent-label (list 'git left "HEAD" 'working))))
+          (should (string-match-p "history from" (emeld--recent-label (list 'history left "HEAD")))))
+      (delete-directory left t)
+      (delete-directory right t))))
+
+(ert-deftest emeld-recent-open-dispatches ()
+  "Reopening routes dir/git/history entries to their commands."
+  (let (called)
+    (cl-letf (((symbol-function 'emeld-diff)
+               (lambda (&rest args) (setq called (cons 'diff args))))
+              ((symbol-function 'emeld-git-diff)
+               (lambda (&rest args) (setq called (cons 'git args))))
+              ((symbol-function 'emeld-git-step-history)
+               (lambda (&rest args) (setq called (cons 'hist args)))))
+      (emeld--recent-open '(dir "/l" "/r" nil))
+      (should (equal called '(diff "/l" "/r" nil)))
+      (emeld--recent-open '(git "/repo" "HEAD~1" "HEAD"))
+      (should (equal called '(git "/repo" "HEAD~1" "HEAD")))
+      (emeld--recent-open '(history "/repo" "HEAD"))
+      (should (equal called '(hist "/repo" "HEAD"))))))
+
+(ert-deftest emeld-diff-pushes-recent ()
+  "Starting a comparison records it in `emeld-recent'."
+  (let ((emeld-recent nil)
+        (left (make-temp-file "emeldL" t))
+        (right (make-temp-file "emeldR" t)))
+    (unwind-protect
+        (progn
+          (cl-letf (((symbol-function 'emeld-refresh) (lambda () nil)))
+            (emeld-diff left right))
+          (should (= 1 (length emeld-recent)))
+          (should (eq 'dir (caar emeld-recent))))
+      (dolist (b (buffer-list))
+        (when (string-prefix-p "*emeld: " (buffer-name b))
+          (kill-buffer b)))
+      (delete-directory left t)
+      (delete-directory right t))))
+
+(ert-deftest emeld-recent-empty-errors ()
+  "No valid recents signals an error instead of prompting."
+  (let ((emeld-recent nil))
+    (should-error (emeld-recent))))
+
 (ert-deftest emeld-list-operations-shows-log ()
   "`emeld-list-operations' renders one row per logged entry."
   (let ((src (generate-new-buffer " *emeld-ops-src*")))

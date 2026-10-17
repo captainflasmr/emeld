@@ -50,6 +50,9 @@ delete are disabled, since history cannot be written to."
      (list repo left right)))
   (unless (emeld--git-work-tree-p repo)
     (user-error "Not a git work tree: %s" repo))
+  (emeld--recent-push (list 'git
+                            (directory-file-name (expand-file-name repo))
+                            left-rev right-rev))
   (let* ((repo (file-name-as-directory (expand-file-name repo)))
          (lname (emeld--git-rev-label left-rev))
          (rname (emeld--git-rev-label right-rev))
@@ -106,6 +109,9 @@ revision, ediff against the parent, fold the commit message, etc."
   (unless (emeld--git-work-tree-p repo)
     (user-error "Not a git work tree: %s" repo))
   (when (memq start '(working staged)) (setq start "HEAD"))
+  (emeld--recent-push (list 'history
+                            (directory-file-name (expand-file-name repo))
+                            start))
   (let* ((repo (file-name-as-directory (expand-file-name repo)))
          (history (let ((emeld--git-repo repo))
                     (emeld--git-history-list start emeld-git-history-limit))))

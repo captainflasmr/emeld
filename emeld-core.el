@@ -2190,6 +2190,10 @@ recursive compare would block on deep I/O."
    (list (read-directory-name "Left directory: ")
          (read-directory-name "Right directory: ")
          (emeld--prefix-to-depth current-prefix-arg)))
+  (emeld--recent-push (list 'dir
+                            (directory-file-name (expand-file-name dir1))
+                            (directory-file-name (expand-file-name dir2))
+                            depth))
   (let ((buf (get-buffer-create (format "*emeld: %s <-> %s*"
                                         (file-name-nondirectory (directory-file-name dir1))
                                         (file-name-nondirectory (directory-file-name dir2))))))
@@ -2315,6 +2319,92 @@ NAME is chosen from `emeld-presets' via completion."
   (interactive (list (emeld--read-preset "Delete preset: ")))
   (setq emeld-presets (assoc-delete-all name emeld-presets))
   (message "Deleted preset \"%s\"" name))
+
+;;;; ─── Recent comparisons ─────────────────────────────────────────
+
+(defcustom emeld-recent-max 20
+  "Maximum number of entries kept in `emeld-recent'."
+  :type 'integer
+  :group 'emeld)
+
+(defcustom emeld-recent nil
+  "Recently compared pairs, most recent first, for `emeld-recent'.
+Each entry is `(dir LEFT RIGHT DEPTH)', `(git REPO LEFT RIGHT)' or
+`(history REPO START)'.  Maintained automatically by `emeld-diff',
+`emeld-git-diff' and `emeld-git-step-history' (preset loads flow
+through `emeld-diff').  Registered with
+`savehist-additional-variables' (see below) so the list persists
+across sessions when `savehist-mode' is enabled."
+  :type '(repeat
+          (choice (list :tag "Directories"
+                        (const dir) directory directory
+                        (choice (const :tag "Full scan" nil)
+                                (integer :tag "Depth limit")))
+                  (list :tag "Git revisions"
+                        (const git) directory
+                        (choice string symbol) (choice string symbol))
+                  (list :tag "History walk"
+                        (const history) directory (choice string symbol))))
+  :group 'emeld)
+
+;; Persist recents across sessions via savehist, when it is in use.
+(with-eval-after-load 'savehist
+  (add-to-list 'savehist-additional-variables 'emeld-recent))
+
+(defun emeld--recent-push (entry)
+  "Record ENTRY in `emeld-recent' (newest first, deduplicated, capped)."
+  (setq emeld-recent (cons entry (delete entry emeld-recent)))
+  (when (> (length emeld-recent) emeld-recent-max)
+    (setq emeld-recent (cl-subseq emeld-recent 0 emeld-recent-max)))
+  entry)
+
+(defun emeld--recent-valid-p (entry)
+  "Return non-nil if recent ENTRY still exists on disk to reopen."
+  (pcase (car entry)
+    ('dir (and (file-directory-p (nth 1 entry))
+               (file-directory-p (nth 2 entry))))
+    ((or 'git 'history) (file-directory-p (nth 1 entry)))
+    (_ nil)))
+
+(defun emeld--recent-rev (rev)
+  "Printable form of a git REV (string or `working'/`staged' symbol)."
+  (if (symbolp rev) (symbol-name rev) rev))
+
+(defun emeld--recent-label (entry)
+  "One-line completing-read label for recent ENTRY."
+  (pcase (car entry)
+    ('dir (format "%s <-> %s"
+                  (abbreviate-file-name (nth 1 entry))
+                  (abbreviate-file-name (nth 2 entry))))
+    ('git (format "%s @ %s..%s"
+                  (abbreviate-file-name (nth 1 entry))
+                  (emeld--recent-rev (nth 2 entry))
+                  (emeld--recent-rev (nth 3 entry))))
+    ('history (format "%s history from %s"
+                      (abbreviate-file-name (nth 1 entry))
+                      (emeld--recent-rev (nth 2 entry))))
+    (_ "???")))
+
+(defun emeld--recent-open (entry)
+  "Reopen recent ENTRY with the command that created it."
+  (pcase (car entry)
+    ('dir (emeld-diff (nth 1 entry) (nth 2 entry) (nth 3 entry)))
+    ('git (emeld-git-diff (nth 1 entry) (nth 2 entry) (nth 3 entry)))
+    ('history (emeld-git-step-history (nth 1 entry) (nth 2 entry)))
+    (_ (user-error "Unknown recent entry: %S" entry))))
+
+;;;###autoload
+(defun emeld-recent ()
+  "Reopen a recently compared pair (`emeld-recent').
+Stale entries (missing directories) are skipped and pruned."
+  (interactive)
+  (setq emeld-recent (cl-remove-if-not #'emeld--recent-valid-p emeld-recent))
+  (unless emeld-recent
+    (user-error "No recent comparisons"))
+  (let* ((table (mapcar (lambda (e) (cons (emeld--recent-label e) e))
+                        emeld-recent))
+         (choice (completing-read "Recent comparison: " table nil t)))
+    (emeld--recent-open (cdr (assoc choice table)))))
 
 ;;;; ─── Git utilities (shared by emeld-git.el and the sidebar) ──────
 
@@ -4759,7 +4849,8 @@ node — see `emeld--node-relpath' for the equivalent slow form."
   [:class transient-subgroups
    [["New"
      ("d" "directories…"        emeld-diff)
-     ("w" "dwim (guess from dired)…" emeld-diff-dwim)]
+     ("w" "dwim (guess from dired)…" emeld-diff-dwim)
+     ("r" "recent…"             emeld-recent)]
     ["Preset"
      ("l" "load…"        emeld-load-preset)
      ("S" "save current" emeld-save-preset)
