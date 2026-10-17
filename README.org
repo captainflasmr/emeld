@@ -17,8 +17,8 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - File copying between directories (~C~), via rsync when available — asynchronous and delta-efficient, with an optional exact-mirror (~--delete~) mode toggled with ~R~.
 - Recursive ~diff~ buffers for the directory at point (~d~; at the top level this covers the whole root), and a non-intrusive preview (~=~/~SPC~) that diffs/opens the node at point while keeping point in the tree.
 - Export changes as a unified-diff patch (~P~).
-- Presets: save a directory pair and recall it later for fast repeated comparisons.
-- Marked directories: flag a directory as comparison side A or B while browsing Dired (plain commands, no default key bindings), then compare the two when ready.
+- Recent comparisons: every comparison is remembered, and the list persists across sessions so it can be re-run from ~M-x emeld-recent~ (or ~r~ in the transient Compare menu).
+- Marked directories: flag a directory as comparison side A while browsing Dired (a plain command, no default key bindings), then compare it against the directory you are browsing.
 - Side-aware navigation (~n~/~p~) and side-jumping (~o~).
 - Targeted rescan of just the directory at point (~C-u G~) when one subtree changed on disk, avoiding a full rescan.
 - Depth-limited "shallow" scan for huge trees or slow mounts (SMB/NFS): prefix ~emeld-diff~ with a depth (~C-u 2 M-x emeld-diff~) to scan only the top levels and stop; deeper directories are marked with a dim ~…~ and drilled into on demand with ~C-u G~.
@@ -40,23 +40,22 @@ Alternatively, run ~M-x emeld-diff-dwim~ to automatically use open Dired buffers
 
 For very large trees or slow filesystems (SMB/NFS), give ~emeld-diff~ a prefix argument to limit the initial scan depth — e.g. ~C-u 2 M-x emeld-diff~ scans two directory levels, ~C-u M-x emeld-diff~ just one.  The scan stops there and shows the tree; directories below the limit (and one-sided directories) are marked with a dim ~…~.  Drill into any marked directory with ~C-u G~ (which scans it fully), and plain ~G~ re-runs the bounded scan at the same depth.  The header-line shows ~[depth N]~ while a depth limit is in effect.
 
-** Marking directories as sides A and B
+** Comparing a marked directory with the current one
 
-Rather than opening two Dired windows or typing both paths, mark a directory as side A and another as side B as you browse, then compare:
+Rather than opening two Dired windows or typing both paths, mark one directory as side A and compare it against the directory you are browsing:
 
-- ~M-x emeld-mark-dir-a~ marks the current directory (in Dired, the Dired buffer's directory) as side A; ~M-x emeld-mark-dir-b~ marks side B.
-- ~M-x emeld-compare-marked-dirs~ compares the two, or use ~c~ in the transient Compare menu.  A side that is not marked is filled in from the current buffer's directory and remembered; with neither marked, it errors instead.
-- ~M-x emeld-swap-marked-dirs~ swaps A and B; ~M-x emeld-clear-marked-dirs~ forgets both.
+- ~M-x emeld-mark-dir-a~ marks the current directory (in Dired, the Dired buffer's directory) as side A.  The mark is global state, not tied to a particular buffer.
+- ~M-x emeld-compare-marked-dirs~ compares side A against the current buffer's directory (in Dired, the Dired buffer's directory).  It errors if nothing is marked, if either directory no longer exists, or if the two resolve to the same directory.
+- Re-marking side A replaces the mark, so reversing a comparison is just marking the other directory and comparing again (or pressing ~W~ to swap the panes while viewing).
 
 The commands are plain functions with no default key bindings — bind the ones you use, e.g.:
 
 #+begin_src elisp
 (global-set-key (kbd "C-c z a") #'emeld-mark-dir-a)
-(global-set-key (kbd "C-c z b") #'emeld-mark-dir-b)
 (global-set-key (kbd "C-c z c") #'emeld-compare-marked-dirs)
 #+end_src
 
-So the flow is: press your A key in the first Dired buffer, navigate to the second directory, press your B key, then compare.  The marks are global state, not tied to a particular buffer, and the pair flows through ~emeld-diff~ — so it is recorded in ~emeld-recent~ and can be re-run from there.
+So the flow is: press your A key in the first Dired buffer, navigate to the second directory, then compare.  The mark is global state, not tied to a particular buffer, and the pair flows through ~emeld-diff~ — so it is recorded in ~emeld-recent~ and can be re-run from there.
 
 ** Comparing git revisions
 
@@ -151,7 +150,7 @@ Top-level row 2 is ~Show~ :: toggle file kinds — same (~S~), new (~N~), modifi
 
 Top-level row 3 is ~Essential commands~ :: copy (~C~), mark (~m~), hop pane (~o~), ediff (~e~), rescan (~G~), undo (~u~).
 
-- ~Compare~ (~d~) :: Start or re-scan.  ~d~ compare two directories, ~w~ dwim (guess from dired), ~c~ compare the marked sides A and B, ~r~ reopen a recent comparison, presets (~l~ load, ~S~ save, ~X~ delete), ~g~ rescan, ~s~ rescan dir at point, ~k~ stop scan.
+- ~Compare~ (~d~) :: Start or re-scan.  ~d~ compare two directories, ~r~ reopen a recent comparison, ~g~ rescan, ~s~ rescan dir at point, ~k~ stop scan.
 - ~Git~ (~T~) :: ~G~ git revisions, ~H~ step git history (`,` older / `.` newer).
 - ~Act — Sync~ (~s~) :: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point, ~D~ delete at point (this pane), ~l~ list undoable operations.
 - ~Act — Diff~ (~h~) :: ~d~ diff directory at point (whole root at the top level), ~P~ format patch.
@@ -175,7 +174,7 @@ Most commands keep a direct key binding in ~emeld-mode~ (see below); the sub-men
 | v         | View sub-menu (toggles and layout)                |
 | A         | Dired the left side (node at point, or left root) |
 | B         | Dired the right side (node at point, or right root) |
-| d         | Compare sub-menu (dirs, dwim, marked A/B, presets, rescan; diff-dir now under Diff) |
+| d         | Compare sub-menu (dirs, recent, rescan; diff-dir now under Diff) |
 | h         | Diff sub-menu (diff dir at point, format patch) |
 | C         | Sync marked nodes to the other side (mark file side → copy, empty/struck side → delete) or node at point |
 | s         | Sync sub-menu (copy, delete, diff-dir)              |
@@ -212,13 +211,11 @@ Most commands keep a direct key binding in ~emeld-mode~ (see below); the sub-men
 | < / >     | Shrink/grow left pane width                       |
 | { / }     | Decrease/increase tree indent                     |
 
-Filter-group toggling (~emeld-toggle-filter-group~) and the preset commands (~emeld-save-preset~, ~emeld-load-preset~, ~emeld-delete-preset~) are not bound to keys by default — invoke them from the transient menu (~?~) or ~M-x~, or bind them yourself, e.g.:
+Filter-group toggling (~emeld-toggle-filter-group~) is not bound to a key by default — invoke it from the transient menu (~?~) or ~M-x~, or bind it yourself, e.g.:
 
 #+begin_src elisp
 (with-eval-after-load 'emeld
-  (define-key emeld-mode-map (kbd "C-c f") #'emeld-toggle-filter-group)
-  (define-key emeld-mode-map (kbd "C-c s") #'emeld-save-preset)
-  (define-key emeld-mode-map (kbd "C-c l") #'emeld-load-preset))
+  (define-key emeld-mode-map (kbd "C-c f") #'emeld-toggle-filter-group))
 #+end_src
 
 * Customization
@@ -282,19 +279,14 @@ Filter-group toggling (~emeld-toggle-filter-group~) and the preset commands (~em
 - ~emeld-rsync-command~: Name or absolute path of the rsync executable (default ~"rsync"~).
 - ~emeld-rsync-options~: Options passed to rsync, as a list of strings (default ~("-a")~).  ~-a~ preserves permissions, timestamps and symlinks and recurses; add e.g. ~"-z"~ for compression.  ~--delete~ is controlled separately by ~emeld-copy-mirror~, not by this list.
 - ~emeld-copy-mirror~: When non-nil, rsync directory copies are exact mirrors via ~--delete~ (default nil) — the destination directory is made to match the source exactly, removing files present only on the destination, so "copy left→right" becomes a true mirror rather than a merge.  Only affects rsync copies of directories (single files and the built-in copy are unaffected, since ~--delete~ has nothing to prune for one file and ~copy-directory~ cannot delete).  To mirror a whole tree, copy a directory node (e.g. a left-only directory) with this enabled.  ~emeld-copy~ labels the action "Mirror" and warns before proceeding.  Toggle it interactively with ~R~ (~emeld-toggle-mirror~); while on, the header line shows ~[Mirror]~.
-- ~emeld-presets~: Saved directory pairs as ~(NAME LEFT RIGHT)~, managed by the preset commands (see below) and persisted across sessions via ~savehist~.
+- ~emeld-recent-max~: Maximum number of comparisons kept in ~emeld-recent~ (default 20).
+- ~emeld-recent-file~: File where the recent-comparison list is persisted between sessions (default ~emeld-recent.eld~ in ~user-emacs-directory~).
 
-* Presets
+* Recent Comparisons
 
-Frequently-compared directory pairs can be saved and recalled:
+There is nothing to save explicitly: every comparison — directory pair, git-revision comparison, or history walk — is recorded automatically in ~emeld-recent~ (newest first, deduplicated, capped by ~emeld-recent-max~).  ~M-x emeld-recent~ (or ~r~ in the transient Compare menu) reopens one via completion, skipping and pruning entries whose directories are gone.
 
-- ~M-x emeld-save-preset~ (or ~S~ in the transient) — name and save the current comparison's left/right directories.
-- ~M-x emeld-load-preset~ (or ~l~) — pick a saved pair via completion (annotated with its directories) and start the comparison.  This is autoloaded, so it works as an entry point even before any comparison is open.
-- ~M-x emeld-delete-preset~ (~X~) — remove a saved pair.
-
-Presets are stored in ~emeld-presets~, which emeld registers with ~savehist-additional-variables~.  With ~savehist-mode~ enabled they persist across sessions automatically; without it they last only for the current session.
-
-Ad-hoc pairs need no saving: every comparison (directory, git-revision, or history walk) is also recorded in ~emeld-recent~ (capped by ~emeld-recent-max~, default 20, persisted the same way).  ~M-x emeld-recent~ (or ~r~ in the transient Compare menu) reopens one via completion, skipping entries whose directories are gone.
+The list persists across sessions in ~emeld-recent-file~ (default ~emeld-recent.eld~ in ~user-emacs-directory~): it is written whenever a comparison is recorded and read back when emeld loads, so neither ~savehist-mode~ nor any other setup is required.  Delete the file to forget all recent comparisons.
 
 * Benchmarking and Regression Tracking
 

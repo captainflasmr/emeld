@@ -19,7 +19,6 @@
 
 (declare-function find-library-name "find-func" (library))
 (declare-function dired-dwim-target-directory "dired-aux")
-(defvar savehist-additional-variables)
 
 ;; git-diff mode lives in emeld-git.el (loaded by the umbrella `emeld').  Core
 ;; dispatches into it from `emeld-refresh', the file ops, the render and the
@@ -261,21 +260,6 @@ warns before proceeding."
 (defvar emeld-simple-comparison nil
   "Obsolete.  Removed in 0.9.4.  Kept for dir-locals compatibility.")
 (make-obsolete-variable 'emeld-simple-comparison nil "0.9.4")
-
-(defcustom emeld-presets nil
-  "Saved directory pairs for quick recall, as a list of (NAME LEFT RIGHT).
-Populated by `emeld-save-preset' and recalled by `emeld-load-preset', so
-frequently-compared directory pairs can be re-run without retyping their
-paths.  Registered with `savehist-additional-variables' (see below) so
-presets persist across sessions when `savehist-mode' is enabled."
-  :type '(alist :key-type (string :tag "Name")
-                :value-type (group (directory :tag "Left")
-                                   (directory :tag "Right")))
-  :group 'emeld)
-
-;; Persist presets across sessions via savehist, when it is in use.
-(with-eval-after-load 'savehist
-  (add-to-list 'savehist-additional-variables 'emeld-presets))
 
 (defun emeld--apply-dir-locals ()
   "Apply .dir-locals.el from `default-directory' to the current buffer."
@@ -2262,64 +2246,6 @@ trees."
         (user-error "Cannot compare a directory with itself: %s" left-abs)
       (emeld-diff left-abs right-abs depth))))
 
-;;;; ─── Presets (saved directory pairs) ─────────────────────────────
-
-(defun emeld--read-preset (prompt)
-  "Read a saved preset name via `completing-read' with PROMPT.
-Candidates are annotated with their left/right directories."
-  (unless emeld-presets
-    (user-error "No saved presets (use `emeld-save-preset')"))
-  (let ((completion-extra-properties
-         (list :annotation-function
-               (lambda (name)
-                 (let ((e (assoc name emeld-presets)))
-                   (when e
-                     (concat "   "
-                             (abbreviate-file-name (nth 1 e)) " ↔ "
-                             (abbreviate-file-name (nth 2 e)))))))))
-    (completing-read prompt (mapcar #'car emeld-presets) nil t)))
-
-(defun emeld-save-preset (name)
-  "Save the current comparison's directories as preset NAME.
-Recall it later with `emeld-load-preset'.  Reusing an existing name
-overwrites it.  Must be called from an emeld comparison buffer."
-  (interactive
-   (progn
-     (unless (and emeld--left-root emeld--right-root)
-       (user-error "No active emeld comparison to save"))
-     (list (completing-read
-            "Save preset as: " (mapcar #'car emeld-presets) nil nil
-            ;; Pre-fill an editable suggested name (RET to accept as-is).
-            (format "%s <-> %s"
-                    (file-name-nondirectory (directory-file-name emeld--left-root))
-                    (file-name-nondirectory (directory-file-name emeld--right-root)))))))
-  (unless (and emeld--left-root emeld--right-root)
-    (user-error "No active emeld comparison to save"))
-  (when (string-empty-p (string-trim name))
-    (user-error "Preset name must not be empty"))
-  (setq emeld-presets
-        (cons (list name emeld--left-root emeld--right-root)
-              (assoc-delete-all name emeld-presets)))
-  (message "Saved preset \"%s\": %s ↔ %s" name
-           (abbreviate-file-name emeld--left-root)
-           (abbreviate-file-name emeld--right-root)))
-
-;;;###autoload
-(defun emeld-load-preset (name)
-  "Load saved preset NAME and start the comparison.
-NAME is chosen from `emeld-presets' via completion."
-  (interactive (list (emeld--read-preset "Load preset: ")))
-  (let ((entry (assoc name emeld-presets)))
-    (unless entry
-      (user-error "No preset named \"%s\"" name))
-    (emeld-diff (nth 1 entry) (nth 2 entry))))
-
-(defun emeld-delete-preset (name)
-  "Delete saved preset NAME from `emeld-presets'."
-  (interactive (list (emeld--read-preset "Delete preset: ")))
-  (setq emeld-presets (assoc-delete-all name emeld-presets))
-  (message "Deleted preset \"%s\"" name))
-
 ;;;; ─── Recent comparisons ─────────────────────────────────────────
 
 (defcustom emeld-recent-max 20
@@ -2327,14 +2253,20 @@ NAME is chosen from `emeld-presets' via completion."
   :type 'integer
   :group 'emeld)
 
+(defcustom emeld-recent-file (locate-user-emacs-file "emeld-recent.eld")
+  "File where `emeld-recent' is persisted between sessions.
+The list is written whenever a comparison is recorded and read back
+when emeld loads, so recent comparisons survive restarting Emacs.
+Delete the file to forget them."
+  :type 'file
+  :group 'emeld)
+
 (defcustom emeld-recent nil
   "Recently compared pairs, most recent first, for `emeld-recent'.
 Each entry is `(dir LEFT RIGHT DEPTH)', `(git REPO LEFT RIGHT)' or
 `(history REPO START)'.  Maintained automatically by `emeld-diff',
-`emeld-git-diff' and `emeld-git-step-history' (preset loads flow
-through `emeld-diff').  Registered with
-`savehist-additional-variables' (see below) so the list persists
-across sessions when `savehist-mode' is enabled."
+`emeld-git-diff' and `emeld-git-step-history', and persisted to
+`emeld-recent-file' across sessions."
   :type '(repeat
           (choice (list :tag "Directories"
                         (const dir) directory directory
@@ -2347,15 +2279,58 @@ across sessions when `savehist-mode' is enabled."
                         (const history) directory (choice string symbol))))
   :group 'emeld)
 
-;; Persist recents across sessions via savehist, when it is in use.
-(with-eval-after-load 'savehist
-  (add-to-list 'savehist-additional-variables 'emeld-recent))
+(defvar emeld--recent-loaded nil
+  "Non-nil once `emeld-recent-file' has been read this session.")
+
+(defun emeld--recent-entry-p (entry)
+  "Return non-nil when ENTRY has the shape of a recorded comparison."
+  (and (listp entry) (memq (car entry) '(dir git history))))
+
+(defun emeld--recent-load (&optional force)
+  "Read `emeld-recent-file' into `emeld-recent'.
+Does nothing when the file has already been read this session,
+unless FORCE is non-nil."
+  (when (or force (not emeld--recent-loaded))
+    (setq emeld--recent-loaded t)
+    (when (file-readable-p emeld-recent-file)
+      (condition-case err
+          (with-temp-buffer
+            (insert-file-contents emeld-recent-file)
+            (goto-char (point-min))
+            (let ((data (and (not (eobp)) (read (current-buffer)))))
+              (when (listp data)
+                (let ((entries (cl-remove-if-not #'emeld--recent-entry-p data)))
+                  (setq emeld-recent
+                        (cl-subseq entries 0
+                                   (min emeld-recent-max (length entries))))))))
+        (error (message "emeld: could not read recent comparisons from %s: %s"
+                        (abbreviate-file-name emeld-recent-file)
+                        (error-message-string err)))))))
+
+(defun emeld--recent-save ()
+  "Write `emeld-recent' to `emeld-recent-file'."
+  (condition-case err
+      (progn
+        (let ((dir (file-name-directory emeld-recent-file)))
+          (when dir (make-directory dir t)))
+        (with-temp-file emeld-recent-file
+          (let ((print-length nil)
+                (print-level nil))
+            (insert ";;; -*- mode: emacs-lisp; lexical-binding: t; -*-\n"
+                    ";;; Recent emeld comparisons, written automatically; do not edit.\n")
+            (prin1 emeld-recent (current-buffer))
+            (insert "\n"))))
+    (error (message "emeld: could not save recent comparisons to %s: %s"
+                    (abbreviate-file-name emeld-recent-file)
+                    (error-message-string err)))))
 
 (defun emeld--recent-push (entry)
-  "Record ENTRY in `emeld-recent' (newest first, deduplicated, capped)."
+  "Record ENTRY in `emeld-recent' (newest first, deduplicated, capped).
+The updated list is persisted to `emeld-recent-file'."
   (setq emeld-recent (cons entry (delete entry emeld-recent)))
   (when (> (length emeld-recent) emeld-recent-max)
     (setq emeld-recent (cl-subseq emeld-recent 0 emeld-recent-max)))
+  (emeld--recent-save)
   entry)
 
 (defun emeld--recent-valid-p (entry)
@@ -2406,85 +2381,51 @@ Stale entries (missing directories) are skipped and pruned."
          (choice (completing-read "Recent comparison: " table nil t)))
     (emeld--recent-open (cdr (assoc choice table)))))
 
-;;;; ─── Marked directories (comparison sides A and B) ──────────────
+;; Restore the persisted list when emeld loads.
+(emeld--recent-load)
+
+;;;; ─── Marked directory (comparison side A) ────────────────────────
 
 (defvar emeld-dir-a nil
   "Marked left side for `emeld-compare-marked-dirs'.
 Set with `emeld-mark-dir-a'.")
 
-(defvar emeld-dir-b nil
-  "Marked right side for `emeld-compare-marked-dirs'.
-Set with `emeld-mark-dir-b'; see `emeld-dir-a'.")
-
 (defun emeld--mark-dir-value ()
-  "The current buffer's directory, as a value for the marked sides.
+  "The current buffer's directory, as a value for the marked side.
 In a dired buffer this is its directory; elsewhere it is the buffer's
 `default-directory'.  Stored without a trailing slash."
   (directory-file-name (expand-file-name default-directory)))
 
-(defun emeld--mark-echo (side value other)
-  "Echo confirmation that SIDE was set to VALUE; OTHER is the peer side."
-  (message "Marked %s: %s%s" side (abbreviate-file-name value)
-           (cond ((null other) "")
-                 ((equal value other) " (same directory as the other side)")
-                 (t " — both sides marked; run M-x emeld-compare-marked-dirs"))))
-
 ;;;###autoload
 (defun emeld-mark-dir-a ()
   "Mark the current dired directory as comparison side A.
-Also works outside dired, using `default-directory'.  Compare the two
-marked sides with `emeld-compare-marked-dirs'.  There are no default
-key bindings: bind your own (e.g. in the `C-c z' prefix)."
+Also works outside dired, using `default-directory'.  Then, from the
+directory to compare it against, run `emeld-compare-marked-dirs'.
+There are no default key bindings: bind your own (e.g. in the `C-c z'
+prefix)."
   (interactive)
   (setq emeld-dir-a (emeld--mark-dir-value))
-  (emeld--mark-echo "A" emeld-dir-a emeld-dir-b))
-
-;;;###autoload
-(defun emeld-mark-dir-b ()
-  "Mark the current dired directory as comparison side B.
-Like `emeld-mark-dir-a', which see."
-  (interactive)
-  (setq emeld-dir-b (emeld--mark-dir-value))
-  (emeld--mark-echo "B" emeld-dir-b emeld-dir-a))
+  (message "Marked A: %s — run M-x emeld-compare-marked-dirs from the other directory"
+           (abbreviate-file-name emeld-dir-a)))
 
 ;;;###autoload
 (defun emeld-compare-marked-dirs (&optional depth)
-  "Compare the marked directories, side A against side B.
-Mark sides in dired with `emeld-mark-dir-a'/`emeld-mark-dir-b'.  A
-side that is not marked is filled in from the current buffer's
-directory (in dired, the dired directory) and remembered; with
-neither marked this errors instead.  With a prefix argument, DEPTH
-limits the initial scan as in `emeld-diff'."
+  "Compare the directory marked with `emeld-mark-dir-a' against the current one.
+Side A is the marked directory; side B is the current buffer's
+directory (in dired, the dired directory).  With a prefix argument,
+DEPTH limits the initial scan as in `emeld-diff'."
   (interactive (list (emeld--prefix-to-depth current-prefix-arg)))
-  (unless (or emeld-dir-a emeld-dir-b)
-    (user-error "No marked directories (use `emeld-mark-dir-a' or `emeld-mark-dir-b')"))
-  (let ((a (or emeld-dir-a (setq emeld-dir-a (emeld--mark-dir-value))))
-        (b (or emeld-dir-b (setq emeld-dir-b (emeld--mark-dir-value)))))
+  (unless emeld-dir-a
+    (user-error "No marked directory (use `emeld-mark-dir-a')"))
+  (let ((a emeld-dir-a)
+        (b (emeld--mark-dir-value)))
     (dolist (side (list (cons "A" a) (cons "B" b)))
       (unless (file-directory-p (cdr side))
         (user-error "%s is not an existing directory: %s"
                     (car side) (cdr side))))
     (when (equal a b)
-      (user-error "A and B are the same directory: %s" a))
+      (user-error "Marked A and the current directory are the same: %s" a))
     (emeld-diff a b depth)))
-
-;;;###autoload
-(defun emeld-swap-marked-dirs ()
-  "Swap the marked comparison sides A and B."
-  (interactive)
-  (unless (or emeld-dir-a emeld-dir-b)
-    (user-error "No marked directories (use `emeld-mark-dir-a' or `emeld-mark-dir-b')"))
-  (cl-rotatef emeld-dir-a emeld-dir-b)
-  (message "A = %s, B = %s"
-           (if emeld-dir-a (abbreviate-file-name emeld-dir-a) "(none)")
-           (if emeld-dir-b (abbreviate-file-name emeld-dir-b) "(none)")))
-
-;;;###autoload
-(defun emeld-clear-marked-dirs ()
-  "Unmark the comparison sides A and B."
-  (interactive)
-  (setq emeld-dir-a nil emeld-dir-b nil)
-  (message "Cleared marked directories"))
 
 ;;;; ─── Git utilities (shared by emeld-git.el and the sidebar) ──────
 
@@ -4926,20 +4867,13 @@ node — see `emeld--node-relpath' for the equivalent slow form."
 
 (transient-define-prefix emeld-dispatch-compare ()
   "Start, switch, or re-scan an emeld comparison."
-  [:class transient-subgroups
-   [["New"
-     ("d" "directories…"        emeld-diff)
-     ("w" "dwim (guess from dired)…" emeld-diff-dwim)
-     ("c" "marked A ↔ B"        emeld-compare-marked-dirs)
-     ("r" "recent…"             emeld-recent)]
-    ["Preset"
-     ("l" "load…"        emeld-load-preset)
-     ("S" "save current" emeld-save-preset)
-     ("X" "delete…"      emeld-delete-preset)]]
-   [["Refresh"
-     ("g" "rescan"                emeld-rescan)
-     ("s" "rescan dir at point"   emeld-refresh-subdir)
-     ("k" "stop scan"             emeld-stop-scan)]]])
+  [["Start"
+    ("d" "directories…"        emeld-diff)
+    ("r" "recent…"             emeld-recent)]
+   ["Refresh"
+    ("g" "rescan"                emeld-rescan)
+    ("s" "rescan dir at point"   emeld-refresh-subdir)
+    ("k" "stop scan"             emeld-stop-scan)]])
 
 (transient-define-prefix emeld-dispatch-git ()
   "Compare git revisions and step through history."

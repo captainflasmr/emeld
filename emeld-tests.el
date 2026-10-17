@@ -281,28 +281,6 @@ must reuse them rather than create siblings with the same name."
             (should (member "--exclude=node_modules" args))))
       (delete-directory dir t))))
 
-(ert-deftest emeld-preset-save-load-delete ()
-  "Presets save, overwrite in place, load to a comparison, and delete."
-  (let ((emeld-presets nil)
-        (emeld--left-root "/a/")
-        (emeld--right-root "/b/"))
-    (emeld-save-preset "p1")
-    (should (equal (assoc "p1" emeld-presets) '("p1" "/a/" "/b/")))
-    ;; Reusing a name overwrites it (new dirs), without duplicating.
-    (let ((emeld--left-root "/x/") (emeld--right-root "/y/"))
-      (emeld-save-preset "p1"))
-    (should (= 1 (length emeld-presets)))
-    (should (equal (assoc "p1" emeld-presets) '("p1" "/x/" "/y/")))
-    ;; Loading dispatches to `emeld-diff' with the stored dirs.
-    (let (captured)
-      (cl-letf (((symbol-function 'emeld-diff)
-                 (lambda (l r) (setq captured (list l r)))))
-        (emeld-load-preset "p1"))
-      (should (equal captured '("/x/" "/y/"))))
-    ;; Deleting removes it.
-    (emeld-delete-preset "p1")
-    (should (null emeld-presets))))
-
 (ert-deftest emeld-mark-by-status ()
   "Marking by status targets the right leaves for modified / left-only / sync."
   (let* ((root (emeld-node-create :name "root" :is-dir t))
@@ -479,18 +457,31 @@ must reuse them rather than create siblings with the same name."
     (setq-local emeld--op-log nil)
     (should-error (emeld-undo-last-op))))
 
+(defmacro emeld--with-temp-recent (&rest body)
+  "Run BODY with `emeld-recent' isolated, persisting to a temp file."
+  (declare (indent 0) (debug t))
+  `(let* ((emeld-recent-file (make-temp-file "emeld-recent"))
+          (emeld-recent nil))
+     (unwind-protect (progn ,@body)
+       (delete-file emeld-recent-file))))
+
 (ert-deftest emeld-recent-push-dedupes-and-caps ()
   "Recent pushes move to front, drop duplicates, and honor the cap."
-  (let ((emeld-recent nil)
-        (emeld-recent-max 3))
-    (emeld--recent-push '(dir "/a" "/b" nil))
-    (emeld--recent-push '(dir "/c" "/d" nil))
-    (emeld--recent-push '(dir "/a" "/b" nil))
-    (should (equal emeld-recent '((dir "/a" "/b" nil) (dir "/c" "/d" nil))))
-    (emeld--recent-push '(dir "/e" "/f" nil))
-    (emeld--recent-push '(dir "/g" "/h" nil))
-    (should (= 3 (length emeld-recent)))
-    (should (equal (car emeld-recent) '(dir "/g" "/h" nil)))))
+  (emeld--with-temp-recent
+    (let ((emeld-recent-max 3))
+      (emeld--recent-push '(dir "/a" "/b" nil))
+      (emeld--recent-push '(dir "/c" "/d" nil))
+      (emeld--recent-push '(dir "/a" "/b" nil))
+      (should (equal emeld-recent '((dir "/a" "/b" nil) (dir "/c" "/d" nil))))
+      (emeld--recent-push '(dir "/e" "/f" nil))
+      (emeld--recent-push '(dir "/g" "/h" nil))
+      (should (= 3 (length emeld-recent)))
+      (should (equal (car emeld-recent) '(dir "/g" "/h" nil))))
+    ;; Pushes are written through to the persistence file immediately.
+    (with-temp-buffer
+      (insert-file-contents emeld-recent-file)
+      (goto-char (point-min))
+      (should (equal (read (current-buffer)) emeld-recent)))))
 
 (ert-deftest emeld-recent-valid-and-label ()
   "Validity drops missing dirs; labels describe each entry kind."
@@ -525,33 +516,70 @@ must reuse them rather than create siblings with the same name."
       (should (equal called '(hist "/repo" "HEAD"))))))
 
 (ert-deftest emeld-diff-pushes-recent ()
-  "Starting a comparison records it in `emeld-recent'."
-  (let ((emeld-recent nil)
-        (left (make-temp-file "emeldL" t))
-        (right (make-temp-file "emeldR" t)))
-    (unwind-protect
-        (progn
-          (cl-letf (((symbol-function 'emeld-refresh) (lambda () nil)))
-            (emeld-diff left right))
-          (should (= 1 (length emeld-recent)))
-          (should (eq 'dir (caar emeld-recent))))
-      (dolist (b (buffer-list))
-        (when (string-prefix-p "*emeld: " (buffer-name b))
-          (kill-buffer b)))
-      (delete-directory left t)
-      (delete-directory right t))))
+  "Starting a comparison records it in `emeld-recent' and persists it."
+  (emeld--with-temp-recent
+    (let ((left (make-temp-file "emeldL" t))
+          (right (make-temp-file "emeldR" t)))
+      (unwind-protect
+          (progn
+            (cl-letf (((symbol-function 'emeld-refresh) (lambda () nil)))
+              (emeld-diff left right))
+            (should (= 1 (length emeld-recent)))
+            (should (eq 'dir (caar emeld-recent)))
+            ;; The entry is on disk straight away.
+            (with-temp-buffer
+              (insert-file-contents emeld-recent-file)
+              (goto-char (point-min))
+              (should (equal (read (current-buffer)) emeld-recent))))
+        (dolist (b (buffer-list))
+          (when (string-prefix-p "*emeld: " (buffer-name b))
+            (kill-buffer b)))
+        (delete-directory left t)
+        (delete-directory right t)))))
 
 (ert-deftest emeld-recent-empty-errors ()
   "No valid recents signals an error instead of prompting."
   (let ((emeld-recent nil))
     (should-error (emeld-recent))))
 
-(ert-deftest emeld-mark-dirs-from-dired ()
-  "Marking in dired records each buffer's directory as side A/B."
+(ert-deftest emeld-recent-save-load-roundtrip ()
+  "`emeld-recent' is written to and read back from `emeld-recent-file'."
+  (let* ((emeld-recent-file (make-temp-file "emeld-recent"))
+         (entries '((dir "/a" "/b" 2)
+                    (git "/repo" "HEAD" working)
+                    (history "/repo" "HEAD")))
+         (emeld-recent entries))
+    (unwind-protect
+        (progn
+          (emeld--recent-save)
+          (let ((emeld-recent nil))
+            (emeld--recent-load t)
+            (should (equal emeld-recent entries))))
+      (delete-file emeld-recent-file))))
+
+(ert-deftest emeld-recent-load-filters-and-caps ()
+  "Loading drops malformed entries and honors `emeld-recent-max'."
+  (let* ((emeld-recent-file (make-temp-file "emeld-recent"))
+         (emeld-recent-max 2)
+         (emeld-recent '((dir "/a" "/b" nil)
+                         (bogus "/nope")
+                         (dir "/c" "/d" nil)
+                         (dir "/e" "/f" nil))))
+    (unwind-protect
+        (progn
+          (emeld--recent-save)
+          (let ((emeld-recent nil))
+            (emeld--recent-load t)
+            (should (equal emeld-recent '((dir "/a" "/b" nil)
+                                          (dir "/c" "/d" nil))))))
+      (delete-file emeld-recent-file))))
+
+(ert-deftest emeld-mark-dir-from-dired ()
+  "Marking in dired records that buffer's directory as side A.
+Comparing from another dired buffer pairs it with that directory."
   (let* ((tmp-a (make-temp-file "emeld-marks-a" t))
          (tmp-b (make-temp-file "emeld-marks-b" t))
          (emeld-dir-a nil)
-         (emeld-dir-b nil)
          (dired-a nil)
          (dired-b nil))
     (unwind-protect
@@ -559,9 +587,15 @@ must reuse them rather than create siblings with the same name."
           (setq dired-a (dired-noselect tmp-a)
                 dired-b (dired-noselect tmp-b))
           (with-current-buffer dired-a (emeld-mark-dir-a))
-          (with-current-buffer dired-b (emeld-mark-dir-b))
           (should (equal emeld-dir-a (directory-file-name (expand-file-name tmp-a))))
-          (should (equal emeld-dir-b (directory-file-name (expand-file-name tmp-b)))))
+          (let (captured)
+            (cl-letf (((symbol-function 'emeld-diff)
+                       (lambda (&rest args) (setq captured args))))
+              (with-current-buffer dired-b (emeld-compare-marked-dirs 2)))
+            (should (equal captured
+                           (list (directory-file-name (expand-file-name tmp-a))
+                                 (directory-file-name (expand-file-name tmp-b))
+                                 2)))))
       (dolist (buf (list dired-a dired-b))
         (when (buffer-live-p buf) (kill-buffer buf)))
       (delete-directory tmp-a t)
@@ -569,68 +603,40 @@ must reuse them rather than create siblings with the same name."
 
 (ert-deftest emeld-mark-dir-uses-default-directory ()
   "Outside dired, marking records the buffer's `default-directory'."
-  (let ((emeld-dir-a nil)
-        (emeld-dir-b nil))
+  (let ((emeld-dir-a nil))
     (with-temp-buffer
       (setq default-directory "/marked-a/")
       (emeld-mark-dir-a))
-    (with-temp-buffer
-      (setq default-directory "/marked-b/")
-      (emeld-mark-dir-b))
-    (should (equal emeld-dir-a "/marked-a"))
-    (should (equal emeld-dir-b "/marked-b"))))
+    (should (equal emeld-dir-a "/marked-a"))))
 
 (ert-deftest emeld-compare-marked-dirs-dispatch ()
-  "Comparing the marked sides calls `emeld-diff' with A, B and the depth."
+  "Comparing calls `emeld-diff' with A, the current directory and depth."
   (let ((emeld-dir-a "/a")
-        (emeld-dir-b "/b")
-        captured)
-    (cl-letf (((symbol-function 'file-directory-p)
-               (lambda (d) (member d '("/a" "/b"))))
-              ((symbol-function 'emeld-diff)
-               (lambda (&rest args) (setq captured args))))
-      (emeld-compare-marked-dirs 3))
-    (should (equal captured '("/a" "/b" 3)))))
-
-(ert-deftest emeld-compare-marked-dirs-fills-and-validates ()
-  "Missing sides fill from the current directory; same or stale dirs error."
-  (let ((emeld-dir-a nil)
-        (emeld-dir-b "/b")
         captured)
     (cl-letf (((symbol-function 'file-directory-p)
                (lambda (d) (member d '("/a" "/b"))))
               ((symbol-function 'emeld-diff)
                (lambda (&rest args) (setq captured args))))
       (with-temp-buffer
-        (setq default-directory "/a/")
-        (emeld-compare-marked-dirs)))
-    (should (equal emeld-dir-a "/a"))
-    (should (equal captured '("/a" "/b" nil))))
-  ;; Neither marked: refuse instead of comparing a directory with itself.
-  (let ((emeld-dir-a nil)
-        (emeld-dir-b nil))
+        (setq default-directory "/b/")
+        (emeld-compare-marked-dirs 3)))
+    (should (equal captured '("/a" "/b" 3)))))
+
+(ert-deftest emeld-compare-marked-dirs-validates ()
+  "No mark, same directory, or a stale mark all error."
+  (let ((emeld-dir-a nil))
     (should-error (emeld-compare-marked-dirs) :type 'user-error))
-  (let ((emeld-dir-a "/x")
-        (emeld-dir-b "/x"))
+  (let ((emeld-dir-a "/x"))
     (cl-letf (((symbol-function 'file-directory-p) (lambda (_) t)))
-      (should-error (emeld-compare-marked-dirs) :type 'user-error)))
-  (let ((emeld-dir-a "/gone")
-        (emeld-dir-b "/b"))
+      (with-temp-buffer
+        (setq default-directory "/x/")
+        (should-error (emeld-compare-marked-dirs) :type 'user-error))))
+  (let ((emeld-dir-a "/gone"))
     (cl-letf (((symbol-function 'file-directory-p)
                (lambda (d) (equal d "/b"))))
-      (should-error (emeld-compare-marked-dirs) :type 'user-error))))
-
-(ert-deftest emeld-swap-and-clear-marked-dirs ()
-  "Swap exchanges the sides; clear forgets them; swapping none errors."
-  (let ((emeld-dir-a "/a")
-        (emeld-dir-b "/b"))
-    (emeld-swap-marked-dirs)
-    (should (equal emeld-dir-a "/b"))
-    (should (equal emeld-dir-b "/a"))
-    (emeld-clear-marked-dirs)
-    (should-not emeld-dir-a)
-    (should-not emeld-dir-b)
-    (should-error (emeld-swap-marked-dirs) :type 'user-error)))
+      (with-temp-buffer
+        (setq default-directory "/b/")
+        (should-error (emeld-compare-marked-dirs) :type 'user-error)))))
 
 (ert-deftest emeld-list-operations-shows-log ()
   "`emeld-list-operations' renders one row per logged entry."
@@ -834,11 +840,6 @@ a new path that is neither is treated as identical."
     (let ((emeld-show-same nil) (emeld-show-files t) (emeld-show-different t))
       (should-not (emeld--node-visible-p same-dir))
       (should (emeld--node-visible-p diff-dir)))))
-
-(ert-deftest emeld-preset-savehist-registered ()
-  "Loading savehist registers `emeld-presets' for cross-session persistence."
-  (require 'savehist)
-  (should (memq 'emeld-presets savehist-additional-variables)))
 
 (ert-deftest emeld-delete-marked-side-aware ()
   "`emeld-delete' with marks deletes each node from its marked side(s)."
