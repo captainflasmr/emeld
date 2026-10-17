@@ -546,6 +546,92 @@ must reuse them rather than create siblings with the same name."
   (let ((emeld-recent nil))
     (should-error (emeld-recent))))
 
+(ert-deftest emeld-mark-dirs-from-dired ()
+  "Marking in dired records each buffer's directory as side A/B."
+  (let* ((tmp-a (make-temp-file "emeld-marks-a" t))
+         (tmp-b (make-temp-file "emeld-marks-b" t))
+         (emeld-dir-a nil)
+         (emeld-dir-b nil)
+         (dired-a nil)
+         (dired-b nil))
+    (unwind-protect
+        (progn
+          (setq dired-a (dired-noselect tmp-a)
+                dired-b (dired-noselect tmp-b))
+          (with-current-buffer dired-a (emeld-mark-dir-a))
+          (with-current-buffer dired-b (emeld-mark-dir-b))
+          (should (equal emeld-dir-a (directory-file-name (expand-file-name tmp-a))))
+          (should (equal emeld-dir-b (directory-file-name (expand-file-name tmp-b)))))
+      (dolist (buf (list dired-a dired-b))
+        (when (buffer-live-p buf) (kill-buffer buf)))
+      (delete-directory tmp-a t)
+      (delete-directory tmp-b t))))
+
+(ert-deftest emeld-mark-dir-uses-default-directory ()
+  "Outside dired, marking records the buffer's `default-directory'."
+  (let ((emeld-dir-a nil)
+        (emeld-dir-b nil))
+    (with-temp-buffer
+      (setq default-directory "/marked-a/")
+      (emeld-mark-dir-a))
+    (with-temp-buffer
+      (setq default-directory "/marked-b/")
+      (emeld-mark-dir-b))
+    (should (equal emeld-dir-a "/marked-a"))
+    (should (equal emeld-dir-b "/marked-b"))))
+
+(ert-deftest emeld-compare-marked-dirs-dispatch ()
+  "Comparing the marked sides calls `emeld-diff' with A, B and the depth."
+  (let ((emeld-dir-a "/a")
+        (emeld-dir-b "/b")
+        captured)
+    (cl-letf (((symbol-function 'file-directory-p)
+               (lambda (d) (member d '("/a" "/b"))))
+              ((symbol-function 'emeld-diff)
+               (lambda (&rest args) (setq captured args))))
+      (emeld-compare-marked-dirs 3))
+    (should (equal captured '("/a" "/b" 3)))))
+
+(ert-deftest emeld-compare-marked-dirs-fills-and-validates ()
+  "Missing sides fill from the current directory; same or stale dirs error."
+  (let ((emeld-dir-a nil)
+        (emeld-dir-b "/b")
+        captured)
+    (cl-letf (((symbol-function 'file-directory-p)
+               (lambda (d) (member d '("/a" "/b"))))
+              ((symbol-function 'emeld-diff)
+               (lambda (&rest args) (setq captured args))))
+      (with-temp-buffer
+        (setq default-directory "/a/")
+        (emeld-compare-marked-dirs)))
+    (should (equal emeld-dir-a "/a"))
+    (should (equal captured '("/a" "/b" nil))))
+  ;; Neither marked: refuse instead of comparing a directory with itself.
+  (let ((emeld-dir-a nil)
+        (emeld-dir-b nil))
+    (should-error (emeld-compare-marked-dirs) :type 'user-error))
+  (let ((emeld-dir-a "/x")
+        (emeld-dir-b "/x"))
+    (cl-letf (((symbol-function 'file-directory-p) (lambda (_) t)))
+      (should-error (emeld-compare-marked-dirs) :type 'user-error)))
+  (let ((emeld-dir-a "/gone")
+        (emeld-dir-b "/b"))
+    (cl-letf (((symbol-function 'file-directory-p)
+               (lambda (d) (equal d "/b"))))
+      (should-error (emeld-compare-marked-dirs) :type 'user-error))))
+
+(ert-deftest emeld-swap-and-clear-marked-dirs ()
+  "Swap exchanges the sides; clear forgets them; swapping none errors."
+  (let ((emeld-dir-a "/a")
+        (emeld-dir-b "/b"))
+    (emeld-swap-marked-dirs)
+    (should (equal emeld-dir-a "/b"))
+    (should (equal emeld-dir-b "/a"))
+    (emeld-clear-marked-dirs)
+    (should-not emeld-dir-a)
+    (should-not emeld-dir-b)
+    (should-error (emeld-swap-marked-dirs) :type 'user-error)))
+
 (ert-deftest emeld-list-operations-shows-log ()
   "`emeld-list-operations' renders one row per logged entry."
   (let ((src (generate-new-buffer " *emeld-ops-src*")))

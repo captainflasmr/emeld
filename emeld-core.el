@@ -2406,6 +2406,86 @@ Stale entries (missing directories) are skipped and pruned."
          (choice (completing-read "Recent comparison: " table nil t)))
     (emeld--recent-open (cdr (assoc choice table)))))
 
+;;;; ─── Marked directories (comparison sides A and B) ──────────────
+
+(defvar emeld-dir-a nil
+  "Marked left side for `emeld-compare-marked-dirs'.
+Set with `emeld-mark-dir-a'.")
+
+(defvar emeld-dir-b nil
+  "Marked right side for `emeld-compare-marked-dirs'.
+Set with `emeld-mark-dir-b'; see `emeld-dir-a'.")
+
+(defun emeld--mark-dir-value ()
+  "The current buffer's directory, as a value for the marked sides.
+In a dired buffer this is its directory; elsewhere it is the buffer's
+`default-directory'.  Stored without a trailing slash."
+  (directory-file-name (expand-file-name default-directory)))
+
+(defun emeld--mark-echo (side value other)
+  "Echo confirmation that SIDE was set to VALUE; OTHER is the peer side."
+  (message "Marked %s: %s%s" side (abbreviate-file-name value)
+           (cond ((null other) "")
+                 ((equal value other) " (same directory as the other side)")
+                 (t " — both sides marked; run M-x emeld-compare-marked-dirs"))))
+
+;;;###autoload
+(defun emeld-mark-dir-a ()
+  "Mark the current dired directory as comparison side A.
+Also works outside dired, using `default-directory'.  Compare the two
+marked sides with `emeld-compare-marked-dirs'.  There are no default
+key bindings: bind your own (e.g. in the `C-c z' prefix)."
+  (interactive)
+  (setq emeld-dir-a (emeld--mark-dir-value))
+  (emeld--mark-echo "A" emeld-dir-a emeld-dir-b))
+
+;;;###autoload
+(defun emeld-mark-dir-b ()
+  "Mark the current dired directory as comparison side B.
+Like `emeld-mark-dir-a', which see."
+  (interactive)
+  (setq emeld-dir-b (emeld--mark-dir-value))
+  (emeld--mark-echo "B" emeld-dir-b emeld-dir-a))
+
+;;;###autoload
+(defun emeld-compare-marked-dirs (&optional depth)
+  "Compare the marked directories, side A against side B.
+Mark sides in dired with `emeld-mark-dir-a'/`emeld-mark-dir-b'.  A
+side that is not marked is filled in from the current buffer's
+directory (in dired, the dired directory) and remembered; with
+neither marked this errors instead.  With a prefix argument, DEPTH
+limits the initial scan as in `emeld-diff'."
+  (interactive (list (emeld--prefix-to-depth current-prefix-arg)))
+  (unless (or emeld-dir-a emeld-dir-b)
+    (user-error "No marked directories (use `emeld-mark-dir-a' or `emeld-mark-dir-b')"))
+  (let ((a (or emeld-dir-a (setq emeld-dir-a (emeld--mark-dir-value))))
+        (b (or emeld-dir-b (setq emeld-dir-b (emeld--mark-dir-value)))))
+    (dolist (side (list (cons "A" a) (cons "B" b)))
+      (unless (file-directory-p (cdr side))
+        (user-error "%s is not an existing directory: %s"
+                    (car side) (cdr side))))
+    (when (equal a b)
+      (user-error "A and B are the same directory: %s" a))
+    (emeld-diff a b depth)))
+
+;;;###autoload
+(defun emeld-swap-marked-dirs ()
+  "Swap the marked comparison sides A and B."
+  (interactive)
+  (unless (or emeld-dir-a emeld-dir-b)
+    (user-error "No marked directories (use `emeld-mark-dir-a' or `emeld-mark-dir-b')"))
+  (cl-rotatef emeld-dir-a emeld-dir-b)
+  (message "A = %s, B = %s"
+           (if emeld-dir-a (abbreviate-file-name emeld-dir-a) "(none)")
+           (if emeld-dir-b (abbreviate-file-name emeld-dir-b) "(none)")))
+
+;;;###autoload
+(defun emeld-clear-marked-dirs ()
+  "Unmark the comparison sides A and B."
+  (interactive)
+  (setq emeld-dir-a nil emeld-dir-b nil)
+  (message "Cleared marked directories"))
+
 ;;;; ─── Git utilities (shared by emeld-git.el and the sidebar) ──────
 
 (defconst emeld--git-empty-tree "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
@@ -4850,6 +4930,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
    [["New"
      ("d" "directories…"        emeld-diff)
      ("w" "dwim (guess from dired)…" emeld-diff-dwim)
+     ("c" "marked A ↔ B"        emeld-compare-marked-dirs)
      ("r" "recent…"             emeld-recent)]
     ["Preset"
      ("l" "load…"        emeld-load-preset)
