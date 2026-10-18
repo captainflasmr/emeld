@@ -1338,6 +1338,37 @@ a new path that is neither is treated as identical."
     (should (eq (get-text-property 0 'face (nth 3 lines)) 'diff-removed))
     (should (eq (get-text-property 0 'face (nth 4 lines)) 'diff-added))))
 
+(ert-deftest emeld-inline-diff-refine-highlights-changed-words ()
+  "`emeld--inline-diff-refine' marks only the changed words of a pair."
+  (let* ((text (concat "@@ -1 +1 @@\n"
+                       "-the quick brown fox\n"
+                       "+the quick brown cat\n"
+                       "@@ -3,1 +3,0 @@\n"
+                       "-pure deletion\n"
+                       "@@ -5,0 +6,1 @@\n"
+                       "+pure addition\n"))
+         (lines (emeld--inline-diff-refine (emeld--inline-diff-faceify text))))
+    (should (= (length lines) 7))
+    (should (eq (get-text-property 0 'face (nth 0 lines)) 'diff-hunk-header))
+    ;; One spot: the removed/added runs of lines 1–2.
+    (should (equal (emeld--inline-diff-spots (emeld--inline-diff-faceify text))
+                   '((1 2 2 3))))
+    ;; Only "fox"/"cat" changed: the shared text keeps the base face.
+    (should (eq (get-text-property 4 'face (nth 1 lines)) 'diff-removed))
+    (should (equal (get-text-property 17 'face (nth 1 lines))
+                   '(diff-refine-removed diff-removed)))
+    (should (eq (get-text-property 4 'face (nth 2 lines)) 'diff-added))
+    (should (equal (get-text-property 17 'face (nth 2 lines))
+                   '(diff-refine-added diff-added)))
+    ;; Runs without a removed/added counterpart stay plain, since the
+    ;; base face already marks them in full.
+    (should (cl-loop for pos below (length (nth 4 lines))
+                     always (eq (get-text-property pos 'face (nth 4 lines))
+                                'diff-removed)))
+    (should (cl-loop for pos below (length (nth 6 lines))
+                     always (eq (get-text-property pos 'face (nth 6 lines))
+                                'diff-added)))))
+
 (ert-deftest emeld-inline-diff-lines-dir-mode ()
   "Inline preview yields diff lines for a differing file and nil for identical."
   (let* ((left (make-temp-file "emeld-l" t))
@@ -1365,6 +1396,20 @@ a new path that is neither is treated as identical."
                 (should lines)
                 (should (cl-some (lambda (l) (string-match-p "new" l)) lines))
                 (should (cl-some (lambda (l) (string-match-p "old" l)) lines)))
+              ;; Changed words are refined by default …
+              (let* ((lines (emeld--inline-diff-lines diff))
+                     (added (cl-find-if #'emeld--inline-diff-added-line-p lines)))
+                (should (equal (get-text-property (string-match "old" added)
+                                                  'face added)
+                               '(diff-refine-added diff-added))))
+              ;; … but not when the peek has more spots than allowed, where
+              ;; the plain `diff-*' faces are used alone.
+              (let* ((emeld-inline-diff-refine-max-spots 0)
+                     (lines (emeld--inline-diff-lines diff))
+                     (added (cl-find-if #'emeld--inline-diff-added-line-p lines)))
+                (should (eq (get-text-property (string-match "old" added)
+                                               'face added)
+                            'diff-added)))
               ;; An identical file has nothing to preview.
               (should-not (emeld--inline-diff-lines same)))))
       (delete-directory left t)

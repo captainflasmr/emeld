@@ -63,6 +63,10 @@ Gaps between emeld and Meld, ordered by usefulness for an Emacs variant.
 
 * TODO Session & UI Polish
 
+** DONE Word-level refinement in the inline diff peek
+
+   =TAB= on a file now highlights the words that actually changed within modified lines (=diff-refine-added= / =diff-refine-removed=, the way =diff-refine-hunk= does), computed with =smerge-refine-regions= and whitespace-trimmed.  Each modified spot costs a small =diff= run, so peeks with more than =emeld-inline-diff-refine-max-spots= spots (default 250) stay plain; =0= disables refinement.
+
 ** TODO Multi-tab / multi-buffer sessions
 
   Multiple comparisons open simultaneously.  emeld is single-buffer per comparison.

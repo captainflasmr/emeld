@@ -15,7 +15,8 @@
 (require 'dired)
 (require 'subr-x)
 (require 'transient)
-(require 'diff-mode)  ; diff-* faces for the inline diff preview
+(require 'diff-mode)    ; diff-* faces for the inline diff preview
+(require 'smerge-mode)  ; smerge-refine-regions for word-level refinement
 
 (declare-function find-library-name "find-func" (library))
 (declare-function dired-dwim-target-directory "dired-aux")
@@ -3504,6 +3505,18 @@ preview each node without leaving it."
                 (display-buffer (find-file-noselect (or path left right)))))
              (t (message "No file at point"))))))))))
 
+(defcustom emeld-inline-diff-refine-max-spots 250
+  "Skip word-level refinement of inline-diff peeks with too many changes.
+Refinement highlights the words that actually changed within modified
+lines, using `smerge-refine-regions' (the machinery behind
+`diff-refine-hunk').  That costs a small `diff' run per modified spot
+— a run of removed lines followed by a run of added lines — so peeks
+with more than this many spots are kept plain, to stay snappy.  Set
+to 0 to disable refinement entirely, or to nil to always refine."
+  :type '(choice (const :tag "No limit" nil)
+                 (integer :tag "Changed spots"))
+  :group 'emeld)
+
 (defun emeld--inline-diff-text (node)
   "Return the raw unified-diff text for file NODE, or nil when there is none.
 In git mode the diff comes from `git diff' between the two revisions; in
@@ -3544,18 +3557,155 @@ Each line gets the appropriate `diff-*' face so themes apply automatically."
        (propertize line 'face face)))
    (split-string (string-trim-right text "[\n\r]+") "\n")))
 
+(defun emeld--inline-diff-removed-line-p (line)
+  "Return non-nil if LINE is a removed (\"-\") line of a unified diff."
+  (and (string-prefix-p "-" line)
+       (not (string-prefix-p "---" line))))
+
+(defun emeld--inline-diff-added-line-p (line)
+  "Return non-nil if LINE is an added (\"+\") line of a unified diff."
+  (and (string-prefix-p "+" line)
+       (not (string-prefix-p "+++" line))))
+
+(defun emeld--inline-diff-refine-ranges (removed added)
+  "Return the fine-change ranges for one REMOVED/ADDED run of diff lines.
+REMOVED and ADDED are lists of plain lines — each including its leading
+-/+ marker — that a unified diff lists for one modified spot.  Run
+`diff' over the two runs through `smerge-refine-regions', the same
+machinery `diff-refine-hunk' uses, and return (REMOVED-RANGES
+ADDED-RANGES).  Each range is a (START . END) pair of character offsets
+into that run's lines joined with newlines, covering the words that
+actually changed, whitespace-trimmed the way diff refinement does it."
+  (with-temp-buffer
+    (let ((beg1 (point)))
+      (dolist (line removed) (insert line "\n"))
+      (let ((end1 (point)))
+        (dolist (line added) (insert line "\n"))
+        (let ((end2 (point))
+              (removed-ranges nil)
+              (added-ranges nil))
+          (smerge-refine-regions beg1 end1 end1 end2 nil
+                                 #'diff-refine-preproc
+                                 '((face . diff-refine-removed))
+                                 '((face . diff-refine-added)))
+          (dolist (overlay (overlays-in beg1 end2))
+            (let ((face (overlay-get overlay 'face))
+                  (start (overlay-start overlay))
+                  (end (overlay-end overlay)))
+              (cond
+               ((and (eq face 'diff-refine-removed) (< start end1))
+                (push (cons (- start beg1) (- (min end end1) beg1))
+                      removed-ranges))
+               ((and (eq face 'diff-refine-added) (>= start end1))
+                (push (cons (- start end1) (- (min end end2) end1))
+                      added-ranges)))))
+          (list (nreverse removed-ranges) (nreverse added-ranges)))))))
+
+(defun emeld--inline-diff-apply-refine (lines ranges face)
+  "Add refinement FACE over RANGES onto the propertized diff LINES.
+RANGES is a list of (START . END) character offsets into LINES joined
+with newlines.  Parts of a range that fall on a line's text get FACE,
+with the line's existing `diff-*' face underneath so unspecified
+attributes still show; parts falling on the newline separators are
+ignored.  LINES is modified in place and returned."
+  (let ((offset 0))
+    (dolist (line lines)
+      (let ((base (get-text-property 0 'face line))
+            (len (length line)))
+        (dolist (range ranges)
+          (let ((start (max offset (car range)))
+                (end (min (+ offset len) (cdr range))))
+            (when (< start end)
+              (add-text-properties (- start offset) (- end offset)
+                                   (list 'face (if base (list face base) face))
+                                   line))))
+        (setq offset (+ offset len 1))))
+    lines))
+
+(defun emeld--inline-diff-spots (lines)
+  "Return the modified spots in the inline-diff LINES.
+LINES is the propertized line list from `emeld--inline-diff-faceify'.
+Each spot is a list (DEL-START DEL-END ADD-START ADD-END), the index
+range of a run of removed lines followed by the index range of the run
+of added lines that a unified diff lists for that spot — the pairs of
+line runs that word-level refinement compares."
+  (let* ((vec (vconcat lines))
+         (n (length vec))
+         (i 0)
+         (spots nil))
+    (while (< i n)
+      (if (not (emeld--inline-diff-removed-line-p (aref vec i)))
+          (setq i (1+ i))
+        (let ((del-beg i))
+          (while (and (< i n) (emeld--inline-diff-removed-line-p (aref vec i)))
+            (setq i (1+ i)))
+          ;; "\ No newline at end of file" lines belong to the run above.
+          (while (and (< i n) (string-prefix-p "\\" (aref vec i)))
+            (setq i (1+ i)))
+          (let ((del-end i)
+                (add-beg i))
+            (while (and (< i n) (emeld--inline-diff-added-line-p (aref vec i)))
+              (setq i (1+ i)))
+            (while (and (< i n) (string-prefix-p "\\" (aref vec i)))
+              (setq i (1+ i)))
+            (when (> i add-beg)
+              (push (list del-beg del-end add-beg i) spots))))))
+    (nreverse spots)))
+
+(defun emeld--inline-diff-refine (lines)
+  "Add word-level refinement to the changed lines in LINES.
+LINES is the propertized line list from `emeld--inline-diff-faceify'.
+Each modified spot — a run of removed lines followed by a run of added
+lines — is refined like `diff-refine-hunk' does: the words that
+actually differ get the `diff-refine-removed'/`diff-refine-added'
+faces on top of the base face, while unchanged text keeps the plain
+base face.  Runs with only removed or only added lines are left alone,
+since their base face already marks them in full.  Peeks with more
+than `emeld-inline-diff-refine-max-spots' spots are left unrefined.
+LINES is modified in place and returned."
+  (let* ((vec (vconcat lines))
+         (spots (emeld--inline-diff-spots lines))
+         (limit emeld-inline-diff-refine-max-spots))
+    (unless (and limit (> (length spots) limit))
+      (dolist (spot spots)
+        (let* ((del-beg (nth 0 spot))
+               (del-end (nth 1 spot))
+               (add-beg (nth 2 spot))
+               (add-end (nth 3 spot))
+               ;; Failing to refine one spot (e.g. no `diff' executable)
+               ;; must not break the peek; leave that spot plain instead.
+               (ranges (condition-case nil
+                           (emeld--inline-diff-refine-ranges
+                            (cl-loop for k from del-beg below del-end
+                                     collect (substring-no-properties (aref vec k)))
+                            (cl-loop for k from add-beg below add-end
+                                     collect (substring-no-properties (aref vec k))))
+                         (error nil))))
+          (when ranges
+            (emeld--inline-diff-apply-refine
+             (cl-loop for k from del-beg below del-end collect (aref vec k))
+             (car ranges) 'diff-refine-removed)
+            (emeld--inline-diff-apply-refine
+             (cl-loop for k from add-beg below add-end collect (aref vec k))
+             (cadr ranges) 'diff-refine-added))))))
+  lines)
+
 (defun emeld--inline-diff-lines (node)
-  "Return propertized diff lines for file NODE, or nil when there is nothing."
+  "Return propertized diff lines for file NODE, or nil when there is nothing.
+Changed words within modified lines are refined like `diff-refine-hunk',
+unless the peek has more than `emeld-inline-diff-refine-max-spots' spots."
   (let ((text (emeld--inline-diff-text node)))
     (and text
          (not (string-empty-p (string-trim text)))
-         (emeld--inline-diff-faceify text))))
+         (emeld--inline-diff-refine (emeld--inline-diff-faceify text)))))
 
 (defun emeld-toggle-inline-diff ()
   "Toggle an inline diff preview of the file node at point.
 On a file that differs (or exists on only one side), expand a quick diff
 beneath the row — a Magit-style peek that keeps point in the tree; invoke
-again to collapse.  Reports a message on a directory or an identical file."
+again to collapse.  Changed words within modified lines are highlighted
+like `diff-refine-hunk' (see `emeld-inline-diff-refine-max-spots').
+Reports a message on a directory or an identical file."
   (interactive)
   (let ((node (get-text-property (point) 'emeld-node)))
     (cond
