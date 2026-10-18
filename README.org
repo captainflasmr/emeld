@@ -146,13 +146,11 @@ Deletions move the files to trash rather than erasing them outright.  When sever
 
 * Transient Menu (~?~)
 
-Magit-style: the top level has four rows — a ~Transient commands~ group with the eight sub-menu entry points, a ~Show~ row with the file-kind toggles, an ~Essential commands~ group for the most-used direct actions, and a ~Navigate~ row for change-oriented movement.  The group keys (~d~ ~T~ ~h~ ~s~ ~F~ ~v~ ~r~ ~O~) also work directly from the tree — pressing one opens its sub-menu without going through ~?~ first.  Pressing ~q~ (or ~C-g~) inside a sub-menu returns to the top level.
+Magit-style: the top level has three rows — a ~Transient commands~ group with the eight sub-menu entry points, a ~Show~ | ~Navigate~ row pairing the file-kind toggles with change-oriented movement, and an ~Essential commands~ group for the most-used direct actions.  The group keys (~d~ ~T~ ~h~ ~s~ ~F~ ~v~ ~r~ ~O~) also work directly from the tree — pressing one opens its sub-menu without going through ~?~ first.  Pressing ~q~ (or ~C-g~) inside a sub-menu returns to the top level.
 
-Top-level row 2 is ~Show~ :: toggle file kinds — same (~S~), new (~N~), modified (~M~).
+Top-level row 2 is ~Show~ | ~Navigate~ :: toggle file kinds — same (~S~), new (~N~), modified (~M~) — beside change movement — next change (~M-n~), previous change (~M-p~).
 
 Top-level row 3 is ~Essential commands~ :: copy (~C~), mark (~m~), hop pane (~o~), ediff (~e~), rescan (~G~), undo (~u~).
-
-Top-level row 4 is ~Navigate~ :: next change (~M-n~), previous change (~M-p~).
 
 - ~Compare~ (~d~) :: Start or re-scan.  ~d~ compare two directories, ~r~ reopen a recent comparison, ~g~/~G~ rescan, ~k~ stop scan.
 - ~Git~ (~T~) :: ~G~ git revisions, ~H~ step git history (`,` older / `.` newer).
