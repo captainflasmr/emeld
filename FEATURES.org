@@ -17,9 +17,9 @@ Gaps between emeld and Meld, ordered by usefulness for an Emacs variant.
 
 * TODO Text / Content Filters
 
-** TODO Regex-based line filtering for diff comparison
+** DONE Regex-based line filtering for diff comparison
 
-  Ignore matching lines during content diff (e.g., strip comments, ignore blank lines).  Complements existing filename/glob filters.
+  Ignore matching lines during content diff (e.g., strip comments, ignore blank lines).  Complements existing filename/glob filters.  Implemented as =emeld-ignore-matching-lines= (regexp), =emeld-ignore-blank-lines= and =emeld-ignore-case=, all passed to every diff invocation alongside =emeld-ignore-whitespace=; presets remain below.
   
 ** TODO Built-in content filter presets
 
@@ -53,9 +53,9 @@ Gaps between emeld and Meld, ordered by usefulness for an Emacs variant.
 
 * TODO Navigation
 
-** TODO Change-count / jump-to-change-number
+** DONE Change-count / jump-to-change-number
 
-  =M-x goto-change= or numeric prefix to jump to the Nth change.
+  =M-n= / =M-p= step between changed files — skipping directory rows, identical files and inline previews — with a numeric prefix to repeat.  The header line shows the number of changed files displayed.
   
 ** TODO Left/right arrow keys to move focus between panes in file view
 

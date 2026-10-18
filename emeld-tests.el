@@ -427,6 +427,161 @@ must reuse them rather than create siblings with the same name."
       (emeld--render-nodes (list node) "" 60)
       (should-not (string-match-p "M f\\.txt" (buffer-string))))))
 
+(ert-deftest emeld-content-filter-args ()
+  "Content filters assemble into flags; the case filter is dir-mode only."
+  (let ((emeld-ignore-whitespace nil)
+        (emeld-ignore-blank-lines nil)
+        (emeld-ignore-case nil)
+        (emeld-ignore-matching-lines nil))
+    (should-not (emeld--content-filter-args))
+    (should-not (emeld--content-filter-args t))
+    (setq emeld-ignore-whitespace 'change)
+    (should (equal '("-b") (emeld--content-filter-args)))
+    (setq emeld-ignore-whitespace 'all
+          emeld-ignore-blank-lines t
+          emeld-ignore-matching-lines "^#"
+          emeld-ignore-case t)
+    (should (equal '("-w" "--ignore-blank-lines" "--ignore-matching-lines=^#" "-i")
+                   (emeld--content-filter-args)))
+    ;; `git diff' has no case-insensitive mode, so -i is dropped there.
+    (should (equal '("-w" "--ignore-blank-lines" "--ignore-matching-lines=^#")
+                   (emeld--content-filter-args t)))))
+
+(ert-deftest emeld-content-filters-change-scan ()
+  "Ignored-only differences drop out of a one-level scan when filters are on."
+  (let ((left (make-temp-file "emeld-fl" t))
+        (right (make-temp-file "emeld-fr" t)))
+    (unwind-protect
+        (progn
+          (with-temp-file (expand-file-name "case.txt" left) (insert "ALPHA\n"))
+          (with-temp-file (expand-file-name "case.txt" right) (insert "alpha\n"))
+          (with-temp-file (expand-file-name "blank.txt" left) (insert "one\ntwo\n"))
+          (with-temp-file (expand-file-name "blank.txt" right) (insert "one\n\ntwo\n"))
+          (with-temp-file (expand-file-name "re.txt" left) (insert "x\n# note\ny\n"))
+          (with-temp-file (expand-file-name "re.txt" right) (insert "x\ny\n"))
+          (with-temp-file (expand-file-name "real.txt" left) (insert "hello\n"))
+          (with-temp-file (expand-file-name "real.txt" right) (insert "world\n"))
+          (let ((emeld-respect-gitignore nil)
+                (emeld--active-filter-groups nil)
+                (emeld-ignore-whitespace nil)
+                (emeld-ignore-blank-lines nil)
+                (emeld-ignore-case nil)
+                (emeld-ignore-matching-lines nil))
+            (should (= 4 (length (emeld--diff-level-entries left right))))
+            (setq emeld-ignore-case t
+                  emeld-ignore-blank-lines t
+                  emeld-ignore-matching-lines "^#")
+            (let ((filtered (emeld--diff-level-entries left right)))
+              (should (equal '("real.txt" . different) (car filtered)))
+              (should (= 1 (length filtered))))))
+      (delete-directory left t)
+      (delete-directory right t))))
+
+(ert-deftest emeld-change-count-render ()
+  "The render tallies visible changed files for the header count."
+  (with-temp-buffer
+    (setq-local emeld--status-phase 'done
+                emeld--marked-paths (make-hash-table :test #'equal)
+                emeld--hidden-paths nil
+                emeld--left-root "/tmp/x/"
+                emeld--right-root "/tmp/y/"
+                emeld--column-width 40
+                emeld-show-file-meta nil
+                emeld-show-same nil
+                emeld-show-files t
+                emeld-show-added t
+                emeld-show-different t
+                emeld--git-mode nil)
+    (let* ((root (emeld-node-create :name "root" :is-dir t :expanded t))
+           (mod  (emeld-node-create :name "m.txt" :parent root
+                                    :left-path "/x/m.txt" :right-path "/x/m.txt"
+                                    :diff-status 'different))
+           (new  (emeld-node-create :name "n.txt" :parent root
+                                    :left-path "/x/n.txt"
+                                    :diff-status 'left-only))
+           (same (emeld-node-create :name "s.txt" :parent root
+                                    :left-path "/x/s.txt" :right-path "/x/s.txt"
+                                    :diff-status 'same))
+           (sub  (emeld-node-create :name "sub" :is-dir t :parent root :expanded t
+                                    :diff-status 'different))
+           (del  (emeld-node-create :name "d.txt" :parent sub
+                                    :right-path "/x/sub/d.txt"
+                                    :diff-status 'right-only)))
+      (setf (emeld-node-children sub) (list del))
+      (setf (emeld-node-children root) (list mod new same sub))
+      (setq-local emeld--root-node root)
+      (emeld--render)
+      ;; m.txt, n.txt and sub/d.txt count; the same file does not.
+      (should (= 3 emeld--change-count))
+      ;; Session-hidden nodes are not drawn, so they stop counting.
+      (setq-local emeld--hidden-paths '("m.txt"))
+      (emeld--render)
+      (should (= 2 emeld--change-count)))))
+
+(ert-deftest emeld-change-count-string ()
+  "The header count is bold, pluralized and suppressed during scans."
+  (with-temp-buffer
+    (setq-local emeld--change-count 4
+                emeld--status-phase 'done)
+    (let ((s (emeld--change-count-string)))
+      (should (string-match-p "\\`4 changes " s))
+      (should (eq 'bold (get-text-property 0 'face s))))
+    (setq-local emeld--change-count 1)
+    (should (string-match-p "\\`1 change " (emeld--change-count-string)))
+    (setq-local emeld--status-phase 'running-diff)
+    (should-not (emeld--change-count-string))
+    (setq-local emeld--status-phase 'building-tree)
+    (should-not (emeld--change-count-string))))
+
+(ert-deftest emeld-change-navigation ()
+  "Change movement skips directories, identical files and inline diff lines."
+  (with-temp-buffer
+    (setq-local emeld--status-phase 'done
+                emeld--marked-paths (make-hash-table :test #'equal)
+                emeld--hidden-paths nil
+                emeld--left-root "/tmp/x/"
+                emeld--right-root "/tmp/y/"
+                emeld-show-file-meta nil
+                emeld-show-same t
+                emeld-show-files t
+                emeld-show-added t
+                emeld-show-different t
+                emeld--git-mode nil)
+    (let* ((root  (emeld-node-create :name "root" :is-dir t :expanded t))
+           (same  (emeld-node-create :name "a-same.txt" :parent root
+                                     :left-path "/x/a" :right-path "/x/a"
+                                     :diff-status 'same))
+           (dir   (emeld-node-create :name "b-dir" :is-dir t :parent root :expanded t
+                                     :diff-status 'different))
+           (inner (emeld-node-create :name "inner.txt" :parent dir
+                                     :left-path "/x/i" :right-path "/x/i"
+                                     :diff-status 'different))
+           (mod   (emeld-node-create :name "c-mod.txt" :parent root
+                                     :left-path "/x/c" :right-path "/x/c"
+                                     :diff-status 'different))
+           (new   (emeld-node-create :name "d-new.txt" :parent root
+                                     :left-path "/x/d"
+                                     :diff-status 'left-only)))
+      (setf (emeld-node-inline-diff mod) (list "  @@ -1 +1 @@"))
+      (setf (emeld-node-children dir) (list inner))
+      (setf (emeld-node-children root) (list same dir mod new))
+      (setq-local emeld--root-node root)
+      (emeld--render)
+      (goto-char (point-min))
+      ;; First change: inner.txt (same file and directory rows skipped).
+      (emeld-next-change)
+      (should (equal "inner.txt" (emeld-node-name (emeld--current-node))))
+      (emeld-next-change)
+      (should (equal "c-mod.txt" (emeld-node-name (emeld--current-node))))
+      ;; The inline diff line under c-mod.txt is not a stop.
+      (emeld-next-change)
+      (should (equal "d-new.txt" (emeld-node-name (emeld--current-node))))
+      ;; No further change: point stays put.
+      (emeld-next-change)
+      (should (equal "d-new.txt" (emeld-node-name (emeld--current-node))))
+      (emeld-previous-change)
+      (should (equal "c-mod.txt" (emeld-node-name (emeld--current-node)))))))
+
 (ert-deftest emeld-delete-one-captures-trash ()
   "`emeld--delete-one' returns the trash location it moved PATH to."
   (let* ((tmp (make-temp-file "emeld-trash" t))

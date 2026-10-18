@@ -226,13 +226,57 @@ re-runs the comparison rather than just re-rendering."
                  (const :tag "Ignore all whitespace (-w)" all))
   :group 'emeld)
 
-(defun emeld--whitespace-args ()
-  "Return the whitespace diff flags for `emeld-ignore-whitespace'.
-The returned list is valid for both `diff' and `git diff'."
-  (pcase emeld-ignore-whitespace
-    ('change '("-b"))
-    ('all '("-w"))
-    (_ nil)))
+(defcustom emeld-ignore-blank-lines nil
+  "Whether to ignore blank-line changes when comparing file content.
+Adds `--ignore-blank-lines' to every `diff'/`git diff' invocation —
+the difference scan, per-subdirectory rescan, identical-file merge,
+quick and inline diffs, and `emeld-format-patch' — like
+`emeld-ignore-whitespace'.  In git mode, `git diff --name-status' may
+still list a file whose only change is blank lines when no other
+content filter is active (the per-file diff honors the setting); see
+`emeld--content-filter-args'.  Toggling re-runs the comparison."
+  :type 'boolean
+  :group 'emeld)
+
+(defcustom emeld-ignore-case nil
+  "Whether to ignore case in file *content* during directory comparison.
+Adds `diff -i' to the directory-mode comparisons (scan, rescan,
+identical-file merge, quick and inline diffs, patch).  Unlike the
+other content filters this one has no `git diff' equivalent, so it is
+deliberately not applied to git revision comparisons.  Toggling
+re-runs the comparison."
+  :type 'boolean
+  :group 'emeld)
+
+(defcustom emeld-ignore-matching-lines nil
+  "Regexp of lines to ignore during file-content comparison, or nil.
+When non-nil, adds `--ignore-matching-lines=REGEXP' to every
+`diff'/`git diff' invocation: a change is ignored when all of its
+changed lines match REGEXP — handy for skipping comment or
+boilerplate lines.  Toggling re-runs the comparison; set it
+interactively with `emeld-set-ignore-matching-lines'."
+  :type '(choice (const :tag "None" nil) regexp)
+  :group 'emeld)
+
+(defun emeld--content-filter-args (&optional git-mode)
+  "Return content-filter flags for the current comparison settings.
+Combines `emeld-ignore-whitespace', `emeld-ignore-blank-lines',
+`emeld-ignore-matching-lines' and `emeld-ignore-case' into arguments
+accepted by both GNU `diff' and `git diff'.  `emeld-ignore-case' has
+no git equivalent, so it is omitted when GIT-MODE is non-nil.
+Git quirk: `--ignore-blank-lines' does not suppress entries in `git
+diff --name-status' unless another content filter is also active (the
+hunk output honors it regardless), so a file whose only change is
+blank lines can still be listed in git mode."
+  (append
+   (pcase emeld-ignore-whitespace
+     ('change '("-b"))
+     ('all '("-w"))
+     (_ nil))
+   (when emeld-ignore-blank-lines '("--ignore-blank-lines"))
+   (when emeld-ignore-matching-lines
+     (list (concat "--ignore-matching-lines=" emeld-ignore-matching-lines)))
+   (when (and emeld-ignore-case (not git-mode)) '("-i"))))
 
 (defcustom emeld-copy-method 'auto
   "How `emeld-copy' transfers files and directories between the two sides.
@@ -436,6 +480,14 @@ Surfaced as a live entry tally in the header line.")
 (defvar-local emeld--scan-total 0
   "Total diff lines to parse while building the tree, or 0 until known.
 With `emeld--scan-processed' this drives the header-line progress bar.")
+
+(defvar-local emeld--change-count 0
+  "Number of changed files currently shown in the comparison.
+Counts rendered non-directory nodes whose status is `different',
+`left-only' or `right-only'; identical files (shown when
+`emeld-show-same' is on) and session-hidden nodes are excluded.  Reset
+and recounted by `emeld--render', surfaced in the header line by
+`emeld--change-count-string'.")
 
 (defvar-local emeld--saved-point-path nil
   "Saved point path to restore across async refresh cycle.")
@@ -1238,7 +1290,7 @@ Uses a process filter to stream-parse output incrementally."
          ;; `diff -rqs' report — and `emeld--entries-to-nodes-progressive'
          ;; assemble — every identical file up front.
          (command `("diff" "-rq"
-                    ,@(emeld--whitespace-args)
+                    ,@(emeld--content-filter-args)
                     ,@excludes
                     ,(expand-file-name emeld--left-root)
                     ,(expand-file-name emeld--right-root)))
@@ -1332,7 +1384,7 @@ Return a list of (NAME . KIND); KIND is `different', `left-only',
 `.gitignore' via the same `--exclude' args as a full scan.  Subdirectories
 present on both sides are reported (as `common-dir') but not descended."
   (let ((args (append '("-q")
-                      (emeld--whitespace-args)
+                      (emeld--content-filter-args)
                       (emeld--diff-exclude-args)
                       (list (expand-file-name left-sub)
                             (expand-file-name right-sub))))
@@ -1840,7 +1892,7 @@ shared `emeld--process-same-files-worker'."
            (left emeld--left-root)
            (right emeld--right-root)
            (root emeld--root-node)
-           (command `("diff" "-rqs" ,@(emeld--whitespace-args) ,@excludes
+           (command `("diff" "-rqs" ,@(emeld--content-filter-args) ,@excludes
                       ,(expand-file-name left)
                       ,(expand-file-name right)))
            (proc (make-process
@@ -2554,6 +2606,8 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "W")   #'emeld-swap-panes)
     (define-key map (kbd "n")   #'emeld-next-line)
     (define-key map (kbd "p")   #'emeld-previous-line)
+    (define-key map (kbd "M-n") #'emeld-next-change)
+    (define-key map (kbd "M-p") #'emeld-previous-change)
     (define-key map (kbd "o")   #'emeld-jump-other-side)
     (define-key map (kbd "P")   #'emeld-format-patch)
     (define-key map (kbd "C")   #'emeld-copy)
@@ -2606,6 +2660,9 @@ Mimics Meld's display of missing files."
   (make-local-variable 'emeld-show-files)
   (make-local-variable 'emeld-respect-gitignore)
   (make-local-variable 'emeld-ignore-whitespace)
+  (make-local-variable 'emeld-ignore-blank-lines)
+  (make-local-variable 'emeld-ignore-case)
+  (make-local-variable 'emeld-ignore-matching-lines)
   ;; Layout tweaks are per-comparison too, so adjusting tree-lines, the
   ;; compact layout, indentation or the column split in one buffer does not
   ;; leak into other emeld buffers or the global defaults.
@@ -2685,6 +2742,72 @@ If the current side is empty but the other has a file, snap to it."
   (let* ((width (emeld--effective-column-width))
          (target-on-right (< (current-column) width)))
     (emeld--move-to-node-name target-on-right)))
+
+(defun emeld--changed-file-p (node)
+  "Non-nil when NODE is a file in a changed state.
+Modified, left-only and right-only files are changed; directories
+(and nil, as on header lines) are not; identical (`same') files are
+not."
+  (and node
+       (not (emeld-node-is-dir node))
+       (memq (emeld-node-diff-status node) '(different left-only right-only))))
+
+(defun emeld--changed-row-at-line-p ()
+  "Non-nil when the line at point is a changed file row.
+Inline-diff preview lines carry the same `emeld-node' property as the
+file row they belong to, so they are excluded."
+  (let ((bol (line-beginning-position)))
+    (and (not (get-text-property bol 'emeld-inline-diff))
+         (emeld--changed-file-p (get-text-property bol 'emeld-node)))))
+
+(defun emeld--next-changed-row (dir)
+  "Return the position of the next changed file row in direction DIR.
+DIR is 1 for forward or -1 for backward; the search starts on the line
+after point.  Returns nil when no changed file row follows."
+  (save-excursion
+    (beginning-of-line)
+    (let (found)
+      (while (and (not found)
+                  (if (> dir 0)
+                      (< (point) (point-max))
+                    (> (point) (point-min))))
+        (forward-line dir)
+        (when (emeld--changed-row-at-line-p)
+          (setq found (point))))
+      found)))
+
+(defun emeld--change-move (dir count)
+  "Move to the next changed file row in direction DIR, COUNT times.
+Aligns to the node name on the side point starts on, like
+`emeld-next-line'.  Echoes a note when fewer than COUNT changes remain."
+  (let* ((width (emeld--effective-column-width))
+         (on-right (>= (current-column) width))
+         (n (max 1 (or count 1)))
+         (moved 0))
+    (dotimes (_ n)
+      (let ((pos (emeld--next-changed-row dir)))
+        (when pos
+          (goto-char pos)
+          (cl-incf moved))))
+    (unless (= moved n)
+      (message "No more changes"))
+    (when (> moved 0)
+      (emeld--move-to-node-name on-right))))
+
+(defun emeld-next-change (&optional count)
+  "Move to the next changed file row.
+Changed rows are files in a changed state (modified, left-only or
+right-only); directory rows, identical files shown by
+`emeld-show-same' and inline-diff preview lines are skipped.  With
+numeric prefix COUNT, move that many changes forward."
+  (interactive "p")
+  (emeld--change-move 1 count))
+
+(defun emeld-previous-change (&optional count)
+  "Move to the previous changed file row.
+See `emeld-next-change' for what counts as a changed row and COUNT."
+  (interactive "p")
+  (emeld--change-move -1 count))
 
 (defun emeld-toggle-show-same ()
   "Toggle showing identical files.
@@ -2811,6 +2934,36 @@ so it re-runs the comparison rather than just re-rendering."
              ('all "all (-w)")
              (_ "off")))
   (emeld-refresh))
+
+(defun emeld-toggle-ignore-blank-lines ()
+  "Toggle `emeld-ignore-blank-lines', then rescan.
+Like `emeld-toggle-ignore-whitespace' this changes which files count as
+differing, so it re-runs the comparison rather than just re-rendering."
+  (interactive)
+  (setq emeld-ignore-blank-lines (not emeld-ignore-blank-lines))
+  (message "Ignore blank lines: %s" (if emeld-ignore-blank-lines "on" "off"))
+  (emeld-refresh))
+
+(defun emeld-toggle-ignore-case ()
+  "Toggle `emeld-ignore-case', then rescan.
+Has no effect in git revision comparisons (`git diff' has no
+case-insensitive mode), which the message notes when in git mode."
+  (interactive)
+  (setq emeld-ignore-case (not emeld-ignore-case))
+  (message "Ignore case: %s%s" (if emeld-ignore-case "on" "off")
+           (if emeld--git-mode " (no effect in git mode)" ""))
+  (emeld-refresh))
+
+(defun emeld-set-ignore-matching-lines ()
+  "Set `emeld-ignore-matching-lines' interactively, then rescan.
+An empty input clears the regexp, returning to exact matching (subject
+to the other content filters)."
+  (interactive)
+  (let ((re (read-regexp "Ignore lines matching regexp (empty to clear): "
+                         emeld-ignore-matching-lines)))
+    (setq emeld-ignore-matching-lines (if (string-empty-p re) nil re))
+    (message "Ignore matching lines: %s" (or emeld-ignore-matching-lines "off"))
+    (emeld-refresh)))
 
 (defun emeld-toggle-expand ()
   "Toggle expansion of the node at point."
@@ -3020,7 +3173,7 @@ same `--exclude' args as a full scan.  Runs `diff -rqs' when
 `emeld-show-same' is on so identical files are included, else `diff -rq'.
 Synchronous: the diff is scoped to one subtree, so it is bounded."
   (let ((args (append (list (if emeld-show-same "-rqs" "-rq"))
-                      (emeld--whitespace-args)
+                      (emeld--content-filter-args)
                       (emeld--diff-exclude-args)
                       (list (expand-file-name left-sub)
                             (expand-file-name right-sub))))
@@ -3363,7 +3516,7 @@ Identical files have no diff."
     (let* ((repo emeld--git-repo)
            (rel (emeld--node-relpath node))
            (revargs (emeld--git-rev-args emeld--git-left-rev emeld--git-right-rev))
-           (args (append (list "diff" "--no-color") (emeld--whitespace-args)
+           (args (append (list "diff" "--no-color") (emeld--content-filter-args t)
                          revargs (list "--" rel))))
       (with-temp-buffer
         (let ((default-directory repo))
@@ -4358,11 +4511,22 @@ hint at the key that toggles it (e.g. \"S\" in \"Same\")."
                       (substring label 1))
             label)))
 
+(defun emeld--change-count-string ()
+  "Return the header segment counting changed files, or nil while scanning.
+Reads `emeld--change-count' (the files currently shown); a stale tally
+would mislead while a scan is running, so it is suppressed then.  The
+segment is bold to stand out among the filter states."
+  (unless (memq emeld--status-phase '(running-diff building-tree))
+    (propertize (format "%d change%s " emeld--change-count
+                        (if (= emeld--change-count 1) "" "s"))
+                'face 'bold)))
+
 (defun emeld--display-state-string ()
   "Return a string showing the primary Same/New/Modified filter states.
 Each label is spelled out with a leading ASCII checkbox.  Scan-affecting
 notes are appended after them: the whitespace mode (`[ws:amount]' or
-`[ws:all]') when active, a
+`[ws:all]') and the other content filters (`[ignore-blanks]',
+`[ignore-re]', `[ignore-case]') when active, a
 `warning'-faced \"(!) gitignore off\" note while `emeld-respect-gitignore'
 is off (git-ignored files are then included in the scan — the exception
 to the default of dropping them, which needs no flag), and a
@@ -4380,6 +4544,9 @@ from the transient (\\[emeld-dispatch])."
    (emeld--toggle-indicator "Modified" emeld-show-different)
    (when emeld-ignore-whitespace
      (if (eq emeld-ignore-whitespace 'all) " [ws:all]" " [ws:amount]"))
+   (when emeld-ignore-blank-lines " [ignore-blanks]")
+   (when emeld-ignore-matching-lines " [ignore-re]")
+   (when emeld-ignore-case " [ignore-case]")
    ;; Git-ignored files are dropped from the scan by default, so that
    ;; needs no flag; warn only when respect is off (the exception),
    ;; since ignored files are then included.
@@ -4434,7 +4601,7 @@ reflects the live scan counters without needing to be re-installed."
   (setq header-line-format
         '(:eval
           (concat (emeld--scan-progress-string)
-                  " " (emeld--display-state-string) " "
+                  " " (emeld--change-count-string) (emeld--display-state-string) " "
                   ;; Flag a git revision comparison and which revs.
                   (when emeld--git-mode
                     (propertize (format "[git %s→%s] "
@@ -4505,6 +4672,8 @@ describe the work tree, not the compared content)."
     (buffer-disable-undo)
     (erase-buffer)
     (remove-overlays)
+    ;; `emeld--render-nodes' recounts the changed files it draws.
+    (setq emeld--change-count 0)
     
     (cond
      ;; Scan in progress, no nodes arrived yet
@@ -4624,7 +4793,7 @@ never visible regardless of the other rules."
       (if (emeld-node-is-dir node)
           (setq result (nconc result (emeld--collect-changed-leaves (emeld-node-children node))))
         (when (and (not (emeld-node-is-filtered node))
-                   (memq (emeld-node-diff-status node) '(different left-only right-only)))
+                   (emeld--changed-file-p node))
           (push node result))))
     (nreverse result)))
 
@@ -4637,7 +4806,7 @@ makes it match the left."
          (status (emeld-node-diff-status node))
          (rel (emeld--node-relpath node)))
     (with-temp-buffer
-      (let ((ws (emeld--whitespace-args)))
+      (let ((ws (emeld--content-filter-args)))
         (cond
          ((eq status 'different)
           (apply #'call-process "diff" nil t nil "-u" (append ws (list right left))))
@@ -4723,6 +4892,9 @@ node — see `emeld--node-relpath' for the equivalent slow form."
     (dolist (node nodes)
       (setq idx (1+ idx))
       (when (emeld--node-visible-p node)
+        ;; Tally what is actually shown for the header count.
+        (when (emeld--changed-file-p node)
+          (cl-incf emeld--change-count))
         (let* ((status (emeld-node-diff-status node))
                (is-last (= idx count))
                (branch (emeld--tree-branch is-last))
@@ -4945,10 +5117,16 @@ node — see `emeld--node-relpath' for the equivalent slow form."
      (lambda () (interactive) (emeld-toggle-gitignore)))
     ("i" (lambda ()
            (pcase emeld-ignore-whitespace
-             ('change "[-b] ignore ws (amount)")
-             ('all "[-w] ignore ws (all)")
-             (_ "[ ] ignore ws")))
+             ('change "[-b] ignore whitespace (amount)")
+             ('all "[-w] ignore whitespace (all)")
+             (_ "[ ] ignore whitespace")))
      (lambda () (interactive) (emeld-toggle-ignore-whitespace)))
+    ("B" (lambda () (if emeld-ignore-blank-lines "[x] ignore blanks" "[ ] ignore blanks"))
+     (lambda () (interactive) (emeld-toggle-ignore-blank-lines)))
+    ("C" (lambda () (if emeld-ignore-case "[x] ignore case" "[ ] ignore case"))
+     (lambda () (interactive) (emeld-toggle-ignore-case)))
+    ("R" (lambda () (if emeld-ignore-matching-lines "[x] ignore matching lines" "[ ] ignore matching lines"))
+     (lambda () (interactive) (emeld-set-ignore-matching-lines)))
     ("c" (lambda () (if emeld--git-commit-expanded "[x] commit msg" "[ ] commit msg"))
      (lambda () (interactive) (emeld-git-toggle-commit-message)) :transient t
      :if (lambda () emeld--git-mode))
@@ -5008,7 +5186,10 @@ node — see `emeld--node-relpath' for the equivalent slow form."
    ("o"   "hop to other pane" emeld-jump-other-side)
    ("e"   "ediff"           emeld-ediff)
    ("G"   "rescan"          emeld-rescan)
-   ("u"   "undo last delete/copy" emeld-undo-last-op)])
+   ("u"   "undo last delete/copy" emeld-undo-last-op)]
+  ["Navigate"
+   ("M-n" "next change"     emeld-next-change :transient t)
+   ("M-p" "previous change" emeld-previous-change :transient t)])
 
 (define-key emeld-mode-map (kbd "?") #'emeld-dispatch)
 
