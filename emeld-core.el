@@ -5131,13 +5131,22 @@ node — see `emeld--node-relpath' for the equivalent slow form."
             ;; act on the file, and TAB again collapses the preview.
             (when (and (not (emeld-node-is-dir node)) (emeld-node-inline-diff node))
               ;; The two leading spaces stand in for the mark column that
-              ;; precedes `indent-prefix' on every tree row, so the tree guides
-              ;; in `indent-prefix' line up vertically with the rows above; the
-              ;; remaining offset spaces — including the status marker's width —
-              ;; indent the diff text under the name.
-              (let ((diff-prefix (concat "  " indent-prefix
-                                         (make-string (emeld--tree-branch-width) ?\s)
-                                         (make-string (string-width status-marker) ?\s))))
+              ;; precedes `indent-prefix' on every tree row, and the branch
+              ;; column repeats the node's own trunk glyph (`│' unless it is
+              ;; the last sibling), so the tree lines run through the preview
+              ;; exactly as they would through a directory's children; the
+              ;; remaining spaces — including the status marker's width —
+              ;; indent the diff text under the name.  The guide span takes the
+              ;; rows' `shadow' face, so the preview cannot stand out by colour.
+              (let* ((branch-width (emeld--tree-branch-width))
+                     (guide (if emeld-show-tree-lines
+                                (concat (if is-last " " "│")
+                                        (make-string (1- branch-width) ?\s))
+                              (make-string branch-width ?\s)))
+                     (diff-prefix (concat "  "
+                                          (propertize (concat indent-prefix guide)
+                                                      'face 'shadow)
+                                          (make-string (string-width status-marker) ?\s))))
                 (dolist (dl (emeld-node-inline-diff node))
                   (let ((dstart (point)))
                     (insert diff-prefix dl "\n")

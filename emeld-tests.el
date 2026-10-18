@@ -427,6 +427,64 @@ must reuse them rather than create siblings with the same name."
       (emeld--render-nodes (list node) "" 60)
       (should-not (string-match-p "M f\\.txt" (buffer-string))))))
 
+(ert-deftest emeld-render-inline-diff-tree-guides ()
+  "Inline diff lines repeat the node's trunk, in the rows' `shadow' face."
+  (with-temp-buffer
+    (setq-local emeld--marked-paths (make-hash-table :test #'equal))
+    (setq-local emeld--git-mode nil)
+    (let* ((emeld-show-file-meta nil)
+           (a (emeld-node-create :name "a.txt" :diff-status 'different
+                                 :left-path "/x/sub/a.txt" :right-path "/x/sub/a.txt"
+                                 :inline-diff (list "+added")))
+           (b (emeld-node-create :name "b.txt" :diff-status 'different
+                                 :left-path "/x/sub/b.txt" :right-path "/x/sub/b.txt"
+                                 :inline-diff (list "-gone")))
+           (c (emeld-node-create :name "c.txt" :diff-status 'different
+                                 :left-path "/x/c.txt" :right-path "/x/c.txt"
+                                 :inline-diff (list "+root")))
+           (d (emeld-node-create :name "d.txt" :diff-status 'different
+                                 :left-path "/x/d.txt" :right-path "/x/d.txt"))
+           (sub (emeld-node-create :name "sub" :is-dir t :diff-status 'different
+                                   :left-path "/x/sub" :right-path "/x/sub"
+                                   :children (list a b)))
+           (root (emeld-node-create :name "" :is-dir t :expanded t
+                                    :children (list sub c d))))
+      (setf (emeld-node-parent sub) root
+            (emeld-node-parent c) root
+            (emeld-node-parent d) root
+            (emeld-node-parent a) sub
+            (emeld-node-parent b) sub)
+      (emeld--render-nodes (emeld-node-children root) "" 80)
+      ;; a.txt is nested and not the last sibling: the preview repeats the
+      ;; parent's guide and a.txt's own trunk, both shadow-faced like the rows.
+      (goto-char (point-min))
+      (search-forward "+added")
+      (let ((bol (line-beginning-position)))
+        (should (equal "  │  │   " (buffer-substring-no-properties bol (+ bol 9))))
+        (should (eq ?│ (char-after (+ bol 5))))
+        (should (eq 'shadow (get-text-property (+ bol 2) 'face)))
+        (should (eq 'shadow (get-text-property (+ bol 5) 'face))))
+      ;; b.txt is the last sibling: its trunk column stays blank.
+      (goto-char (point-min))
+      (search-forward "-gone")
+      (let ((bol (line-beginning-position)))
+        (should (equal "  │      " (buffer-substring-no-properties bol (+ bol 9)))))
+      ;; c.txt is top level and not the last sibling: a single trunk glyph.
+      (goto-char (point-min))
+      (search-forward "+root")
+      (let ((bol (line-beginning-position)))
+        (should (equal "  │   " (buffer-substring-no-properties bol (+ bol 6))))
+        (should (eq 'shadow (get-text-property (+ bol 2) 'face))))
+      ;; With tree lines disabled the preview stays blank, like the rows.
+      (let ((emeld-show-tree-lines nil))
+        (erase-buffer)
+        (emeld--render-nodes (emeld-node-children root) "" 80)
+        (goto-char (point-min))
+        (search-forward "+added")
+        (should-not (string-match-p
+                     "│" (buffer-substring-no-properties
+                         (line-beginning-position) (line-end-position))))))))
+
 (ert-deftest emeld-content-filter-args ()
   "Content filters assemble into flags; the case filter is dir-mode only."
   (let ((emeld-ignore-whitespace nil)
