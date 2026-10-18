@@ -5213,6 +5213,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
     ("r" "recent…"             emeld-recent)]
    ["Refresh"
     ("g" "rescan"                emeld-rescan)
+    ("G" "rescan"                emeld-rescan)
     ("k" "stop scan"             emeld-stop-scan)]])
 
 (transient-define-prefix emeld-dispatch-git ()
@@ -5231,6 +5232,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
     (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
    ("x"   "delete marked/at point" emeld-delete)
    ("D"   "delete at point (this pane)" emeld-delete-at-point)
+   ("u"   "undo last delete/copy" emeld-undo-last-op)
    ("l"   "list operations" emeld-list-operations)])
 
 (transient-define-prefix emeld-dispatch-diff ()

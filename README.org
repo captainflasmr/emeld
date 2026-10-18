@@ -154,9 +154,9 @@ Top-level row 3 is ~Essential commands~ :: copy (~C~), mark (~m~), hop pane (~o~
 
 Top-level row 4 is ~Navigate~ :: next change (~M-n~), previous change (~M-p~).
 
-- ~Compare~ (~d~) :: Start or re-scan.  ~d~ compare two directories, ~r~ reopen a recent comparison, ~g~ rescan, ~k~ stop scan.
+- ~Compare~ (~d~) :: Start or re-scan.  ~d~ compare two directories, ~r~ reopen a recent comparison, ~g~/~G~ rescan, ~k~ stop scan.
 - ~Git~ (~T~) :: ~G~ git revisions, ~H~ step git history (`,` older / `.` newer).
-- ~Act — Sync~ (~s~) :: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point, ~D~ delete at point (this pane), ~l~ list undoable operations.
+- ~Act — Sync~ (~s~) :: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point, ~D~ delete at point (this pane), ~u~ undo last delete/copy, ~l~ list undoable operations.
 - ~Act — Diff~ (~h~) :: ~d~ diff directory at point (whole root at the top level), ~P~ format patch.
 - ~Act — Filter~ (~F~) :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), edit ~.dir-locals.el~ (~E~), or add the node at point as a filter (~&~).
 - ~Inspect — View~ (~v~) :: Toggle what is displayed — tree-lines (~t~), tree density (~z~ cycles compact → extreme → wide), ~.gitignore~ respect (~I~), content filters — whitespace (~i~ cycles off → amount → all), blank lines (~B~), case (~C~, directory mode only; ~git diff~ has no equivalent) and a regexp of ignorable lines (~R~ prompts, empty input clears) — commit message (~c~, git mode only), file size/mtime tags (~f~), session hide (~C-k~ hide node at point, ~C-u C-k~ unhides all); pane resize (~<~/~>~) and indent (~{~/~}~).
