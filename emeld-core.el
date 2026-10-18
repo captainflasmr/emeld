@@ -376,6 +376,9 @@ with a dim `…'; expanding one (TAB) enumerates its subtree.")
   "Currently running `make-process' for the async diff scan.")
 (defvar-local emeld--copy-proc nil
   "In-flight async rsync process for `emeld-copy', or nil when idle.")
+(defvar-local emeld--copy-timer nil
+  "Pending timer driving an async built-in copy, or nil when idle.
+See `emeld--copy-builtin-async'.")
 (defvar-local emeld--scan-diff-lines nil
   "Diff status lines from `diff -rq' output.")
 (defvar-local emeld--scan-buf nil
@@ -2876,7 +2879,11 @@ use rsync (see `emeld-copy-method')."
   (interactive)
   (setq emeld-copy-mirror (not emeld-copy-mirror))
   (force-mode-line-update)
-  (message "Copy mirror (rsync --delete): %s" (if emeld-copy-mirror "ON" "off")))
+  (message "Copy mirror (rsync --delete): %s%s"
+           (if emeld-copy-mirror "ON" "off")
+           (if (and emeld-copy-mirror (not (emeld--copy-use-rsync-p)))
+               "  (needs rsync)"
+             "")))
 
 (defun emeld-increase-indent ()
   "Increase the directory indentation."
@@ -3089,15 +3096,19 @@ bounded scan, the identical-files merge) sees a newer generation and aborts."
   (when (and emeld--scan-process
              (process-live-p emeld--scan-process))
     (delete-process emeld--scan-process))
-  ;; An async rsync copy is independent of the scan, but a rescan or buffer
-  ;; kill should not leave it running with a sentinel pointing at a stale tree.
+  ;; Async copies are independent of the scan, but a rescan or buffer kill
+  ;; should not leave one running with a sentinel (rsync) or a pending
+  ;; timer (built-in) pointing at a stale tree.
   (when (and emeld--copy-proc (process-live-p emeld--copy-proc))
     (delete-process emeld--copy-proc))
+  (when (timerp emeld--copy-timer)
+    (cancel-timer emeld--copy-timer))
   (dolist (p emeld--gitignore-procs)
     (when (process-live-p p) (delete-process p)))
   (setq emeld--gitignore-procs nil
         emeld--scan-process nil
         emeld--copy-proc nil
+        emeld--copy-timer nil
         emeld--scan-diff-lines nil
         emeld--scan-buf nil))
 
@@ -3974,6 +3985,12 @@ checked once up front in `emeld-copy'."
   (and (memq emeld-copy-method '(auto rsync))
        (executable-find emeld-rsync-command)))
 
+(defun emeld--copy-method-effective ()
+  "Return the method `emeld-copy' will actually use.
+`rsync' when `emeld-copy-method' asks for it and the program is
+available, else `builtin'."
+  (if (emeld--copy-use-rsync-p) 'rsync 'builtin))
+
 (defun emeld--copy-dest (source dest-root)
   "Return the destination path for SOURCE under DEST-ROOT, making its parent.
 The path within the side is preserved; a stray file occupying the parent
@@ -4006,9 +4023,8 @@ when `emeld-copy-mirror' is enabled, making DEST exactly match SOURCE."
 
 (defun emeld--copy-one (source dest-root)
   "Copy a single file or directory at SOURCE to DEST-ROOT preserving path.
-Synchronous built-in copy (`copy-file' / `copy-directory'); rsync copies
-go through `emeld--copy-async' instead.  Creates missing parent
-directories."
+The built-in copy performed per node by `emeld--copy-builtin-async';
+creates missing parent directories."
   (let ((dest (emeld--copy-dest source dest-root)))
     (if (file-directory-p source)
         (if (fboundp 'copy-directory-contents)
@@ -4017,7 +4033,6 @@ directories."
             (delete-file dest))
           (copy-directory source dest t t))
       (copy-file source dest t))
-    (message "Copied %s" (file-name-nondirectory (directory-file-name source)))
     dest))
 
 (defun emeld--find-node (rel)
@@ -4111,6 +4126,11 @@ located in the tree."
           (setq ok nil))))
     (if ok (emeld--render) (emeld-refresh))))
 
+(defun emeld--copy-busy-p ()
+  "Non-nil while an asynchronous copy is still running in this buffer."
+  (or (and emeld--copy-proc (process-live-p emeld--copy-proc))
+      (timerp emeld--copy-timer)))
+
 (defun emeld--copy-async (jobs rels mirror)
   "Copy JOBS via rsync, one at a time, asynchronously.
 JOBS is a list of (SOURCE . DEST-ROOT).  RELS are the relative paths the
@@ -4120,7 +4140,7 @@ marks are cleared and a summary is reported.  MIRROR non-nil records that
 destination-only files may have been pruned (not restorable by undo).
 Successful copies are pushed to `emeld--op-log' for `emeld-undo-last-op'.
 rsync output is logged to the hidden buffer ` *emeld-rsync*'."
-  (when (and emeld--copy-proc (process-live-p emeld--copy-proc))
+  (when (emeld--copy-busy-p)
     (user-error "A copy is already in progress"))
   (let* ((buf (current-buffer))
          (prog (executable-find emeld-rsync-command))
@@ -4181,26 +4201,59 @@ rsync output is logged to the hidden buffer ` *emeld-rsync*'."
     (message "Copying %d node(s) via rsync..." total)
     (funcall run-next jobs)))
 
-(defun emeld--copy-sync (jobs rels)
-  "Copy JOBS (list of (SOURCE . DEST-ROOT)) synchronously with the built-in copy.
-RELS are the relative paths the overall sync touched; only those nodes
-are updated in place afterwards (`emeld--update-after-copy')."
-  (let ((count 0) (errors 0))
-    (dolist (job jobs)
-      (if (file-exists-p (car job))
-          (condition-case nil
-              (let ((dest (emeld--copy-one (car job) (cdr job))))
-                (cl-incf count)
-                (emeld--log-op (list :type 'copy :src (car job) :dest dest
-                                     :time (current-time)
-                                     :is-dir (file-directory-p (car job))
-                                     :mirror nil)))
-            (error (cl-incf errors)))
-        (cl-incf errors)))
-    (clrhash emeld--marked-paths)
-    (emeld--update-after-copy rels)
-    (message "Copied %d node(s)%s" count
-             (if (> errors 0) (format " (%d errors)" errors) ""))))
+(defun emeld--copy-builtin-async (jobs rels)
+  "Copy JOBS with the built-in copy, one node at a time, asynchronously.
+The fallback used when rsync is unavailable: `emeld--copy-one' copies a
+node, then the loop reschedules itself through a zero-delay timer, so
+Emacs stays responsive between nodes (a single very large node still
+blocks while it is copied).  Cancelling `emeld--copy-timer' — which
+`emeld--stop-scan' does for a rescan or a buffer kill — aborts the
+chain.  RELS are the relative paths the overall sync touched; on
+completion only those nodes are updated in place
+\(`emeld--update-after-copy'), marks are cleared and a summary is
+reported.  Successful copies are pushed to `emeld--op-log' for
+`emeld-undo-last-op'."
+  (when (emeld--copy-busy-p)
+    (user-error "A copy is already in progress"))
+  (let* ((buf (current-buffer))
+         (total (length jobs))
+         (done 0) (count 0) (errors 0)
+         run-next)
+    (setq run-next
+          (lambda (remaining)
+            (cond
+             ((not (buffer-live-p buf)) nil) ; emeld buffer gone; abandon quietly
+             ((null remaining)
+              (with-current-buffer buf
+                (setq emeld--copy-timer nil)
+                (clrhash emeld--marked-paths)
+                (emeld--update-after-copy rels))
+              (message "Copied %d/%d node(s) using the built-in copy%s" count total
+                       (if (> errors 0)
+                           (format " (%d error%s)" errors (if (= errors 1) "" "s"))
+                         "")))
+             (t
+              (let ((src (caar remaining))
+                    (dst-root (cdar remaining)))
+                (cl-incf done)
+                (if (not (file-exists-p src))
+                    (cl-incf errors)
+                  (condition-case _err
+                      (with-current-buffer buf
+                        (let ((dest (emeld--copy-one src dst-root)))
+                          (cl-incf count)
+                          (emeld--log-op (list :type 'copy
+                                               :src src :dest dest
+                                               :time (current-time)
+                                               :is-dir (file-directory-p src)
+                                               :mirror nil))))
+                    (error (cl-incf errors)))
+                  (message "Copying %d/%d: %s" done total
+                           (file-name-nondirectory (directory-file-name src))))
+                (setq emeld--copy-timer
+                      (run-with-timer 0 nil run-next (cdr remaining))))))))
+    (message "Copying %d node(s) using the built-in copy..." total)
+    (setq emeld--copy-timer (run-with-timer 0 nil run-next jobs))))
 
 (defun emeld--copy-jobs ()
   "Return sync jobs for the marked set (or the node at point).
@@ -4247,11 +4300,12 @@ marked on its empty (struck-through) side is DELETED from the other side.
 With no marks the node at point is synced from the side point is in.
 Missing parent directories are created on the destination.
 
-Copies use rsync or the built-in copy per `emeld-copy-method'; rsync
-copies run asynchronously (one node at a time) so Emacs stays responsive,
-built-in copies are synchronous.  When `emeld-copy-mirror' is on, rsync
-directory copies use `--delete' to make the destination an exact mirror.
-Deletions move the file to trash and run synchronously first.
+Copies use rsync or the built-in copy per `emeld-copy-method'; both
+paths run asynchronously, one node at a time, so Emacs stays responsive
+between nodes (a single very large node still blocks while it is
+copied).  When `emeld-copy-mirror' is on, rsync directory copies use
+`--delete' to make the destination an exact mirror.  Deletions move the
+file to trash and run synchronously first.
 
 On completion only the touched nodes are updated in place (re-classified
 and their ancestors recomputed) and the tree is re-rendered once, rather
@@ -4277,15 +4331,21 @@ state without the whole tree flashing (see `emeld--update-after-copy')."
                           (mapcar (lambda (j) (emeld--rel-from-abs (cdr j))) deletes))))
          (prompt (cond
                   ((zerop nd)
-                   (format "%s %d node(s) to the other side%s%s? "
+                   (format "%s %d node(s) to the other side %s%s? "
                            (if mirror "Mirror" "Copy") nc
-                           (if use-rsync " via rsync" "")
-                           (if mirror " (deletes destination-only files in dirs)" "")))
+                           (if use-rsync "via rsync" "using the built-in copy")
+                           (cond (mirror " (deletes destination-only files in dirs)")
+                                 ((and emeld-copy-mirror (not use-rsync))
+                                  " (mirror needs rsync)")
+                                 (t ""))))
                   ((zerop nc)
                    (format "Delete %d node(s) from the other side to sync (to trash)? " nd))
                   (t
-                   (format "Sync: copy %d and delete %d node(s) to the other side%s? "
-                           nc nd (if use-rsync " (copies via rsync)" ""))))))
+                   (format "Sync: copy %d and delete %d node(s) to the other side (%s%s)? "
+                           nc nd
+                           (if use-rsync "copies via rsync" "copies using the built-in copy")
+                           (if (and emeld-copy-mirror (not use-rsync))
+                               "; mirror needs rsync" ""))))))
     (when (yes-or-no-p prompt)
       ;; Deletions first (synchronous, to trash); the surgical update then
       ;; drops those now-absent nodes from the tree.
@@ -4300,7 +4360,7 @@ state without the whole tree flashing (see `emeld--update-after-copy')."
       (cond
        (copies (if use-rsync
                    (emeld--copy-async copies rels mirror)
-                 (emeld--copy-sync copies rels)))
+                 (emeld--copy-builtin-async copies rels)))
        (t (clrhash emeld--marked-paths)
           (emeld--update-after-copy rels)
           (message "Deleted %d node(s) to sync" nd))))))
@@ -5297,7 +5357,10 @@ node — see `emeld--node-relpath' for the equivalent slow form."
 (transient-define-prefix emeld-dispatch-sync ()
   "Sync files or delete nodes."
   ["Sync"
-   ("C"   "sync to other side (copy/delete)" emeld-copy)
+   ("C" (lambda ()
+          (format "sync to other side (copy/delete via %s)"
+                  (if (emeld--copy-use-rsync-p) "rsync" "built-in copy")))
+    emeld-copy)
    ("R" (lambda () (if emeld-copy-mirror "[x] mirror copy (--delete)" "[ ] mirror copy (--delete)"))
     (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
    ("x"   "delete marked/at point" emeld-delete)

@@ -1051,27 +1051,59 @@ Comparing from another dired buffer pairs it with that directory."
       (when (buffer-live-p src) (kill-buffer src))
       (delete-directory tmp t))))
 
-(ert-deftest emeld-copy-sync-logs ()
-  "Synchronous copies push undoable log entries."
+(ert-deftest emeld-copy-builtin-async-logs ()
+  "Built-in copies run node-at-a-time and push undoable log entries."
   (let* ((left (make-temp-file "emeldL" t))
          (right (make-temp-file "emeldR" t)))
     (unwind-protect
         (progn
           (with-temp-file (expand-file-name "a.txt" left) (insert "x"))
+          (with-temp-file (expand-file-name "b.txt" left) (insert "y"))
           (with-temp-buffer
             (setq-local emeld--left-root left
                         emeld--right-root right
                         emeld--marked-paths (make-hash-table :test #'equal)
                         emeld--op-log nil)
             (cl-letf (((symbol-function 'emeld-refresh) (lambda () nil)))
-              (emeld--copy-sync
-               (list (cons (expand-file-name "a.txt" left) right))
-               '("a.txt"))
+              (emeld--copy-builtin-async
+               (list (cons (expand-file-name "a.txt" left) right)
+                     (cons (expand-file-name "b.txt" left) right))
+               '("a.txt" "b.txt"))
+              ;; The chain yields between nodes: it stays busy until the
+              ;; pending timers have all been run.
+              (should (emeld--copy-busy-p))
+              (while (timerp emeld--copy-timer)
+                (timer-event-handler emeld--copy-timer))
+              (should-not (emeld--copy-busy-p))
               (should (file-exists-p (expand-file-name "a.txt" right)))
-              (should (= 1 (length emeld--op-log)))
-              (should (eq 'copy (plist-get (car emeld--op-log) :type))))))
+              (should (file-exists-p (expand-file-name "b.txt" right)))
+              (should (= 2 (length emeld--op-log)))
+              (should (eq 'copy (plist-get (car emeld--op-log) :type)))
+              ;; Newest entry first: b.txt was copied last.
+              (should (equal (expand-file-name "b.txt" right)
+                             (plist-get (car emeld--op-log) :dest))))))
       (delete-directory left t)
       (delete-directory right t))))
+
+(ert-deftest emeld-copy-method-effective ()
+  "The reported method follows `emeld-copy-method' and rsync availability."
+  (let ((emeld-copy-method 'auto))
+    (cl-letf (((symbol-function 'executable-find)
+               (lambda (&rest _) "/usr/bin/rsync")))
+      (should (eq 'rsync (emeld--copy-method-effective))))
+    (cl-letf (((symbol-function 'executable-find) (lambda (&rest _) nil)))
+      (should (eq 'builtin (emeld--copy-method-effective)))))
+  (let ((emeld-copy-method 'builtin))
+    (cl-letf (((symbol-function 'executable-find)
+               (lambda (&rest _) "/usr/bin/rsync")))
+      (should (eq 'builtin (emeld--copy-method-effective))))))
+
+(ert-deftest emeld-stop-scan-cancels-copy-timer ()
+  "A rescan or buffer kill aborts a pending built-in copy chain."
+  (with-temp-buffer
+    (setq emeld--copy-timer (run-with-timer 100 nil #'ignore))
+    (emeld--stop-scan)
+    (should-not emeld--copy-timer)))
 
 (ert-deftest emeld-same-list-exclusions ()
   "The `list' same-merge keeps only genuinely-identical left files.
