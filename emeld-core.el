@@ -230,8 +230,8 @@ re-runs the comparison rather than just re-rendering."
 (defcustom emeld-ignore-blank-lines nil
   "Whether to ignore blank-line changes when comparing file content.
 Adds `--ignore-blank-lines' to every `diff'/`git diff' invocation —
-the difference scan, per-subdirectory rescan, identical-file merge,
-quick and inline diffs, and `emeld-format-patch' — like
+the difference scan, the identical-file merge, quick and inline diffs,
+and `emeld-format-patch' — like
 `emeld-ignore-whitespace'.  In git mode, `git diff --name-status' may
 still list a file whose only change is blank lines when no other
 content filter is active (the per-file diff honors the setting); see
@@ -370,8 +370,8 @@ in-memory defaults."
 (defvar-local emeld--scan-max-depth nil
   "Directory-depth limit for the initial scan, or nil for a full scan.
 Set from the prefix argument to `emeld-diff'; honored by `emeld-refresh'.
-When non-nil, directories below this depth are left unscanned and marked,
-to be drilled into with `\\[universal-argument] g' (`emeld-refresh-subdir').")
+When non-nil, directories below this depth are left unscanned and marked
+with a dim `…'; expanding one (TAB) enumerates its subtree.")
 (defvar-local emeld--scan-process nil
   "Currently running `make-process' for the async diff scan.")
 (defvar-local emeld--copy-proc nil
@@ -1443,8 +1443,8 @@ pairs that should be scanned next."
                       :left-path (and (eq kind 'left-only) path)
                       :right-path (and (eq kind 'right-only) path)
                       ;; A one-sided directory is shown but its contents are
-                      ;; not enumerated here; mark it unscanned so it is drilled
-                      ;; with `C-u G'.
+                      ;; not enumerated here; mark it unscanned so expanding
+                      ;; it enumerates the subtree.
                       :scanned (not is-dir))
                      children)))
             ('common-dir
@@ -1494,7 +1494,7 @@ directory statuses (`left-only'/`right-only') are preserved."
   "Build the tree for BUF by scanning only DEPTH directory levels.
 Uses non-recursive `diff -q' level by level (driven by an idle timer so
 Emacs stays responsive), leaving deeper and one-sided directories
-unscanned for drilling with `\\[universal-argument] g'.  Aborts if the
+unscanned; each is enumerated in place when expanded.  Aborts if the
 buffer's `emeld--scan-generation' changes (a newer scan started)."
   (with-current-buffer buf
     (let ((gen emeld--scan-generation)
@@ -2238,8 +2238,8 @@ unhide everything hidden this session (`emeld-unhide-all')."
 With a prefix argument, limit the initial scan to DEPTH directory levels
 \(a bare \\[universal-argument] means depth 1) using a fast level-by-level
 scan, leaving deeper and one-sided directories unscanned and marked with a
-dim `…'.  Drill into a marked directory with `\\[universal-argument] g'
-\(`emeld-refresh-subdir').  Without a prefix, scan fully (the default).
+dim `…'; expanding a marked directory (TAB) enumerates its subtree.
+Without a prefix, scan fully (the default).
 Useful for very large trees or slow filesystems (SMB/NFS) where a full
 recursive compare would block on deep I/O."
   (interactive
@@ -2971,7 +2971,8 @@ to the other content filters)."
   (interactive)
   (let ((node (get-text-property (point) 'emeld-node)))
     (when (and node (emeld-node-is-dir node))
-      (emeld--maybe-populate-lazy-dir node)
+      (when (emeld--maybe-populate-lazy-dir node)
+        (emeld--refresh-ancestor-statuses node))
       (setf (emeld-node-expanded node) (not (emeld-node-expanded node)))
       (let ((pos (point)))
         (emeld--render)
@@ -3045,7 +3046,8 @@ naturally."
       (emeld-toggle-inline-diff))
      ((not (emeld-node-expanded node))
       ;; FOLDED → DIRS
-      (emeld--maybe-populate-lazy-dir node)
+      (when (emeld--maybe-populate-lazy-dir node)
+        (emeld--refresh-ancestor-statuses node))
       (setf (emeld-node-expanded node) t)
       (dolist (child (emeld-node-children node))
         (emeld--walk-set-dirs-only child))
@@ -3087,8 +3089,7 @@ bounded scan, the identical-files merge) sees a newer generation and aborts."
 Cancels the async `diff' process and the timer-driven tree building (the
 full scan, the bounded scan and the identical-files merge all check the
 scan generation and bail).  The partial tree is left in place; rescan with
-\\[emeld-rescan] or scan a single directory with `\\[universal-argument] \
-\\[emeld-rescan]'."
+\\[emeld-rescan]."
   (interactive)
   (if (not (memq emeld--status-phase '(running-diff building-tree)))
       (message "No scan in progress")
@@ -3191,77 +3192,10 @@ Synchronous: the diff is scoped to one subtree, so it is bounded."
         (forward-line 1)))
     (nreverse entries)))
 
-(defun emeld-refresh-subdir ()
-  "Rescan only the directory at point, merging the result into the tree.
-Bound to \\`C-u G' (see `emeld-rescan').  Useful when you know a single
-subdirectory changed on disk and want to avoid a full rescan
-(\\[emeld-rescan]); the rest of the tree is left untouched.  If point is
-on a file, its containing directory is rescanned."
+(defun emeld-rescan ()
+  "Rescan the whole comparison asynchronously (`emeld-refresh')."
   (interactive)
-  (when emeld--git-mode
-    (user-error "Subdirectory rescan is not used in git mode; press `G' to rescan"))
-  (unless emeld--root-node (user-error "No comparison loaded"))
-  (let* ((node0 (get-text-property (point) 'emeld-node))
-         (node (cond ((null node0) (user-error "No node at point"))
-                     ((emeld-node-is-dir node0) node0)
-                     (t (emeld-node-parent node0)))))
-    (when (or (null node) (eq node emeld--root-node))
-      (user-error "Use `G' to rescan the whole comparison"))
-    (let* ((rel (emeld--node-relpath node))
-           (left-sub (concat (file-name-as-directory emeld--left-root) rel))
-           (right-sub (concat (file-name-as-directory emeld--right-root) rel))
-           (left-exists (file-directory-p left-sub))
-           (right-exists (file-directory-p right-sub)))
-      (cond
-       ;; Gone on both sides — drop the node from its parent.
-       ((not (or left-exists right-exists))
-        (let ((parent (emeld-node-parent node)))
-          (setf (emeld-node-children parent) (delq node (emeld-node-children parent))))
-        (emeld--render)
-        (message "%s no longer exists on either side; removed" rel))
-       ;; Present on both sides — re-diff and rebuild the subtree.
-       ((and left-exists right-exists)
-        (let ((entries (emeld--diff-subdir-entries left-sub right-sub))
-              (saved (emeld--collect-expanded node))
-              (saved-dirs (emeld--collect-dirs node)))
-          (setf (emeld-node-left-path node) left-sub
-                (emeld-node-right-path node) right-sub
-                (emeld-node-children node) (emeld--entries-to-nodes entries rel node))
-          (setf (emeld-node-diff-status node)
-                (if (cl-some (lambda (c) (not (eq (emeld-node-diff-status c) 'same)))
-                             (emeld-node-children node))
-                    'different 'same))
-          ;; A full recursive subdir scan clears any depth-limit boundary mark.
-          (setf (emeld-node-scanned node) t)
-          (let ((emeld--saved-expanded saved)
-                (emeld--saved-dirs saved-dirs))
-            (emeld--restore-expanded node))
-          (emeld--render)
-          (message "Rescanned %s — %d change%s" rel
-                   (cl-count-if (lambda (e) (not (eq (cdr e) 'same))) entries)
-                   (if (= 1 (cl-count-if (lambda (e) (not (eq (cdr e) 'same))) entries))
-                       "" "s"))))
-       ;; Single-sided now — re-enumerate the side that exists.
-       (t
-        (setf (emeld-node-diff-status node) (if left-exists 'left-only 'right-only)
-              (emeld-node-left-path node) (and left-exists left-sub)
-              (emeld-node-right-path node) (and right-exists right-sub)
-              (emeld-node-children node) nil)
-        (setf (emeld-node-scanned node) t)
-        (emeld--maybe-populate-lazy-dir node)
-        (emeld--render)
-        (message "Rescanned %s — only on the %s side" rel
-                 (if left-exists "left" "right")))))))
-
-(defun emeld-rescan (&optional arg)
-  "Rescan the comparison.
-With a prefix ARG (\\[universal-argument]), rescan only the directory at
-point (`emeld-refresh-subdir'); otherwise rescan the whole comparison
-asynchronously (`emeld-refresh')."
-  (interactive "P")
-  (if arg
-      (emeld-refresh-subdir)
-    (emeld-refresh)))
+  (emeld-refresh))
 
 (defun emeld--collect-expanded (node)
   "Return a list of relative paths for expanded directories under NODE."
@@ -3302,32 +3236,82 @@ scan, where everything starts expanded)."
     paths))
 
 (defun emeld--maybe-populate-lazy-dir (node)
-  "Populate NODE's children if it is a lazy (unexpanded) single-sided directory."
+  "Populate NODE's children when it is a lazy directory not yet enumerated.
+A one-sided directory is filled by listing the side that exists; a
+directory left unscanned by a depth-limited scan (both sides exist) is
+filled by diffing the subtree.  Return non-nil when NODE was populated."
   (when (and (emeld-node-is-dir node)
-             (null (emeld-node-children node))
-             (memq (emeld-node-diff-status node) '(left-only right-only)))
-    (let* ((status (emeld-node-diff-status node))
-           (side-path (if (eq status 'left-only)
-                          (emeld-node-left-path node)
+             (null (emeld-node-children node)))
+    (let ((populated nil))
+      (cond
+       ((memq (emeld-node-diff-status node) '(left-only right-only))
+        (let* ((status (emeld-node-diff-status node))
+               (side-path (if (eq status 'left-only)
+                              (emeld-node-left-path node)
+                            (emeld-node-right-path node)))
+               ;; Strip side-path itself, not the comparison root: entries must be
+               ;; relative to NODE, otherwise the full path-from-root gets nested
+               ;; under NODE producing a duplicated subtree.
+               (base-dir (file-name-as-directory (expand-file-name side-path)))
+               (node-rel (emeld--node-relpath node))
+               (sub-files (directory-files-recursively side-path "" t))
+               (entries nil))
+          (dolist (f sub-files)
+            (let* ((abs-f (expand-file-name f))
+                   (rel (if (string-prefix-p base-dir abs-f)
+                            (substring abs-f (length base-dir))
+                          abs-f)))
+              (when (string-prefix-p "/" rel)
+                (setq rel (substring rel 1)))
+              (unless (string-empty-p rel)
+                (push (cons rel status) entries))))
+          (setf (emeld-node-children node)
+                (emeld--entries-to-nodes entries node-rel node))
+          (setq populated t)))
+       ;; Both sides exist: a depth-limited scan stopped above this directory.
+       ;; Re-diff just this subtree and classify it like a fresh scan would.
+       ((and (not (emeld-node-scanned node))
+             (emeld-node-left-path node)
+             (emeld-node-right-path node))
+        (let ((entries (emeld--diff-subdir-entries
+                        (emeld-node-left-path node)
                         (emeld-node-right-path node)))
-           ;; Strip side-path itself, not the comparison root: entries must be
-           ;; relative to NODE, otherwise the full path-from-root gets nested
-           ;; under NODE producing a duplicated subtree.
-           (base-dir (file-name-as-directory (expand-file-name side-path)))
-           (node-rel (emeld--node-relpath node))
-           (sub-files (directory-files-recursively side-path "" t))
-           (entries nil))
-      (dolist (f sub-files)
-        (let* ((abs-f (expand-file-name f))
-               (rel (if (string-prefix-p base-dir abs-f)
-                        (substring abs-f (length base-dir))
-                      abs-f)))
-          (when (string-prefix-p "/" rel)
-            (setq rel (substring rel 1)))
-          (unless (string-empty-p rel)
-            (push (cons rel status) entries))))
-      (setf (emeld-node-children node)
-            (emeld--entries-to-nodes entries node-rel node)))))
+              (rel (emeld--node-relpath node)))
+          (setf (emeld-node-children node)
+                (emeld--entries-to-nodes entries rel node))
+          (setf (emeld-node-diff-status node)
+                (if (cl-some (lambda (c) (not (eq (emeld-node-diff-status c) 'same)))
+                             (emeld-node-children node))
+                    'different 'same))
+          (setq populated t))))
+      (when populated
+        (setf (emeld-node-scanned node) t)
+        t))))
+
+(defun emeld--refresh-ancestor-statuses (node)
+  "Recompute status and `scanned' flag for NODE's ancestors, up to the root.
+Called after NODE was populated in place: an ancestor whose only unscanned
+descendant was NODE becomes `same'/`different' again and loses its drill
+mark; one that still has unscanned descendants stays `unscanned'."
+  (let ((p (emeld-node-parent node)))
+    (while p
+      (let ((any-change nil) (any-unscanned nil))
+        (dolist (c (emeld-node-children p))
+          (if (emeld-node-is-dir c)
+              (progn
+                (when (memq (emeld-node-diff-status c) '(different left-only right-only))
+                  (setq any-change t))
+                (unless (emeld-node-scanned c)
+                  (setq any-unscanned t)))
+            (when (memq (emeld-node-diff-status c) '(different left-only right-only))
+              (setq any-change t))))
+        (unless (memq (emeld-node-diff-status p) '(left-only right-only))
+          (setf (emeld-node-diff-status p)
+                (cond (any-change 'different)
+                      (any-unscanned 'unscanned)
+                      (t 'same))))
+        (setf (emeld-node-scanned p) (not any-unscanned)))
+      (setq p (emeld-node-parent p)))))
 
 (defun emeld--read-new-root (on-left)
   "Prompt for a new root directory for side ON-LEFT and update the buffer.
@@ -5229,7 +5213,6 @@ node — see `emeld--node-relpath' for the equivalent slow form."
     ("r" "recent…"             emeld-recent)]
    ["Refresh"
     ("g" "rescan"                emeld-rescan)
-    ("s" "rescan dir at point"   emeld-refresh-subdir)
     ("k" "stop scan"             emeld-stop-scan)]])
 
 (transient-define-prefix emeld-dispatch-git ()

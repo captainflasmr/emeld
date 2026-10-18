@@ -14,7 +14,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Orphan files shown with strikethrough on the missing side (Meld-style, always on).
 - Dired-style, per-side marking (~m~/~u~/~U~): the ~*~ sits in the column of the side you mark, and a node can be marked left, right, or both.  Copy/sync (~C~) makes the *other* side match the side you marked — a node marked on the side that has the file is copied across, while a node marked on its empty (struck-through) side is *deleted* from the other side, so you can resolve a one-sided file either way.  Bulk delete (~x~) deletes from every marked side; bulk-mark by status (~* m~ modified, ~* l~ left-only, ~* c~ the full left→right mirror set — modified + left-only + right-only).
 - Filter groups toggleable from the transient menu.
-- Content filters applied consistently to the scan, subdirectory rescans, identical-file merge, inline/quick diffs and patch export: ignore whitespace (~i~ cycles off → amount → all), blank lines (~v B~), case (~v C~, directory mode only) and a regexp of lines to ignore (~v R~; git mode uses the subset ~git diff~ supports).
+- Content filters applied consistently to the scan, identical-file merge, inline/quick diffs and patch export: ignore whitespace (~i~ cycles off → amount → all), blank lines (~v B~), case (~v C~, directory mode only) and a regexp of lines to ignore (~v R~; git mode uses the subset ~git diff~ supports).
 - Org-mode-style subtree cycling: ~TAB~ cycles the directory at point (FOLDED → DIRS → SUBTREE).  On a file, ~TAB~ instead peeks an inline diff underneath the row (Magit-style), expandable and collapsible without leaving the tree; the words that actually changed inside modified lines are highlighted like ~diff-refine-hunk~ (tune or disable with ~emeld-inline-diff-refine-max-spots~).
 - File copying between directories (~C~), via rsync when available — asynchronous and delta-efficient, with an optional exact-mirror (~--delete~) mode toggled with ~R~.
 - Recursive ~diff~ buffers for the directory at point (~d~; at the top level this covers the whole root), and a non-intrusive preview (~=~/~SPC~) that diffs/opens the node at point while keeping point in the tree.
@@ -23,8 +23,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Marked directories: flag a directory as comparison side A while browsing Dired (a plain command, no default key bindings), then compare it against the directory you are browsing.
 - Side-aware navigation (~n~/~p~) and side-jumping (~o~).
 - Change-oriented movement: ~M-n~/~M-p~ jump to the next/previous changed *file* (numeric prefix to repeat), skipping directory rows, identical files (when shown) and inline-diff preview lines; the header line shows how many changes are displayed.
-- Targeted rescan of just the directory at point (~C-u G~) when one subtree changed on disk, avoiding a full rescan.
-- Depth-limited "shallow" scan for huge trees or slow mounts (SMB/NFS): prefix ~emeld-diff~ with a depth (~C-u 2 M-x emeld-diff~) to scan only the top levels and stop; deeper directories are marked with a dim ~…~ and drilled into on demand with ~C-u G~.
+- Depth-limited "shallow" scan for huge trees or slow mounts (SMB/NFS): prefix ~emeld-diff~ with a depth (~C-u 2 M-x emeld-diff~) to scan only the top levels and stop; deeper directories are marked with a dim ~…~ and enumerated on demand by expanding them (~TAB~).
 - Integration with ~ediff~.
 - A treemacs-style file-tree sidebar (~M-x emeld-sidebar~) that follows and highlights the active file — built on the same tree machinery (see below).
 - A tree-navigable, Dired-like file manager (~M-x emeld-dired~): mark, copy, rename, delete and create files in a single foldable tree instead of one flat listing (see below).
@@ -41,7 +40,7 @@ Copy the files to your load path and add the following to your init file:
 Run ~M-x emeld-diff~ and select the two directories you wish to compare.
 Alternatively, run ~M-x emeld-diff-dwim~ to automatically use open Dired buffers as the comparison sources.
 
-For very large trees or slow filesystems (SMB/NFS), give ~emeld-diff~ a prefix argument to limit the initial scan depth — e.g. ~C-u 2 M-x emeld-diff~ scans two directory levels, ~C-u M-x emeld-diff~ just one.  The scan stops there and shows the tree; directories below the limit (and one-sided directories) are marked with a dim ~…~.  Drill into any marked directory with ~C-u G~ (which scans it fully), and plain ~G~ re-runs the bounded scan at the same depth.  The header-line shows ~[depth N]~ while a depth limit is in effect.
+For very large trees or slow filesystems (SMB/NFS), give ~emeld-diff~ a prefix argument to limit the initial scan depth — e.g. ~C-u 2 M-x emeld-diff~ scans two directory levels, ~C-u M-x emeld-diff~ just one.  The scan stops there and shows the tree; directories below the limit (and one-sided directories) are marked with a dim ~…~.  Expand a marked directory (~TAB~) to scan its subtree in place, and plain ~G~ re-runs the bounded scan at the same depth.  The header-line shows ~[depth N]~ while a depth limit is in effect.
 
 ** Comparing a marked directory with the current one
 
@@ -70,7 +69,7 @@ The result is the same side-by-side tree, showing the hierarchy of added, delete
 - ~S~ (show Same) lists the left revision and merges in every unchanged file.
 - A foldable commit-context block sits between the revision header and the tree, in two columns aligned to the panes (left/old commit under the left header, right/new under the right): each shows its short SHA and subject, and ~c~ (or ~RET~ on the block) unfolds the author, date+time and full message.
 - Header ~RET~ re-selects a revision for that side; ~W~ swaps the two revisions; ~G~ re-scans.
-- Copy (~C~), delete (~x~) and subdirectory rescan are disabled — history cannot be written to.
+- Copy (~C~) and delete (~x~) are disabled — history cannot be written to.
 
 The header line shows ~[git OLD→NEW]~ with the chosen revision labels; a revision that points at the current ~HEAD~ is shown as ~HEAD (SHA)~.
 
@@ -155,7 +154,7 @@ Top-level row 3 is ~Essential commands~ :: copy (~C~), mark (~m~), hop pane (~o~
 
 Top-level row 4 is ~Navigate~ :: next change (~M-n~), previous change (~M-p~).
 
-- ~Compare~ (~d~) :: Start or re-scan.  ~d~ compare two directories, ~r~ reopen a recent comparison, ~g~ rescan, ~s~ rescan dir at point, ~k~ stop scan.
+- ~Compare~ (~d~) :: Start or re-scan.  ~d~ compare two directories, ~r~ reopen a recent comparison, ~g~ rescan, ~k~ stop scan.
 - ~Git~ (~T~) :: ~G~ git revisions, ~H~ step git history (`,` older / `.` newer).
 - ~Act — Sync~ (~s~) :: ~C~ copy/sync marked/at point, ~R~ toggle mirror copy, ~x~ delete marked/at point, ~D~ delete at point (this pane), ~l~ list undoable operations.
 - ~Act — Diff~ (~h~) :: ~d~ diff directory at point (whole root at the top level), ~P~ format patch.
@@ -208,7 +207,7 @@ Most commands keep a direct key binding in ~emeld-mode~ (see below); the sub-men
 | &         | Filter node at point → save to ~.dir-locals.el~ and rescan |
 | C-k       | Temporarily hide node at point (session only; ~C-u C-k~ unhides all) |
 | W         | Swap left/right panes                              |
-| G         | Rescan whole comparison (~C-u G~: rescan dir at point) |
+| G         | Rescan whole comparison |
 | k         | Stop/abort an in-progress scan (keeps the partial tree) |
 | R         | Toggle mirror copy (rsync ~--delete~; shows ~[Mirror]~ in header) |
 | g         | Reset layout (indent + pane split + density) to defaults and redraw |

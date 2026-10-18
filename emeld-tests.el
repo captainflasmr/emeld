@@ -984,48 +984,59 @@ a new path that is neither is treated as identical."
       (delete-directory left t)
       (delete-directory right t))))
 
-(ert-deftest emeld-refresh-subdir-rebuilds-subtree ()
-  "`emeld-refresh-subdir' re-diffs the dir at point and splices in the result."
+(ert-deftest emeld-expanding-unscanned-dir-populates-subtree ()
+  "Expanding a dir left unscanned by a depth-limited scan enumerates it.
+The subtree is diffed in place, and ancestors stop being flagged for
+drilling once nothing below them remains unscanned."
   (let* ((left (make-temp-file "emeld-l" t))
          (right (make-temp-file "emeld-r" t)))
     (unwind-protect
         (progn
-          (make-directory (expand-file-name "d" left))
-          (make-directory (expand-file-name "d" right))
-          ;; Initially d/ holds one differing file.
-          (with-temp-file (expand-file-name "d/a.txt" left) (insert "a"))
-          (with-temp-file (expand-file-name "d/a.txt" right) (insert "b"))
+          (make-directory (expand-file-name "sub/d" left) t)
+          (make-directory (expand-file-name "sub/d" right) t)
+          ;; d/ holds one differing and one identical file.
+          (with-temp-file (expand-file-name "sub/d/a.txt" left) (insert "a"))
+          (with-temp-file (expand-file-name "sub/d/a.txt" right) (insert "b"))
+          (with-temp-file (expand-file-name "sub/d/same.txt" left) (insert "x"))
+          (with-temp-file (expand-file-name "sub/d/same.txt" right) (insert "x"))
           (with-temp-buffer
             (setq-local emeld--left-root (file-name-as-directory left)
                         emeld--right-root (file-name-as-directory right)
                         emeld-respect-gitignore nil
                         emeld--active-filter-groups nil
-                        emeld-show-same nil
-                        emeld--column-width 30)
-            ;; Build a minimal tree: root → d (different) → a.txt (different).
+                        emeld-show-same nil)
+            ;; Mimic a depth-limited scan: sub is marked `unscanned', d below
+            ;; it was never enumerated (no children, dim marker).
             (let* ((root (emeld-node-create :name "root" :is-dir t))
-                   (d (emeld-node-create :name "d" :is-dir t :parent root
-                                         :diff-status 'different
-                                         :left-path (expand-file-name "d" left)
-                                         :right-path (expand-file-name "d" right))))
-              (setf (emeld-node-children d)
-                    (list (emeld-node-create :name "a.txt" :parent d :diff-status 'different)))
-              (setf (emeld-node-children root) (list d))
-              (setq-local emeld--root-node root)
-              ;; On disk: a.txt now matches, and a new differing b.txt appears.
-              (with-temp-file (expand-file-name "d/a.txt" right) (insert "a"))
-              (with-temp-file (expand-file-name "d/b.txt" left) (insert "x"))
-              (with-temp-file (expand-file-name "d/b.txt" right) (insert "y"))
+                   (sub (emeld-node-create
+                         :name "sub" :is-dir t :parent root :expanded t
+                         :diff-status 'unscanned :scanned nil
+                         :left-path (expand-file-name "sub" left)
+                         :right-path (expand-file-name "sub" right)))
+                   (d (emeld-node-create
+                       :name "d" :is-dir t :parent sub :expanded nil
+                       :diff-status 'unscanned :scanned nil
+                       :left-path (expand-file-name "sub/d" left)
+                       :right-path (expand-file-name "sub/d" right))))
+              (setf (emeld-node-children sub) (list d)
+                    (emeld-node-children root) (list sub)
+                    emeld--root-node root)
               ;; Put point on a line tagged with the d node, and no-op the render.
               (insert (propertize "d" 'emeld-node d))
               (goto-char (point-min))
               (cl-letf (((symbol-function 'emeld--render) (lambda () nil)))
-                (emeld-refresh-subdir))
-              ;; a.txt is now identical (gone, since show-same is off); b.txt differs.
+                (emeld-cycle-subtree))
+              ;; The subtree is enumerated: the differing file is a child,
+              ;; the identical one is not (show-same off), and both d and the
+              ;; ancestor sub are scanned again.
               (let ((names (mapcar #'emeld-node-name (emeld-node-children d))))
-                (should (member "b.txt" names))
-                (should-not (member "a.txt" names))
-                (should (eq 'different (emeld-node-diff-status d)))))))
+                (should (member "a.txt" names))
+                (should-not (member "same.txt" names))
+                (should (eq 'different (emeld-node-diff-status d)))
+                (should (emeld-node-scanned d))
+                (should (emeld-node-expanded d))
+                (should (emeld-node-scanned sub))
+                (should (eq 'different (emeld-node-diff-status sub)))))))
       (delete-directory left t)
       (delete-directory right t))))
 
