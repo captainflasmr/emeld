@@ -376,6 +376,57 @@ must reuse them rather than create siblings with the same name."
       (delete-file l)
       (delete-file r))))
 
+(ert-deftest emeld-status-marker-lookup ()
+  "Markers default to M/A/D; dirs and unlisted statuses get none."
+  (should (equal "M " (emeld--status-marker
+                       (emeld-node-create :name "f" :diff-status 'different))))
+  (should (equal "A " (emeld--status-marker
+                       (emeld-node-create :name "f" :diff-status 'left-only))))
+  (should (equal "D " (emeld--status-marker
+                       (emeld-node-create :name "f" :diff-status 'right-only))))
+  (should (equal "" (emeld--status-marker
+                     (emeld-node-create :name "f" :diff-status 'same))))
+  ;; Directories never get a marker, even with a matching status.
+  (should (equal "" (emeld--status-marker
+                     (emeld-node-create :name "d" :is-dir t
+                                        :diff-status 'different))))
+  ;; A custom alist restyles, opts `same' in and disables others.
+  (let ((emeld-status-markers '((same . "= "))))
+    (should (equal "= " (emeld--status-marker
+                         (emeld-node-create :name "f" :diff-status 'same))))
+    (should (equal "" (emeld--status-marker
+                       (emeld-node-create :name "f" :diff-status 'different))))))
+
+(ert-deftest emeld-render-status-markers ()
+  "Rendered rows carry the status marker before the name on both sides."
+  (with-temp-buffer
+    (setq-local emeld--marked-paths (make-hash-table :test #'equal))
+    (setq-local emeld--git-mode nil)
+    (let ((emeld-show-file-meta nil)
+          (emeld-show-strikethrough t)
+          (nodes (list (emeld-node-create :name "m.txt" :left-path "/x/m.txt"
+                                          :right-path "/x/m.txt"
+                                          :diff-status 'different)
+                       (emeld-node-create :name "l.txt" :left-path "/x/l.txt"
+                                          :diff-status 'left-only)
+                       (emeld-node-create :name "r.txt" :right-path "/x/r.txt"
+                                          :diff-status 'right-only))))
+      (emeld--render-nodes nodes "" 80)
+      (let ((text (buffer-string)))
+        (dolist (pattern '("M m\\.txt" "A l\\.txt" "D r\\.txt"))
+          (let ((n 0) (pos 0))
+            (while (string-match pattern text pos)
+              (setq n (1+ n) pos (match-end 0)))
+            (should (equal 2 n))))))
+    ;; Disabling the markers leaves the file names bare.
+    (erase-buffer)
+    (let ((emeld-status-markers nil)
+          (node (emeld-node-create :name "f.txt" :left-path "/x/f.txt"
+                                   :right-path "/x/f.txt"
+                                   :diff-status 'different)))
+      (emeld--render-nodes (list node) "" 60)
+      (should-not (string-match-p "M f\\.txt" (buffer-string))))))
+
 (ert-deftest emeld-delete-one-captures-trash ()
   "`emeld--delete-one' returns the trash location it moved PATH to."
   (let* ((tmp (make-temp-file "emeld-trash" t))

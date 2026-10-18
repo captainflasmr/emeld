@@ -4,6 +4,7 @@
 
 ** Added
 - ~emeld-sidebar-follow-mode~ now follows multi-candidate xref navigation.  In an ~*xref*~ buffer — and any other ~xref--xref-buffer-mode~ buffer, such as find-references results — a buffer-local ~post-command-hook~ (~emeld--sidebar-follow-xref~) reveals the file of the candidate at point the moment point moves onto it.  The file is resolved exactly via the candidate's location marker (~emeld--sidebar-xref-candidate-file~), so it is correct regardless of which window displays the preview.  Enabling follow mode retro-fits xref buffers that already exist; disabling it scrubs them again; and re-loading the package into a session where the mode is already on wires it too (the mode body does not re-run on its own).
+- Every file row now shows a one-letter status marker before the name — ~M~ modified, ~A~ left-only (new), ~D~ right-only (deleted) — on both sides, including before the struck-through name of a one-sided file, so the status is legible whatever the theme's colors.  The markers live in the new ~emeld-status-markers~ alist: set a status to ~""~ to hide its marker, or add a ~same~ entry to mark identical files too.
 
 ** Changed
 - Recent comparisons now persist in a dedicated file, ~emeld-recent-file~ (default ~emeld-recent.eld~ in ~user-emacs-directory~), written whenever a comparison is recorded and read back when emeld loads — so the list survives restarting Emacs without depending on ~savehist-mode~.

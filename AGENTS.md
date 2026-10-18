@@ -19,7 +19,7 @@ emacs -Q -L . -l emeld.el --eval '(emeld-git-diff default-directory "HEAD~3" "HE
 ## Structure
 
 - `emeld.el` — thin umbrella: `(require 'emeld-core/-git/-sidebar)`, `(provide 'emeld)`. `(require 'emeld)` loads the whole package.
-- `emeld-core.el` — the shared core: `emeld-node` struct, buffer-local state (incl. `emeld--git-*` mode vars), faces, async scan, filtering/gitignore, render, navigation, `emeld-mode`, file ops, presets, benchmarking, transient, and git *utilities* shared by the others (`emeld--git-rev-label`, `emeld--git-toplevel`, `emeld--git-work-tree-p`, `emeld--git-rev-args`). `(provide 'emeld-core)`.
+- `emeld-core.el` — the shared core: `emeld-node` struct, buffer-local state (incl. `emeld--git-*` mode vars), faces, async scan, filtering/gitignore, render, navigation, `emeld-mode`, file ops, recent comparisons (persisted to `emeld-recent-file`), benchmarking, transient, and git *utilities* shared by the others (`emeld--git-rev-label`, `emeld--git-toplevel`, `emeld--git-work-tree-p`, `emeld--git-rev-args`). `(provide 'emeld-core)`.
 - `emeld-git.el` — `(require 'emeld-core)`. Git-diff feature: `M-x emeld-git-diff` (two revisions, or a rev vs working tree / index), `M-x emeld-git-step-history` (`,` older / `.` newer), history/commit/blob helpers, `emeld--git-action`/`-soft-diff`. `(provide 'emeld-git)`.
 - `emeld-sidebar.el` — `(require 'emeld-core)`. `M-x emeld-sidebar` (treemacs-style single-tree explorer; see below). `(provide 'emeld-sidebar)`.
 - `emeld-tests.el` — `ert` tests. Adds the repo root to `load-path` and `(require 'emeld)` — run from repo root.

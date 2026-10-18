@@ -159,6 +159,25 @@ display.  When nil, the other side shows nothing for the orphan."
   :type 'boolean
   :group 'emeld)
 
+(defcustom emeld-status-markers
+  '((different  . "M ")
+    (left-only  . "A ")
+    (right-only . "D "))
+  "Per-status markers shown before file names in the comparison view.
+An alist mapping a diff status to the string rendered immediately
+before a file's name: `different' (modified), `left-only' (exists
+only on the left, i.e. new) and `right-only' (exists only on the
+right, i.e. deleted).  The marker is shown on both sides of the row,
+including next to the struck-through name on the side where the file
+is missing (see `emeld-show-strikethrough'), so the status is legible
+whatever the theme's colors.  Add a `same' entry to mark identical
+files too (only visible with `emeld-show-same').  Set a status to
+\"\" to disable its marker.  Include a trailing space for readability;
+set e.g. \"≠ \", \"✚ \" and \"✖ \" for a more symbolic look.
+Directories never get markers."
+  :type '(alist :key-type symbol :value-type string)
+  :group 'emeld)
+
 (defcustom emeld-show-files t
   "Whether to show regular files (non-directory entries).
 When nil, only the directory hierarchy is displayed."
@@ -4685,6 +4704,15 @@ Honors `emeld-show-tree-lines' and `emeld-tree-density'."
                    (_ emeld-indent-offset))
                  ?\s)))
 
+(defun emeld--status-marker (node)
+  "Return the status marker string for NODE, per `emeld-status-markers'.
+Directories never get a marker, and statuses without an entry in
+`emeld-status-markers' return the empty string."
+  (if (emeld-node-is-dir node)
+      ""
+    (or (cdr (assq (emeld-node-diff-status node) emeld-status-markers))
+        "")))
+
 (defun emeld--render-nodes (nodes indent-prefix column-width &optional rel-prefix)
   "Render a list of NODES with INDENT-PREFIX and COLUMN-WIDTH.
 REL-PATH is threaded down as REL-PREFIX (the parent's relative path) so each
@@ -4704,6 +4732,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
                            ((eq status 'left-only) 'emeld-left-only-face)
                            ((eq status 'right-only) 'emeld-right-only-face)))
                (name-face (if (emeld-node-is-dir node) 'emeld-dir-face face))
+               (status-marker (emeld--status-marker node))
                (dir-indicator (if (emeld-node-is-dir node)
                                   (concat (if (emeld-node-expanded node)
                                               emeld-fold-expanded-indicator
@@ -4748,6 +4777,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
             (insert (propertize full-prefix 'face 'shadow))
             (if (emeld-node-left-path node)
                 (progn
+                  (insert (propertize status-marker 'face face))
                   (insert dir-indicator)
                   (insert (propertize (emeld-node-name node) 'face name-face))
                   (insert (or (emeld--file-meta-string (emeld-node-left-path node)
@@ -4755,6 +4785,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
                               ""))
                   (insert scan-marker))
               (when (and emeld-show-strikethrough (eq status 'right-only))
+                (insert (propertize status-marker 'face face))
                 (insert dir-indicator)
                 (insert (propertize (emeld-node-name node)
                                     'face 'emeld-right-only-strike-face))))
@@ -4770,6 +4801,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
             (insert (propertize full-prefix 'face 'shadow))
             (if (emeld-node-right-path node)
                 (progn
+                  (insert (propertize status-marker 'face face))
                   (insert dir-indicator)
                   (insert (propertize (or (emeld-node-name-right node)
                                           (emeld-node-name node))
@@ -4779,6 +4811,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
                               ""))
                   (insert scan-marker))
               (when (and emeld-show-strikethrough (eq status 'left-only))
+                (insert (propertize status-marker 'face face))
                 (insert dir-indicator)
                 (insert (propertize (emeld-node-name node)
                                     'face 'emeld-left-only-strike-face))))
@@ -4794,9 +4827,11 @@ node — see `emeld--node-relpath' for the equivalent slow form."
               ;; The two leading spaces stand in for the mark column that
               ;; precedes `indent-prefix' on every tree row, so the tree guides
               ;; in `indent-prefix' line up vertically with the rows above; the
-              ;; remaining offset spaces indent the diff text under the name.
+              ;; remaining offset spaces — including the status marker's width —
+              ;; indent the diff text under the name.
               (let ((diff-prefix (concat "  " indent-prefix
-                                         (make-string (emeld--tree-branch-width) ?\s))))
+                                         (make-string (emeld--tree-branch-width) ?\s)
+                                         (make-string (string-width status-marker) ?\s))))
                 (dolist (dl (emeld-node-inline-diff node))
                   (let ((dstart (point)))
                     (insert diff-prefix dl "\n")
