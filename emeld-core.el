@@ -432,6 +432,9 @@ overriding the restored expansion state for that scan only.")
 Refreshed on each git scan so `emeld--git-rev-label' can show a revision
 that points at HEAD as \"HEAD\" rather than a bare abbreviated SHA.")
 (defvar-local emeld--column-width nil)
+(defvar-local emeld--resize-render-timer nil
+  "Idle timer scheduled to re-render after a window resize, or nil.
+See `emeld--window-size-changed'.")
 (defvar-local emeld--saved-expanded nil
   "Saved expanded directory paths to restore after refresh.")
 (defvar-local emeld--saved-dirs nil
@@ -1271,6 +1274,14 @@ patterns from root .gitignore files."
         (dolist (pattern (emeld--read-gitignore-simple-patterns root))
           (push (concat "--exclude=" pattern) args))))
     args))
+
+(defun emeld--ensure-diff-program ()
+  "Signal a user error when the `diff' program cannot be found.
+Every directory-mode scan and quick diff shells out to `diff', so this
+fails fast with a pointer instead of a raw \"Searching for program\"
+error from `make-process'."
+  (unless (executable-find "diff")
+    (user-error "The `diff' program is not on `exec-path'; install GNU diffutils and try again")))
 
 (defun emeld--start-diff (buf)
   "Start async `diff -rq' for content comparison.
@@ -2246,6 +2257,7 @@ recursive compare would block on deep I/O."
    (list (read-directory-name "Left directory: ")
          (read-directory-name "Right directory: ")
          (emeld--prefix-to-depth current-prefix-arg)))
+  (emeld--ensure-diff-program)
   (emeld--recent-push (list 'dir
                             (directory-file-name (expand-file-name dir1))
                             (directory-file-name (expand-file-name dir2))
@@ -2673,6 +2685,11 @@ Mimics Meld's display of missing files."
   (make-local-variable 'emeld-column-ratio)
   (setq-local revert-buffer-function #'emeld-refresh)
   (add-hook 'kill-buffer-hook #'emeld--stop-scan nil t)
+  (add-hook 'kill-buffer-hook #'emeld--cancel-resize-render nil t)
+  ;; Keep the pane split aligned when the window's width changes: the
+  ;; buffer-local entry runs with this buffer current and the affected
+  ;; window as its argument.
+  (add-hook 'window-size-change-functions #'emeld--window-size-changed nil t)
   (emeld--update-header-line))
 
 (defun emeld--effective-column-width ()
@@ -3139,6 +3156,8 @@ scan instead, preserving the shallow view.
 The optional arguments are ignored; they exist so this can serve as the
 buffer's `revert-buffer-function', which is called with two arguments."
   (interactive)
+  (unless emeld--git-mode
+    (emeld--ensure-diff-program))
   (emeld--stop-scan)
   (setq emeld--status-phase 'running-diff)
   (let* ((buf (current-buffer))
@@ -4882,6 +4901,48 @@ describe the work tree, not the compared content)."
     
     (set-buffer-modified-p nil)))
 
+(defun emeld--split-outdated-p (window)
+  "Non-nil when WINDOW's width implies a pane split other than the rendered one.
+The rendered split is `emeld--column-width'; nil until the first render
+has set it."
+  (and emeld--column-width
+       (/= emeld--column-width
+           (/ (* (window-width window) emeld-column-ratio) 100))))
+
+(defun emeld--window-size-changed (window)
+  "Schedule a re-render when WINDOW's size invalidates the pane split.
+The split is computed once per `emeld--render' and baked into the
+padding of every rendered row, so a resize needs a render before the two
+sides line up again.  Runs buffer-locally from
+`window-size-change-functions' (so WINDOW displays this buffer) and
+defers the work through a short idle timer, coalescing the stream of
+size changes of an interactive drag into one render."
+  (when (and emeld--root-node (emeld--split-outdated-p window))
+    (when (timerp emeld--resize-render-timer)
+      (cancel-timer emeld--resize-render-timer))
+    (setq emeld--resize-render-timer
+          (run-with-idle-timer 0.2 nil #'emeld--resize-render (current-buffer)))))
+
+(defun emeld--resize-render (buf)
+  "Re-render BUF when its window's pane split changed since the last render.
+Idle-timer callback scheduled by `emeld--window-size-changed'."
+  (when (buffer-live-p buf)
+    (with-current-buffer buf
+      (setq emeld--resize-render-timer nil)
+      (let ((window (get-buffer-window buf t)))
+        (when (and window (emeld--split-outdated-p window))
+          ;; Render with the buffer's own window selected so the split is
+          ;; measured from it, not from whatever window happens to be
+          ;; selected when the idle timer fires.
+          (with-selected-window window
+            (emeld--render)))))))
+
+(defun emeld--cancel-resize-render ()
+  "Cancel a pending resize re-render timer, if any."
+  (when (timerp emeld--resize-render-timer)
+    (cancel-timer emeld--resize-render-timer)
+    (setq emeld--resize-render-timer nil)))
+
 (defun emeld--node-visible-p (node)
   "Determine if NODE should be visible based on status and structure filters.
 The root node is always visible.  When showing identical files, top-level
@@ -5299,7 +5360,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
     ("e"   "ediff"              emeld-ediff)
     ("="   "diff / open / fold (SPC)" emeld-soft-diff)
     ("TAB" "peek inline diff (file)" emeld-toggle-inline-diff :transient t)
-    ("o" "hop to other pane" emeld-jump-other-side :transient t)]
+    ("o" "hop to other tree" emeld-jump-other-side :transient t)]
    ["Dired"
     ("A"   "dired left side"    emeld-dired-left)
     ("B"   "dired right side"   emeld-dired-right)
@@ -5330,7 +5391,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
   ["Essential commands"
    ("C"   "sync to other side (copy/delete)" emeld-copy)
    ("m"   "mark"            emeld-mark)
-   ("o"   "hop to other pane" emeld-jump-other-side)
+   ("o"   "hop to other tree" emeld-jump-other-side)
    ("e"   "ediff"           emeld-ediff)
    ("G"   "rescan"          emeld-rescan)
    ("u"   "undo last delete/copy" emeld-undo-last-op)])

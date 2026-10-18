@@ -485,6 +485,106 @@ must reuse them rather than create siblings with the same name."
                      "│" (buffer-substring-no-properties
                          (line-beginning-position) (line-end-position))))))))
 
+(ert-deftest emeld-ensure-diff-program-signals-when-missing ()
+  "A missing `diff' program fails fast with a friendly user error."
+  (cl-letf (((symbol-function 'executable-find) (lambda (&rest _) nil)))
+    (should-error (emeld--ensure-diff-program) :type 'user-error)
+    ;; `emeld-diff' checks before creating a buffer or a recent entry.
+    (should-error (emeld-diff "/tmp/emeld-no-diff-a" "/tmp/emeld-no-diff-b")
+                  :type 'user-error))
+  (cl-letf (((symbol-function 'executable-find) (lambda (&rest _) "/usr/bin/diff")))
+    (should-not (emeld--ensure-diff-program))))
+
+(ert-deftest emeld-refresh-requires-diff-in-dir-mode ()
+  "Directory rescans fail before touching scan state when `diff' is missing."
+  (with-temp-buffer
+    (setq-local emeld--git-mode nil
+                emeld--root-node (emeld-node-create :name "root" :is-dir t :expanded t))
+    (cl-letf (((symbol-function 'executable-find) (lambda (&rest _) nil)))
+      (should-error (emeld-refresh) :type 'user-error))))
+
+(ert-deftest emeld-window-size-change-schedules-resize-render ()
+  "A resize that changes the pane split schedules a debounced re-render."
+  (with-temp-buffer
+    (setq-local emeld--root-node (emeld-node-create :name "root" :is-dir t :expanded t))
+    (unwind-protect
+        (progn
+          (let ((split (/ (* (window-width (selected-window)) emeld-column-ratio) 100)))
+            ;; A stale split, as after a drag: a render is scheduled.
+            (setq emeld--column-width (1+ split))
+            (emeld--window-size-changed (selected-window))
+            (should (timerp emeld--resize-render-timer))
+            ;; A width mapping to the same split schedules nothing.
+            (emeld--cancel-resize-render)
+            (setq emeld--column-width split)
+            (emeld--window-size-changed (selected-window))
+            (should-not emeld--resize-render-timer))
+          ;; No comparison loaded yet: nothing to render.
+          (setq emeld--root-node nil
+                emeld--column-width nil)
+          (emeld--window-size-changed (selected-window))
+          (should-not emeld--resize-render-timer)
+          ;; The timer callback re-renders only while the split is stale.
+          (let ((rendered 0))
+            (cl-letf (((symbol-function 'emeld--render)
+                       (lambda () (cl-incf rendered)))
+                      ((symbol-function 'get-buffer-window)
+                       (lambda (&rest _) (selected-window))))
+              (setq emeld--column-width 9999)
+              (emeld--resize-render (current-buffer))
+              (should (equal 1 rendered))
+              (setq emeld--column-width
+                    (/ (* (window-width (selected-window)) emeld-column-ratio) 100))
+              (emeld--resize-render (current-buffer))
+              (should (equal 1 rendered)))))
+      (emeld--cancel-resize-render))))
+
+(ert-deftest emeld-resize-render-reflows-pane-split ()
+  "The resize callback re-renders at the window's new width.
+The pane split is computed once per `emeld--render' and baked into the
+rows' padding, so the callback must re-render and refresh
+`emeld--column-width' for the two sides to line up again."
+  (let* ((frame (selected-frame))
+         (win (selected-window))
+         (width (frame-width frame))
+         (height (frame-height frame))
+         (old-buf (window-buffer win))
+         (root (emeld-node-create :name "root" :is-dir t :expanded t))
+         (buf (get-buffer-create " *emeld-resize-render-test*")))
+    (unwind-protect
+        (progn
+          (setf (emeld-node-children root)
+                (list (emeld-node-create :name "a.txt" :diff-status 'different
+                                         :left-path "/x/a.txt" :right-path "/y/a.txt"
+                                         :parent root)))
+          (with-current-buffer buf
+            (emeld-mode)
+            (setq emeld--status-phase 'done
+                  emeld--marked-paths (make-hash-table :test #'equal)
+                  emeld--hidden-paths nil
+                  emeld--left-root "/x/"
+                  emeld--right-root "/y/"
+                  emeld-show-file-meta nil
+                  emeld-show-same t
+                  emeld-show-files t
+                  emeld-show-added t
+                  emeld-show-different t
+                  emeld--git-mode nil
+                  emeld--root-node root))
+          (set-window-buffer win buf)
+          (with-current-buffer buf
+            (emeld--render)
+            (set-frame-size frame (- width 20) height)
+            (skip-unless (/= (window-width win) width))
+            (should (emeld--split-outdated-p win))
+            (emeld--resize-render buf)
+            (should-not (emeld--split-outdated-p win))
+            (should (= emeld--column-width
+                       (/ (* (window-width win) emeld-column-ratio) 100)))))
+      (set-frame-size frame width height)
+      (set-window-buffer win old-buf)
+      (when (buffer-live-p buf) (kill-buffer buf)))))
+
 (ert-deftest emeld-content-filter-args ()
   "Content filters assemble into flags; the case filter is dir-mode only."
   (let ((emeld-ignore-whitespace nil)
