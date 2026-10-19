@@ -191,8 +191,12 @@ When non-nil, each file row shows a dim \"(SIZE MM-DD HH:MM)\" tag
 after the name on every side where the file exists.  Directories
 never show it, and it is hidden in git-revision comparisons (where
 the on-disk work tree does not reflect the compared content).
-Needs one `file-attributes' call per visible file per render, so it
-can slow down very large trees — leave it off unless wanted."
+The tag is computed once per file and cached on the node, so
+renders for toggles, expand/collapse and marks do not re-stat
+visible files; the cache is dropped when the node is re-classified
+after a copy or its undo, rotated by a pane swap, and rebuilt by a
+rescan — so a tag always agrees with the rest of the tree's
+snapshot."
   :type 'boolean
   :group 'emeld)
 
@@ -365,7 +369,9 @@ in-memory defaults."
   (is-dir nil)
   (scanned t)       ; nil for a directory left unscanned by a depth-limited scan
   (is-filtered nil)
-  (inline-diff nil)) ; cached propertized diff lines when expanded inline (TAB on a file)
+  (inline-diff nil) ; cached propertized diff lines when expanded inline (TAB on a file)
+  (left-meta nil)   ; cached file-meta tag for `left-path' (`emeld--node-meta-string')
+  (right-meta nil)) ; ... and for `right-path'; `none' means "computed, no tag"
 
 (defvar-local emeld--scan-max-depth nil
   "Directory-depth limit for the initial scan, or nil for a full scan.
@@ -4077,6 +4083,9 @@ ancestors are then recomputed.  Mutates the tree without rendering."
          (right-sub (concat (file-name-as-directory emeld--right-root) rel))
          (left-exists (file-exists-p left-sub))
          (right-exists (file-exists-p right-sub)))
+    ;; The node's disk state (and possibly its paths) changed: drop the
+    ;; cached file-meta tags so they are recomputed on the next render.
+    (emeld--invalidate-node-meta node)
     (cond
      ;; Should not happen after a copy, but stay correct: gone on both sides.
      ((not (or left-exists right-exists))
@@ -4694,6 +4703,9 @@ In git mode the two revisions are swapped and the comparison re-scanned."
                     ;; Swap left and right paths
                     (cl-rotatef (emeld-node-left-path node)
                                 (emeld-node-right-path node))
+                    ;; Cached file-meta tags follow their paths.
+                    (cl-rotatef (emeld-node-left-meta node)
+                                (emeld-node-right-meta node))
                     ;; Flip side-exclusive diff statuses
                     (cl-case (emeld-node-diff-status node)
                       (left-only (setf (emeld-node-diff-status node) 'right-only))
@@ -4870,6 +4882,37 @@ describe the work tree, not the compared content)."
                              "%m-%d %H:%M"
                              (file-attribute-modification-time attrs)))
                     'face 'emeld-meta-face)))))
+
+(defun emeld--node-meta-string (node side)
+  "Return NODE's file-meta tag on SIDE, computing and caching it once.
+SIDE is `left' or `right'.  The formatted tag (`emeld--file-meta-string')
+is stored in the node's `left-meta'/`right-meta' slot — with the symbol
+`none' marking a computed \"no tag\" — so re-renders driven by toggles,
+expand/collapse and marks never re-stat visible files.
+`emeld--invalidate-node-meta' drops the cache when the node's disk state
+changes (a copy or its undo); a rescan builds fresh nodes."
+  (let ((cached (if (eq side 'left)
+                    (emeld-node-left-meta node)
+                  (emeld-node-right-meta node))))
+    (cond
+     ((eq cached 'none) nil)
+     (cached cached)
+     (t
+      (let ((tag (emeld--file-meta-string
+                  (if (eq side 'left)
+                      (emeld-node-left-path node)
+                    (emeld-node-right-path node))
+                  (emeld-node-is-dir node))))
+        (if (eq side 'left)
+            (setf (emeld-node-left-meta node) (or tag 'none))
+          (setf (emeld-node-right-meta node) (or tag 'none)))
+        tag)))))
+
+(defun emeld--invalidate-node-meta (node)
+  "Forget any cached file-meta tags on NODE.
+See `emeld--node-meta-string'."
+  (setf (emeld-node-left-meta node) nil
+        (emeld-node-right-meta node) nil))
 
 (defun emeld--render ()
   "Render the current visible tree into the comparison buffer, preserving point."
@@ -5207,9 +5250,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
                   (insert (propertize status-marker 'face face))
                   (insert dir-indicator)
                   (insert (propertize (emeld-node-name node) 'face name-face))
-                  (insert (or (emeld--file-meta-string (emeld-node-left-path node)
-                                                       (emeld-node-is-dir node))
-                              ""))
+                  (insert (or (emeld--node-meta-string node 'left) ""))
                   (insert scan-marker))
               (when (and emeld-show-strikethrough (eq status 'right-only))
                 (insert (propertize status-marker 'face face))
@@ -5233,9 +5274,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
                   (insert (propertize (or (emeld-node-name-right node)
                                           (emeld-node-name node))
                                       'face name-face))
-                  (insert (or (emeld--file-meta-string (emeld-node-right-path node)
-                                                       (emeld-node-is-dir node))
-                              ""))
+                  (insert (or (emeld--node-meta-string node 'right) ""))
                   (insert scan-marker))
               (when (and emeld-show-strikethrough (eq status 'left-only))
                 (insert (propertize status-marker 'face face))

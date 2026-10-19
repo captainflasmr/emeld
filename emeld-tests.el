@@ -376,6 +376,79 @@ must reuse them rather than create siblings with the same name."
       (delete-file l)
       (delete-file r))))
 
+(ert-deftest emeld-file-meta-cached-across-renders ()
+  "A node's file-meta tag is computed once and reused by later renders."
+  (let* ((file (make-temp-file "emeld-meta" nil ".txt"))
+         (calls 0)
+         (real (symbol-function 'file-attributes)))
+    (unwind-protect
+        (with-temp-buffer
+          (setq-local emeld--marked-paths (make-hash-table :test #'equal))
+          (setq-local emeld--git-mode nil)
+          (let ((emeld-show-file-meta t)
+                (node (emeld-node-create :name (file-name-nondirectory file)
+                                         :diff-status 'different
+                                         :left-path file :right-path file)))
+            (cl-letf (((symbol-function 'file-attributes)
+                       (lambda (path &optional id-format)
+                         (cl-incf calls)
+                         (funcall real path id-format))))
+              (emeld--render-nodes (list node) "" 60)
+              (let ((first calls)
+                    (first-text (buffer-string)))
+                ;; Both sides are tagged on the first render (two stats).
+                (should (= 2 first))
+                (erase-buffer)
+                (emeld--render-nodes (list node) "" 60)
+                ;; The second render is served entirely from the cache.
+                (should (= 2 calls))
+                (should (equal first-text (buffer-string)))))))
+      (delete-file file))))
+
+(ert-deftest emeld-reclassify-drops-meta-cache ()
+  "Re-classifying after a copy drops the node's cached meta tags."
+  (let* ((left (make-temp-file "emeld-metaL" t))
+         (right (make-temp-file "emeld-metaR" t)))
+    (unwind-protect
+        (progn
+          (with-temp-file (expand-file-name "a.txt" left) (insert "same"))
+          (with-temp-file (expand-file-name "a.txt" right) (insert "same"))
+          (with-temp-buffer
+            (setq-local emeld--left-root left
+                        emeld--right-root right
+                        emeld--marked-paths (make-hash-table :test #'equal))
+            (setq-local emeld--git-mode nil)
+            (let ((node (emeld-node-create :name "a.txt" :diff-status 'different
+                                           :left-path (expand-file-name "a.txt" left)
+                                           :right-path (expand-file-name "a.txt" right))))
+              (setf (emeld-node-left-meta node) " (4 B 01-01 00:00)")
+              (emeld--reclassify-copied-node node)
+              (should-not (emeld-node-left-meta node))
+              (should-not (emeld-node-right-meta node))
+              (should (eq 'same (emeld-node-diff-status node))))))
+      (delete-directory left t)
+      (delete-directory right t))))
+
+(ert-deftest emeld-swap-panes-rotates-meta-cache ()
+  "Swapping panes carries cached meta tags over with their paths."
+  (with-temp-buffer
+    (setq-local emeld--git-mode nil)
+    (setq-local emeld--left-root "/x/" emeld--right-root "/y/")
+    (let ((node (emeld-node-create :name "f.txt" :diff-status 'different
+                                   :left-path "/x/f.txt" :right-path "/y/f.txt"))
+          (root (emeld-node-create :name "root" :is-dir t :expanded t)))
+      (setf (emeld-node-children root) (list node)
+            (emeld-node-parent node) root
+            emeld--root-node root
+            (emeld-node-left-meta node) " L"
+            (emeld-node-right-meta node) " R")
+      (cl-letf (((symbol-function 'emeld--render) (lambda () nil)))
+        (emeld-swap-panes))
+      (should (equal "/y/f.txt" (emeld-node-left-path node)))
+      (should (equal "/x/f.txt" (emeld-node-right-path node)))
+      (should (equal " R" (emeld-node-left-meta node)))
+      (should (equal " L" (emeld-node-right-meta node))))))
+
 (ert-deftest emeld-status-marker-lookup ()
   "Markers default to M/A/D; dirs and unlisted statuses get none."
   (should (equal "M " (emeld--status-marker
