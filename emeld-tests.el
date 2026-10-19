@@ -697,7 +697,8 @@ rows' padding, so the callback must re-render and refresh
   (let ((emeld-ignore-whitespace nil)
         (emeld-ignore-blank-lines nil)
         (emeld-ignore-case nil)
-        (emeld-ignore-matching-lines nil))
+        (emeld-ignore-matching-lines nil)
+        (emeld-ignore-line-endings nil))
     (should-not (emeld--content-filter-args))
     (should-not (emeld--content-filter-args t))
     (setq emeld-ignore-whitespace 'change)
@@ -705,11 +706,15 @@ rows' padding, so the callback must re-render and refresh
     (setq emeld-ignore-whitespace 'all
           emeld-ignore-blank-lines t
           emeld-ignore-matching-lines "^#"
-          emeld-ignore-case t)
-    (should (equal '("-w" "--ignore-blank-lines" "--ignore-matching-lines=^#" "-i")
+          emeld-ignore-case t
+          emeld-ignore-line-endings t)
+    (should (equal '("-w" "--ignore-blank-lines" "--ignore-matching-lines=^#"
+                     "--strip-trailing-cr" "-i")
                    (emeld--content-filter-args)))
-    ;; `git diff' has no case-insensitive mode, so -i is dropped there.
-    (should (equal '("-w" "--ignore-blank-lines" "--ignore-matching-lines=^#")
+    ;; `git diff' has no case-insensitive mode, so -i is dropped there,
+    ;; and line endings use git's own flag.
+    (should (equal '("-w" "--ignore-blank-lines" "--ignore-matching-lines=^#"
+                     "--ignore-cr-at-eol")
                    (emeld--content-filter-args t)))))
 
 (ert-deftest emeld-content-filters-change-scan ()
@@ -724,6 +729,8 @@ rows' padding, so the callback must re-render and refresh
           (with-temp-file (expand-file-name "blank.txt" right) (insert "one\n\ntwo\n"))
           (with-temp-file (expand-file-name "re.txt" left) (insert "x\n# note\ny\n"))
           (with-temp-file (expand-file-name "re.txt" right) (insert "x\ny\n"))
+          (with-temp-file (expand-file-name "crlf.txt" left) (insert "one\ntwo\n"))
+          (with-temp-file (expand-file-name "crlf.txt" right) (insert "one\r\ntwo\r\n"))
           (with-temp-file (expand-file-name "real.txt" left) (insert "hello\n"))
           (with-temp-file (expand-file-name "real.txt" right) (insert "world\n"))
           (let ((emeld-respect-gitignore nil)
@@ -731,11 +738,13 @@ rows' padding, so the callback must re-render and refresh
                 (emeld-ignore-whitespace nil)
                 (emeld-ignore-blank-lines nil)
                 (emeld-ignore-case nil)
-                (emeld-ignore-matching-lines nil))
-            (should (= 4 (length (emeld--diff-level-entries left right))))
+                (emeld-ignore-matching-lines nil)
+                (emeld-ignore-line-endings nil))
+            (should (= 5 (length (emeld--diff-level-entries left right))))
             (setq emeld-ignore-case t
                   emeld-ignore-blank-lines t
-                  emeld-ignore-matching-lines "^#")
+                  emeld-ignore-matching-lines "^#"
+                  emeld-ignore-line-endings t)
             (let ((filtered (emeld--diff-level-entries left right)))
               (should (equal '("real.txt" . different) (car filtered)))
               (should (= 1 (length filtered))))))

@@ -231,6 +231,16 @@ re-runs the comparison rather than just re-rendering."
                  (const :tag "Ignore all whitespace (-w)" all))
   :group 'emeld)
 
+(defcustom emeld-ignore-line-endings nil
+  "Whether to ignore line-ending (CRLF vs LF) changes in file content.
+Adds `--strip-trailing-cr' to directory-mode diffs and
+`--ignore-cr-at-eol' (Git 2.16+) to git-mode diffs — the difference
+scan, the identical-file merge, quick and inline diffs, and patch
+export — so a file whose only changes are line endings compares
+identical.  Toggling re-runs the comparison."
+  :type 'boolean
+  :group 'emeld)
+
 (defcustom emeld-ignore-blank-lines nil
   "Whether to ignore blank-line changes when comparing file content.
 Adds `--ignore-blank-lines' to every `diff'/`git diff' invocation —
@@ -266,9 +276,12 @@ interactively with `emeld-set-ignore-matching-lines'."
 (defun emeld--content-filter-args (&optional git-mode)
   "Return content-filter flags for the current comparison settings.
 Combines `emeld-ignore-whitespace', `emeld-ignore-blank-lines',
-`emeld-ignore-matching-lines' and `emeld-ignore-case' into arguments
-accepted by both GNU `diff' and `git diff'.  `emeld-ignore-case' has
-no git equivalent, so it is omitted when GIT-MODE is non-nil.
+`emeld-ignore-matching-lines', `emeld-ignore-case' and
+`emeld-ignore-line-endings' into arguments accepted by both GNU `diff'
+and `git diff'.  `emeld-ignore-case' has no git equivalent, so it is
+omitted when GIT-MODE is non-nil; line endings use
+`--strip-trailing-cr' in directory mode and `--ignore-cr-at-eol'
+\(Git 2.16+) in git mode.
 Git quirk: `--ignore-blank-lines' does not suppress entries in `git
 diff --name-status' unless another content filter is also active (the
 hunk output honors it regardless), so a file whose only change is
@@ -281,6 +294,8 @@ blank lines can still be listed in git mode."
    (when emeld-ignore-blank-lines '("--ignore-blank-lines"))
    (when emeld-ignore-matching-lines
      (list (concat "--ignore-matching-lines=" emeld-ignore-matching-lines)))
+   (when emeld-ignore-line-endings
+     (if git-mode '("--ignore-cr-at-eol") '("--strip-trailing-cr")))
    (when (and emeld-ignore-case (not git-mode)) '("-i"))))
 
 (defcustom emeld-copy-method 'auto
@@ -2685,6 +2700,7 @@ Mimics Meld's display of missing files."
   (make-local-variable 'emeld-respect-gitignore)
   (make-local-variable 'emeld-ignore-whitespace)
   (make-local-variable 'emeld-ignore-blank-lines)
+  (make-local-variable 'emeld-ignore-line-endings)
   (make-local-variable 'emeld-ignore-case)
   (make-local-variable 'emeld-ignore-matching-lines)
   ;; Layout tweaks are per-comparison too, so adjusting tree-lines, the
@@ -3049,6 +3065,15 @@ differing, so it re-runs the comparison rather than just re-rendering."
   (interactive)
   (setq emeld-ignore-blank-lines (not emeld-ignore-blank-lines))
   (message "Ignore blank lines: %s" (if emeld-ignore-blank-lines "on" "off"))
+  (emeld-refresh))
+
+(defun emeld-toggle-ignore-line-endings ()
+  "Toggle `emeld-ignore-line-endings', then rescan.
+Like `emeld-toggle-ignore-whitespace' this changes which files count as
+differing, so it re-runs the comparison rather than just re-rendering."
+  (interactive)
+  (setq emeld-ignore-line-endings (not emeld-ignore-line-endings))
+  (message "Ignore line endings: %s" (if emeld-ignore-line-endings "on" "off"))
   (emeld-refresh))
 
 (defun emeld-toggle-ignore-case ()
@@ -5041,7 +5066,7 @@ segment is bold to stand out among the filter states."
 Each label is spelled out with a leading ASCII checkbox.  Scan-affecting
 notes are appended after them: the whitespace mode (`[ws:amount]' or
 `[ws:all]') and the other content filters (`[ignore-blanks]',
-`[ignore-re]', `[ignore-case]') when active, a
+`[ignore-crlf]', `[ignore-re]', `[ignore-case]') when active, a
 `warning'-faced \"(!) gitignore off\" note while `emeld-respect-gitignore'
 is off (git-ignored files are then included in the scan — the exception
 to the default of dropping them, which needs no flag), and a
@@ -5060,6 +5085,7 @@ from the transient (\\[emeld-dispatch])."
    (when emeld-ignore-whitespace
      (if (eq emeld-ignore-whitespace 'all) " [ws:all]" " [ws:amount]"))
    (when emeld-ignore-blank-lines " [ignore-blanks]")
+   (when emeld-ignore-line-endings " [ignore-crlf]")
    (when emeld-ignore-matching-lines " [ignore-re]")
    (when emeld-ignore-case " [ignore-case]")
    ;; Git-ignored files are dropped from the scan by default, so that
@@ -5726,6 +5752,8 @@ node — see `emeld--node-relpath' for the equivalent slow form."
              ('all "[-w] ignore whitespace (all)")
              (_ "[ ] ignore whitespace")))
      (lambda () (interactive) (emeld-toggle-ignore-whitespace)) :transient t)
+    ("L" (lambda () (if emeld-ignore-line-endings "[x] ignore line endings" "[ ] ignore line endings"))
+     (lambda () (interactive) (emeld-toggle-ignore-line-endings)) :transient t)
     ("B" (lambda () (if emeld-ignore-blank-lines "[x] ignore blanks" "[ ] ignore blanks"))
      (lambda () (interactive) (emeld-toggle-ignore-blank-lines)) :transient t)
     ("C" (lambda () (if emeld-ignore-case "[x] ignore case" "[ ] ignore case"))
