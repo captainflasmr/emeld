@@ -2408,12 +2408,18 @@ recursive compare would block on deep I/O."
                             (directory-file-name (expand-file-name dir1))
                             (directory-file-name (expand-file-name dir2))
                             depth))
-  (let ((buf (get-buffer-create (format "*emeld: %s <-> %s*"
-                                        (file-name-nondirectory (directory-file-name dir1))
-                                        (file-name-nondirectory (directory-file-name dir2))))))
+  ;; Expand each directory once, against the caller's `default-directory':
+  ;; the comparison buffer's `default-directory' is set to the left root, so
+  ;; expanding a relative DIR1 again inside it would double the path.
+  (let* ((left-root (file-name-as-directory (expand-file-name dir1)))
+         (right-root (file-name-as-directory (expand-file-name dir2)))
+         (buf (get-buffer-create
+               (format "*emeld: %s <-> %s*"
+                       (file-name-nondirectory (directory-file-name left-root))
+                       (file-name-nondirectory (directory-file-name right-root))))))
     (with-current-buffer buf
       (emeld-mode)
-      (setq default-directory (file-name-as-directory (expand-file-name dir1)))
+      (setq default-directory left-root)
       (setq emeld--scan-max-depth depth)
       (emeld--ensure-dir-locals default-directory)
       (emeld--apply-dir-locals)
@@ -2422,8 +2428,8 @@ recursive compare would block on deep I/O."
                      when (emeld--group-active-default g)
                      collect (car g)))
       (setq emeld--marked-paths (make-hash-table :test 'equal))
-      (setq emeld--left-root (file-name-as-directory (expand-file-name dir1)))
-      (setq emeld--right-root (file-name-as-directory (expand-file-name dir2)))
+      (setq emeld--left-root left-root)
+      (setq emeld--right-root right-root)
       (setq emeld--root-node (emeld-node-create
                               :name (file-name-nondirectory
                                      (directory-file-name emeld--left-root))

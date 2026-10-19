@@ -1,10 +1,14 @@
 ;;; emeld-tests.el --- Tests for emeld.el -*- lexical-binding: t; -*-
 
-;; The package is now multi-file (emeld-core/-git/-sidebar, umbrella emeld.el).
-;; Put the repo root on `load-path' so the parts resolve, then load the whole.
-(add-to-list 'load-path (file-name-directory (or load-file-name buffer-file-name
-                                                  default-directory)))
+;; The package is now multi-file (emeld-core/-git/-sidebar/-dired, umbrella
+;; emeld.el).  Put the repo root — and test/, for the example fixture
+;; generator — on `load-path', then load the whole.
+(let ((root (file-name-directory (or load-file-name buffer-file-name
+                                     default-directory))))
+  (add-to-list 'load-path root)
+  (add-to-list 'load-path (expand-file-name "test" root)))
 (require 'emeld)
+(require 'emeld-example)
 (require 'ert)
 
 (ert-deftest emeld-glob-matching ()
@@ -2425,6 +2429,188 @@ candidate's file."
             (kill-buffer buf1)
             (kill-buffer buf2)
             (kill-buffer sb-buf)))
+      (delete-directory dir t))))
+
+;; ── Example fixture (test/emeld-example.el) ─────────────────────────────
+;; The generator builds two directory trees covering every user-visible
+;; feature, plus a small git repository.  These tests drive the real scan
+;; pipeline over it, so they double as end-to-end coverage of the features
+;; the fixture demonstrates.
+
+(defun emeld-test--wait-for-scan (buf)
+  "Wait until BUF's comparison scan reaches the `done' phase.
+Signals a test failure when it does not finish in time."
+  (let ((n 0))
+    (while (and (< n 400)
+                (not (eq (buffer-local-value 'emeld--status-phase buf) 'done)))
+      (accept-process-output nil 0.05)
+      (sit-for 0.01)
+      (setq n (1+ n)))
+    (should (eq (buffer-local-value 'emeld--status-phase buf) 'done))))
+
+(defun emeld-test--changed-statuses (buf)
+  "Return sorted (RELPATH . STATUS) for BUF's changed file leaves."
+  (with-current-buffer buf
+    (sort (mapcar (lambda (node)
+                    (cons (emeld--node-relpath node)
+                          (emeld-node-diff-status node)))
+                  (emeld--collect-changed-leaves
+                   (emeld-node-children emeld--root-node)))
+          (lambda (a b) (string< (car a) (car b))))))
+
+(ert-deftest emeld-diff-expands-relative-paths-once ()
+  "Relative DIR1/DIR2 are expanded against the caller, not the new buffer.
+The comparison buffer's `default-directory' is the left root, so expanding
+a relative DIR1 a second time there would double the path."
+  (let ((root (make-temp-file "emeld-relative" t))
+        (buf nil))
+    (unwind-protect
+        (progn
+          (make-directory (expand-file-name "l" root))
+          (make-directory (expand-file-name "r" root))
+          (emeld--with-temp-recent
+            (let ((default-directory root))
+              (cl-letf (((symbol-function 'emeld-refresh) (lambda () nil)))
+                (emeld-diff "l" "r")))
+            (setq buf (current-buffer))
+            (should (equal (file-name-as-directory (expand-file-name "l" root))
+                           (buffer-local-value 'emeld--left-root buf)))
+            (should (equal (file-name-as-directory (expand-file-name "r" root))
+                           (buffer-local-value 'emeld--right-root buf)))))
+      (when (buffer-live-p buf) (kill-buffer buf))
+      (delete-directory root t))))
+
+(ert-deftest emeld-example-scan-statuses ()
+  "A real scan of the demo fixture reports exactly the expected statuses.
+Compares the generator's manifest (every differing file) with the changed
+leaves of a real `emeld-diff' scan, minus the two backup files the default
+Backups filter group excludes."
+  (let ((dir (make-temp-file "emeld-example" t))
+        (buf nil))
+    (unwind-protect
+        (emeld--with-temp-recent
+          (let* ((manifest (emeld-example-make dir))
+                 (left (expand-file-name "left" dir))
+                 (right (expand-file-name "right" dir)))
+            (setq manifest
+                  ;; Excluded by the default "Backups" filter group, and by
+                  ;; the fixture's simple .gitignore patterns (`*.log`,
+                  ;; `build/`), which reach `diff --exclude' even outside a
+                  ;; git work tree.
+                  (seq-remove (lambda (entry)
+                                (member (car entry) '("backups/app.bak"
+                                                      "backups/notes~"
+                                                      "ignored.log"
+                                                      "build/output.txt")))
+                              manifest))
+            (emeld-diff left right)
+            (setq buf (current-buffer))
+            (emeld-test--wait-for-scan buf)
+            (should (equal (sort manifest
+                                 (lambda (a b) (string< (car a) (car b))))
+                           (emeld-test--changed-statuses buf)))))
+      (when (buffer-live-p buf) (kill-buffer buf))
+      (delete-directory dir t))))
+
+(ert-deftest emeld-example-content-filters ()
+  "Each content filter drops its demo file from a scan of the fixture.
+Case-insensitive comparison also dissolves the case-only change in
+duplicate-blocks.txt and the no-newline.txt tail."
+  (let ((dir (make-temp-file "emeld-example" t))
+        (buf nil))
+    (unwind-protect
+        (emeld--with-temp-recent
+          (let* ((manifest (emeld-example-make dir))
+                 (left (expand-file-name "left" dir))
+                 (right (expand-file-name "right" dir))
+                 (filtered '("whitespace.txt"   ; -w
+                             "blanklines.txt"   ; -B
+                             "case.txt"         ; -i
+                             "duplicate-blocks.txt" ; -i (case-only change)
+                             "no-newline.txt"   ; -i (case-only tail)
+                             "comments.c"       ; -I
+                             "crlf.txt")))      ; --strip-trailing-cr
+            (setq manifest
+                  (seq-remove (lambda (entry)
+                                (or (member (car entry) '("backups/app.bak"
+                                                          "backups/notes~"
+                                                          "ignored.log"
+                                                          "build/output.txt"))
+                                    (member (car entry) filtered)))
+                              manifest))
+            (let ((emeld-ignore-whitespace 'all)
+                  (emeld-ignore-blank-lines t)
+                  (emeld-ignore-case t)
+                  ;; POSIX syntax: this regexp is handed to `diff'/`git diff'.
+                  (emeld-ignore-matching-lines "^[[:space:]]*//")
+                  (emeld-ignore-line-endings t))
+              (emeld-diff left right))
+            (setq buf (current-buffer))
+            (emeld-test--wait-for-scan buf)
+            (let ((actual (emeld-test--changed-statuses buf)))
+              (dolist (rel filtered)
+                (should-not (assoc rel actual)))
+              (should (equal (sort manifest
+                                   (lambda (a b) (string< (car a) (car b))))
+                             actual)))))
+      (when (buffer-live-p buf) (kill-buffer buf))
+      (delete-directory dir t))))
+
+(ert-deftest emeld-example-peek-jump-narrow ()
+  "The fixture's multi-hunk file peeks as three hunks; jump/narrow are scoped."
+  (let ((dir (make-temp-file "emeld-example" t))
+        (buf nil))
+    (unwind-protect
+        (emeld--with-temp-recent
+          (let ((left (expand-file-name "left" dir))
+                (right (expand-file-name "right" dir)))
+            (emeld-example-make dir)
+            (emeld-diff left right)
+            (setq buf (current-buffer))
+            (emeld-test--wait-for-scan buf)
+            (with-current-buffer buf
+              ;; multi-hunk.txt peeks as three separate hunks.
+              (let* ((node (emeld--find-node "multi-hunk.txt"))
+                     (lines (mapcar #'substring-no-properties
+                                    (emeld--inline-diff-lines node))))
+                (should (= 3 (seq-count (lambda (line)
+                                          (string-prefix-p "@@" line))
+                                        lines))))
+              ;; Jump candidates cover changed files, not identical ones.
+              (let ((candidates (mapcar #'emeld--node-relpath
+                                        (emeld--collect-jump-files emeld--root-node))))
+                (should (member "src/main.el" candidates))
+                (should (member "many/f10.txt" candidates))
+                (should-not (member "many/f01.txt" candidates)))
+              ;; Narrowing to src/ keeps just that subtree's changed files.
+              (emeld-narrow "src/")
+              (should (equal '("src/deep/level1/level2/level3/deep-file.txt"
+                               "src/main.el")
+                             (sort (mapcar #'emeld--node-relpath
+                                           (emeld--collect-jump-files
+                                            emeld--root-node))
+                                   #'string<)))
+              (emeld-widen))))
+      (when (buffer-live-p buf) (kill-buffer buf))
+      (delete-directory dir t))))
+
+(ert-deftest emeld-example-git-scan ()
+  "The demo git repository scans HEAD~1 against the working tree correctly.
+The unstaged edit, the worktree deletion and the staged addition must all
+show up with the right statuses."
+  (let ((dir (make-temp-file "emeld-example-git" t))
+        (buf nil))
+    (unwind-protect
+        (emeld--with-temp-recent
+          (let ((repo (emeld-example-make-git dir)))
+            (emeld-git-diff repo "HEAD~1" 'working)
+            (setq buf (current-buffer))
+            (emeld-test--wait-for-scan buf)
+            (should (equal '(("main.txt" . different)
+                             ("notes.txt" . left-only)
+                             ("wip.txt" . right-only))
+                           (emeld-test--changed-statuses buf)))))
+      (when (buffer-live-p buf) (kill-buffer buf))
       (delete-directory dir t))))
 
 (message "Running tests...")
