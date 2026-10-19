@@ -1642,6 +1642,72 @@ drilling once nothing below them remains unscanned."
               (should (eq 'different (cdr (assoc "a.txt" entries)))))))
       (delete-directory dir t))))
 
+(ert-deftest emeld-git-blank-lines-quirk-closed ()
+  "Blank-line-only changes are dropped from the modified set when filtering.
+`git diff --name-status' still lists them (see
+`emeld--content-filter-args'); `emeld--git-verify-modified-entries'
+re-checks with `--numstat' and drops the empty ones."
+  (skip-unless (executable-find "git"))
+  (let ((dir (make-temp-file "emeld-gitb" t)))
+    (unwind-protect
+        (cl-flet ((g (&rest a) (apply #'call-process "git" nil nil nil "-C" dir a)))
+          (g "init" "-q")
+          (g "config" "user.email" "t@t.com")
+          (g "config" "user.name" "T")
+          (with-temp-file (expand-file-name "blank.txt" dir) (insert "one\ntwo\n"))
+          (with-temp-file (expand-file-name "real.txt" dir) (insert "x\n"))
+          (g "add" "-A")
+          (g "commit" "-q" "-m" "c1")
+          (with-temp-file (expand-file-name "blank.txt" dir) (insert "one\n\ntwo\n"))
+          (with-temp-file (expand-file-name "real.txt" dir) (insert "y\n"))
+          (with-temp-buffer
+            (setq-local emeld--git-repo (file-name-as-directory dir)
+                        emeld--git-left-rev "HEAD"
+                        emeld--git-right-rev 'working
+                        emeld-ignore-blank-lines t)
+            (let* ((cmd (emeld--git-diff-command))
+                   (out (with-temp-buffer
+                          (apply #'call-process (car cmd) nil t nil (cdr cmd))
+                          (buffer-string)))
+                   (entries (emeld--parse-git-name-status out)))
+              ;; Both are listed by the name-status fast path (the quirk)…
+              (should (assoc "blank.txt" entries))
+              (should (assoc "real.txt" entries))
+              ;; …and the verification drops only the blank-only change.
+              (let ((kept (emeld--git-verify-modified-entries entries)))
+                (should-not (assoc "blank.txt" kept))
+                (should (eq 'different (cdr (assoc "real.txt" kept))))))))
+      (delete-directory dir t))))
+
+(ert-deftest emeld-git-patch-has-real-diff ()
+  "A git-mode patch is a real `git diff' between the two revisions."
+  (skip-unless (executable-find "git"))
+  (let ((dir (make-temp-file "emeld-gitp" t)))
+    (unwind-protect
+        (cl-flet ((g (&rest a) (apply #'call-process "git" nil nil nil "-C" dir a)))
+          (g "init" "-q")
+          (g "config" "user.email" "t@t.com")
+          (g "config" "user.name" "T")
+          (with-temp-file (expand-file-name "f.txt" dir) (insert "one\n"))
+          (g "add" "-A")
+          (g "commit" "-q" "-m" "c1")
+          (with-temp-file (expand-file-name "f.txt" dir) (insert "two\n"))
+          (g "add" "-A")
+          (g "commit" "-q" "-m" "c2")
+          (with-temp-buffer
+            (setq-local emeld--git-repo (file-name-as-directory dir)
+                        emeld--git-left-rev "HEAD~1"
+                        emeld--git-right-rev "HEAD")
+            (let ((out (expand-file-name "out.patch" dir)))
+              (emeld--write-git-patch out 1)
+              (let ((patch (with-temp-buffer
+                             (insert-file-contents out)
+                             (buffer-string))))
+                (should (string-match-p "diff --git a/f\\.txt b/f\\.txt" patch))
+                (should (string-match-p "^-one" patch))
+                (should (string-match-p "^\\+two" patch))))))
+      (delete-directory dir t))))
+
 (ert-deftest emeld-git-commit-info ()
   "`emeld--git-commit-info' parses commit metadata; non-commits return nil."
   (skip-unless (executable-find "git"))

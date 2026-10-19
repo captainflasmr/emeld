@@ -246,10 +246,11 @@ identical.  Toggling re-runs the comparison."
 Adds `--ignore-blank-lines' to every `diff'/`git diff' invocation —
 the difference scan, the identical-file merge, quick and inline diffs,
 and `emeld-format-patch' — like
-`emeld-ignore-whitespace'.  In git mode, `git diff --name-status' may
+`emeld-ignore-whitespace'.  In git mode `git diff --name-status' can
 still list a file whose only change is blank lines when no other
-content filter is active (the per-file diff honors the setting); see
-`emeld--content-filter-args'.  Toggling re-runs the comparison."
+content filter is active; the scan re-verifies the modified files with
+one `--numstat' pass (`emeld--git-verify-modified-entries'), so such a
+file is not listed either.  Toggling re-runs the comparison."
   :type 'boolean
   :group 'emeld)
 
@@ -283,9 +284,11 @@ omitted when GIT-MODE is non-nil; line endings use
 `--strip-trailing-cr' in directory mode and `--ignore-cr-at-eol'
 \(Git 2.16+) in git mode.
 Git quirk: `--ignore-blank-lines' does not suppress entries in `git
-diff --name-status' unless another content filter is also active (the
-hunk output honors it regardless), so a file whose only change is
-blank lines can still be listed in git mode."
+diff --name-status' unless another content filter is also active, so a
+file whose only change is blank lines can still be listed by the scan;
+`emeld--build-git-tree' therefore re-verifies the modified files with
+one `--numstat' pass (`emeld--git-verify-modified-entries') whenever
+that filter is on, and the hunk output honors it regardless."
   (append
    (pcase emeld-ignore-whitespace
      ('change '("-b"))
@@ -5438,9 +5441,34 @@ makes it match the left."
         (replace-match (concat "+++ b/" rel)))
       (buffer-string))))
 
+(defun emeld--write-git-patch (outfile count)
+  "Write the `git diff' patch between the buffer's revisions to OUTFILE.
+Uses the same revision pair, content filters and rename detection as
+the scan, so the patch matches the tree; applying it to the right
+revision reproduces the left.  Reports COUNT changes."
+  ;; Capture the buffer-local repo/revs and filter settings *before* the
+  ;; temp buffer, where they would read as nil/defaults.
+  (let ((repo (directory-file-name emeld--git-repo))
+        (rev-args (emeld--git-rev-args emeld--git-left-rev emeld--git-right-rev))
+        (filter-args (emeld--content-filter-args t)))
+    (with-temp-buffer
+      (let ((status
+             (apply #'call-process "git" nil t nil
+                    (append (list "-C" repo "diff" "--no-color"
+                                  "--find-renames" "--find-copies")
+                            filter-args rev-args))))
+        (unless (eq status 0)
+          (user-error "git diff failed (exit %s); is the repository still available?"
+                      status))
+        (write-region (point-min) (point-max) outfile nil 'silent))))
+  (message "Wrote git patch with %d change(s) to %s" count outfile))
+
 (defun emeld-format-patch ()
   "Generate a unified-diff patch of all changed files and write to a file.
-Prompts for an output filename, defaulting to \"emeld.patch\"."
+Prompts for an output filename, defaulting to \"emeld.patch\".  In git
+mode the patch comes from `git diff' between the two revisions (with
+the content filters), so applying it to the right revision reproduces
+the left."
   (interactive)
   (unless emeld--root-node
     (user-error "No comparison loaded"))
@@ -5450,11 +5478,13 @@ Prompts for an output filename, defaulting to \"emeld.patch\"."
          (nodes (emeld--collect-changed-leaves (emeld-node-children emeld--root-node))))
     (if (null nodes)
         (message "No changes to write to patch")
-      (with-temp-buffer
-        (dolist (node nodes)
-          (insert (emeld--write-patch-hunk node)))
-        (write-region nil nil outfile nil 'silent)
-        (message "Wrote patch with %d change(s) to %s" (length nodes) outfile)))))
+      (if emeld--git-mode
+          (emeld--write-git-patch outfile (length nodes))
+        (with-temp-buffer
+          (dolist (node nodes)
+            (insert (emeld--write-patch-hunk node)))
+          (write-region nil nil outfile nil 'silent)
+          (message "Wrote patch with %d change(s) to %s" (length nodes) outfile))))))
 
 (defun emeld--tree-branch-width ()
   "Column width of a node's branch connector under the current density."

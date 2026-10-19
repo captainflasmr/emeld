@@ -406,6 +406,66 @@ copy adds only the new path (the source is unchanged)."
              (emeld--build-git-tree buf (apply #'concat (nreverse chunks))))))))
     (setq emeld--scan-process proc)))
 
+(defun emeld--git-numstat-nonempty-paths (paths)
+  "Return a hash table of PATHS that still have content under the filters.
+PATHS is a list of repository-relative paths.  Runs one
+`git diff --numstat -z' for the buffer's revision pair with the active
+content filters and returns the paths with any added or deleted lines —
+files whose filtered diff is empty (e.g. a blank-line-only change under
+`emeld-ignore-blank-lines', which `git diff --name-status' still lists)
+are absent.  A rename's two paths are both recorded, and binary files
+\(dash counts) count as having content.  Returns nil when git fails, so
+the caller can keep the unverified set."
+  ;; Capture the buffer-local repo/revs and filter settings *before* the
+  ;; temp buffer, where they would read as nil/defaults.
+  (let ((repo (directory-file-name emeld--git-repo))
+        (rev-args (emeld--git-rev-args emeld--git-left-rev emeld--git-right-rev))
+        (filter-args (emeld--content-filter-args t)))
+    (with-temp-buffer
+      (let ((status (apply #'call-process "git" nil t nil
+                           (append (list "-C" repo "diff" "--numstat" "-z")
+                                   filter-args rev-args (list "--") paths))))
+        (when (eq status 0)
+          (let ((table (make-hash-table :test #'equal))
+                (tokens (split-string (buffer-string) "\0" t)))
+            (while tokens
+              (let* ((entry (pop tokens))
+                     (fields (split-string entry "\t"))
+                     (added (nth 0 fields))
+                     (deleted (nth 1 fields))
+                     (path (or (nth 2 fields) ""))
+                     (has-content (not (and (equal added "0")
+                                            (equal deleted "0")))))
+                (if (not (string-empty-p path))
+                    (when has-content (puthash path t table))
+                  ;; Rename/copy form: the paths follow as separate tokens.
+                  (let ((old (pop tokens))
+                        (new (pop tokens)))
+                    (when has-content
+                      (when old (puthash old t table))
+                      (when new (puthash new t table)))))))
+            table))))))
+
+(defun emeld--git-verify-modified-entries (entries)
+  "Drop modified ENTRIES whose filtered diff is empty.
+`git diff --name-status' still lists a file whose only change is blank
+lines when `--ignore-blank-lines' is the only content filter active;
+one `git diff --numstat -z' pass over the modified paths (same revision
+pair and filters) shows which of them actually have content.  Returns
+ENTRIES unchanged when there is nothing to verify or the call fails."
+  (let ((modified (delq nil (mapcar (lambda (e)
+                                      (and (eq (cdr e) 'different) (car e)))
+                                    entries))))
+    (if (null modified)
+        entries
+      (let ((nonempty (emeld--git-numstat-nonempty-paths modified)))
+        (if (null nonempty)
+            entries
+          (cl-remove-if (lambda (e)
+                          (and (eq (cdr e) 'different)
+                               (not (gethash (car e) nonempty))))
+                        entries))))))
+
 (defun emeld--build-git-tree (buf output)
   "Build the node tree in BUF from git name-status OUTPUT.
 Parses OUTPUT into entries and feeds them through the shared progressive
@@ -417,6 +477,12 @@ the filesystem for paths that exist only in history."
              (entries (emeld--parse-git-name-status output))
              (scan-gen emeld--scan-generation)
              (old-gc gc-cons-threshold))
+        ;; `git diff --name-status' can list files whose only change is
+        ;; blank lines while `--ignore-blank-lines' is the sole content
+        ;; filter (see `emeld--content-filter-args'); verify the modified
+        ;; files so the tree agrees with the per-file diffs.
+        (when emeld-ignore-blank-lines
+          (setq entries (emeld--git-verify-modified-entries entries)))
         (setq gc-cons-threshold (* 128 1024 1024))
         (setq emeld--status-phase 'building-tree
               emeld--scan-total (length entries)
