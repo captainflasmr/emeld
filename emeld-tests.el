@@ -1723,6 +1723,135 @@ drilling once nothing below them remains unscanned."
       (delete-directory left t)
       (delete-directory right t))))
 
+(ert-deftest emeld-hunk-sides-parse-diff-lines ()
+  "Hunk lookup and side reconstruction handle context, headers and hunks."
+  (let ((lines '("--- a/f" "+++ b/f"
+                 "@@ -1,3 +1,3 @@"
+                 " same"
+                 "-old"
+                 "+new"
+                 " tail"
+                 "@@ -10 +10 @@"
+                 "-gone"
+                 "+kept")))
+    ;; Inside the first hunk (including its header), inside the second,
+    ;; and outside every hunk (the file headers).
+    (should (equal '(2 . 7) (emeld--inline-diff-hunk-at lines 2)))
+    (should (equal '(2 . 7) (emeld--inline-diff-hunk-at lines 4)))
+    (should (equal '(7 . 10) (emeld--inline-diff-hunk-at lines 8)))
+    (should-not (emeld--inline-diff-hunk-at lines 0))
+    (should-not (emeld--inline-diff-hunk-at lines 1))
+    ;; Sides: context belongs to both, `-' only to old, `+' only to new.
+    (pcase-let ((`(,old . ,new) (emeld--hunk-sides lines 2 7)))
+      (should (equal "same\nold\ntail\n" old))
+      (should (equal "same\nnew\ntail\n" new)))
+    (pcase-let ((`(,old . ,new) (emeld--hunk-sides lines 7 10)))
+      (should (equal "gone\n" old))
+      (should (equal "kept\n" new)))))
+
+(ert-deftest emeld-hunk-sides-no-newline-marker ()
+  "A `\\ No newline' marker strips the newline from the side it follows."
+  (let ((lines '("@@ -1 +1 @@"
+                 "-old" "\\ No newline at end of file"
+                 "+new" "\\ No newline at end of file")))
+    (pcase-let ((`(,old . ,new) (emeld--hunk-sides lines 0 5)))
+      (should (equal "old" old))
+      (should (equal "new" new))))
+  ;; A context line belongs to both sides, so both lose the newline.
+  (let ((lines '("@@" " ctx" "\\ No newline at end of file")))
+    (pcase-let ((`(,old . ,new) (emeld--hunk-sides lines 0 3)))
+      (should (equal "ctx" old))
+      (should (equal "ctx" new)))))
+
+(ert-deftest emeld-copy-hunk-applies-and-undoes ()
+  "Applying a change block rewrites the other file; undo restores it."
+  (let* ((left (make-temp-file "emeld-hL" t))
+         (right (make-temp-file "emeld-hR" t))
+         (lf (expand-file-name "f.txt" left))
+         (rf (expand-file-name "f.txt" right)))
+    (unwind-protect
+        (progn
+          (with-temp-file lf (insert "one\ntwo\nthree\n"))
+          (with-temp-file rf (insert "one\nTWO\nthree\n"))
+          (with-temp-buffer
+            (setq-local emeld--git-mode nil
+                        emeld--left-root left
+                        emeld--right-root right
+                        emeld--marked-paths (make-hash-table :test #'equal)
+                        emeld--op-log nil)
+            (let ((node (emeld-node-create :name "f.txt" :diff-status 'different
+                                           :left-path lf :right-path rf)))
+              (setq-local emeld--root-node
+                          (emeld-node-create :name "" :is-dir t :expanded t))
+              (setf (emeld-node-children emeld--root-node) (list node))
+              (setf (emeld-node-inline-diff node) (emeld--inline-diff-lines node))
+              (emeld--render-nodes (list node) "" 60)
+              ;; Point on the peek's removed line ("TWO" — the right file's
+              ;; content): that hunk is applied to the right file.
+              (goto-char (point-min))
+              (search-forward "-TWO")
+              (cl-letf (((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+                        ((symbol-function 'emeld--render) (lambda () nil)))
+                (emeld-copy-hunk))
+              (should (equal "one\ntwo\nthree\n"
+                             (with-temp-buffer
+                               (insert-file-contents rf)
+                               (buffer-string))))
+              (should (eq 'same (emeld-node-diff-status node)))
+              (should-not (emeld-node-inline-diff node))
+              (should (eq 'hunk (plist-get (car emeld--op-log) :type)))
+              ;; Undo restores the right file and pops the entry.
+              (cl-letf (((symbol-function 'emeld--render) (lambda () nil)))
+                (emeld-undo-last-op))
+              (should (equal "one\nTWO\nthree\n"
+                             (with-temp-buffer
+                               (insert-file-contents rf)
+                               (buffer-string))))
+              (should-not emeld--op-log))))
+      (delete-directory left t)
+      (delete-directory right t))))
+
+(ert-deftest emeld-copy-hunk-reverse ()
+  "A prefix argument applies the block to the left file instead."
+  (let* ((left (make-temp-file "emeld-hL" t))
+         (right (make-temp-file "emeld-hR" t))
+         (lf (expand-file-name "f.txt" left))
+         (rf (expand-file-name "f.txt" right)))
+    (unwind-protect
+        (progn
+          (with-temp-file lf (insert "one\ntwo\nthree\n"))
+          (with-temp-file rf (insert "one\nTWO\nthree\n"))
+          (with-temp-buffer
+            (setq-local emeld--git-mode nil
+                        emeld--left-root left
+                        emeld--right-root right
+                        emeld--marked-paths (make-hash-table :test #'equal)
+                        emeld--op-log nil)
+            (let ((node (emeld-node-create :name "f.txt" :diff-status 'different
+                                           :left-path lf :right-path rf)))
+              (setq-local emeld--root-node
+                          (emeld-node-create :name "" :is-dir t :expanded t))
+              (setf (emeld-node-children emeld--root-node) (list node))
+              (setf (emeld-node-inline-diff node) (emeld--inline-diff-lines node))
+              (emeld--render-nodes (list node) "" 60)
+              (goto-char (point-min))
+              (search-forward "+two")
+              (cl-letf (((symbol-function 'yes-or-no-p) (lambda (&rest _) t))
+                        ((symbol-function 'emeld--render) (lambda () nil)))
+                (emeld-copy-hunk t))
+              ;; The left file now matches the right at that block.
+              (should (equal "one\nTWO\nthree\n"
+                             (with-temp-buffer
+                               (insert-file-contents lf)
+                               (buffer-string))))
+              (should (equal "one\nTWO\nthree\n"
+                             (with-temp-buffer
+                               (insert-file-contents rf)
+                               (buffer-string))))
+              (should (eq 'same (emeld-node-diff-status node))))))
+      (delete-directory left t)
+      (delete-directory right t))))
+
 (ert-deftest emeld-git-history-working-tree-slot ()
   "Index -1 is the working-tree slot: newest commit on the left, working right."
   (with-temp-buffer

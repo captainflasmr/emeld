@@ -2633,6 +2633,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "o")   #'emeld-jump-other-side)
     (define-key map (kbd "P")   #'emeld-format-patch)
     (define-key map (kbd "C")   #'emeld-copy)
+    (define-key map (kbd "a")   #'emeld-copy-hunk)
     (define-key map (kbd "w")   #'emeld-copy-path-at-point)
     (define-key map (kbd "x")   #'emeld-delete)
     (define-key map (kbd "D")   #'emeld-delete-at-point)
@@ -3725,6 +3726,8 @@ On a file that differs (or exists on only one side), expand a quick diff
 beneath the row — a Magit-style peek that keeps point in the tree; invoke
 again to collapse.  Changed words within modified lines are highlighted
 like `diff-refine-hunk' (see `emeld-inline-diff-refine-max-spots').
+With the peek open, \\[emeld-copy-hunk] applies the change block at
+point to the other file (a prefix argument reverses the direction).
 Reports a message on a directory or an identical file."
   (interactive)
   (let ((node (get-text-property (point) 'emeld-node)))
@@ -3741,6 +3744,192 @@ Reports a message on a directory or an identical file."
             (message "Nothing to preview (identical?)")
           (setf (emeld-node-inline-diff node) lines)
           (let ((pos (point))) (emeld--render) (goto-char pos))))))))
+
+(defun emeld--inline-diff-hunk-at (lines index)
+  "Return (BEG . END) line indices of the `@@' hunk in LINES containing INDEX.
+Returns nil when INDEX falls outside every hunk, e.g. on the file
+headers of the diff."
+  (let ((i 0)
+        (n (length lines))
+        (found nil))
+    (while (and (not found) (< i n))
+      (if (string-prefix-p "@@" (nth i lines))
+          (let ((j (1+ i)))
+            (while (and (< j n) (not (string-prefix-p "@@" (nth j lines))))
+              (setq j (1+ j)))
+            (if (and (<= i index) (< index j))
+                (setq found (cons i j))
+              (setq i j)))
+        (setq i (1+ i))))
+    found))
+
+(defun emeld--hunk-sides (lines beg end)
+  "Return (OLD . NEW) file texts for the unified-diff hunk LINES[BEG..END).
+OLD joins the hunk's context and `-' lines (one-char prefix stripped)
+and NEW the context and `+' lines, each ending in a newline except where
+a \"\\ No newline at end of file\" marker says otherwise — so the two
+strings reproduce the two file versions of the hunk's region exactly."
+  (let ((old nil) (new nil) (i beg) (last-sides nil))
+    (while (< i end)
+      (let ((line (nth i lines)))
+        (cond
+         ((string-prefix-p "@@" line)
+          (setq last-sides nil))
+         ((string-prefix-p "\\" line)
+          ;; The marker applies to the line just appended, on whichever
+          ;; side(s) that line belonged to.
+          (when (memq 'old last-sides)
+            (setcar old (string-remove-suffix "\n" (car old))))
+          (when (memq 'new last-sides)
+            (setcar new (string-remove-suffix "\n" (car new))))
+          (setq last-sides nil))
+         ((string-prefix-p "+" line)
+          (push (concat (substring line 1) "\n") new)
+          (setq last-sides '(new)))
+         ((string-prefix-p "-" line)
+          (push (concat (substring line 1) "\n") old)
+          (setq last-sides '(old)))
+         (t
+          (let ((text (concat (if (string-prefix-p " " line)
+                                  (substring line 1)
+                                line)
+                              "\n")))
+            (push text old)
+            (push text new)
+            (setq last-sides '(old new))))))
+      (setq i (1+ i)))
+    (cons (apply #'concat (nreverse old))
+          (apply #'concat (nreverse new)))))
+
+(defun emeld--replace-in-file (path find replace &optional line-hint)
+  "Replace the FIND text with REPLACE in file PATH, preserving its coding.
+When FIND occurs more than once, the occurrence closest to LINE-HINT
+\(a 1-based line number) wins; nil picks the first.  An empty FIND
+inserts REPLACE at the hinted line (a hunk that only adds content).
+Signals a `user-error' when FIND is absent, so a file that changed on
+disk since the peek was rendered fails loudly instead of editing the
+wrong place."
+  (with-temp-buffer
+    (insert-file-contents path)
+    (let ((coding last-coding-system-used)
+          (first nil) (all nil) (hint-pos nil))
+      (when line-hint
+        (save-excursion
+          (goto-char (point-min))
+          (forward-line (max 0 (1- line-hint)))
+          (setq hint-pos (point))))
+      (if (string-empty-p find)
+          (progn
+            (goto-char (or hint-pos (point-min)))
+            (insert replace))
+        (goto-char (point-min))
+        (while (search-forward find nil t)
+          (let ((p (match-beginning 0)))
+            (unless first (setq first p))
+            (push p all)))
+        (unless all
+          (user-error "The change block is no longer in %s — the file changed; rescan and retry"
+                      (file-name-nondirectory path)))
+        (goto-char (if (and hint-pos (cdr all))
+                       (let ((best first))
+                         (dolist (p all)
+                           (when (< (abs (- p hint-pos)) (abs (- best hint-pos)))
+                             (setq best p)))
+                         best)
+                     first))
+        (delete-region (point) (+ (point) (length find)))
+        (insert replace))
+      (let ((coding-system-for-write coding))
+        (write-region (point-min) (point-max) path nil 'silent)))))
+
+(defun emeld--file-pair-same-p (left right)
+  "Non-nil when files LEFT and RIGHT compare identical under the content filters."
+  (and left right
+       (file-exists-p left) (file-exists-p right)
+       (eq 0 (apply #'call-process "diff" nil nil nil "-q"
+                    (append (emeld--content-filter-args) (list left right))))))
+
+(defun emeld--reclassify-hunk-node (node)
+  "Re-status NODE after a change block was applied to one of its files.
+Both files still exist, so — unlike `emeld--reclassify-copied-node' —
+the status comes from an actual content comparison (honoring the content
+filters).  An open peek is recomputed, the ancestors are recomputed and
+the tree is re-rendered."
+  (let ((same (emeld--file-pair-same-p (emeld-node-left-path node)
+                                       (emeld-node-right-path node))))
+    (setf (emeld-node-diff-status node) (if same 'same 'different))
+    (when (emeld-node-inline-diff node)
+      (setf (emeld-node-inline-diff node)
+            (unless same (emeld--inline-diff-lines node))))
+    (emeld--recompute-ancestors node)
+    (emeld--render)))
+
+(defun emeld--refresh-node-after-hunk (path)
+  "Update the tree after a change block was applied to PATH.
+Finds the node owning PATH and re-classifies it; falls back to a full
+rescan when the node cannot be located."
+  (let* ((rel (emeld--rel-from-abs path))
+         (node (and rel (emeld--find-node rel))))
+    (if node
+        (emeld--reclassify-hunk-node node)
+      (emeld-refresh))))
+
+(defun emeld-copy-hunk (&optional reverse)
+  "Apply the inline-diff change block at point to the other file.
+With point on a line of an expanded peek (\\[emeld-toggle-inline-diff]),
+the unified-diff hunk containing it is copied to the other side: as
+displayed, it is applied to the right file (making it match the left);
+with a prefix argument (REVERSE) it is applied to the left file
+instead.  The hunk's old side must be found in the target file — the
+occurrence nearest the hunk header wins — and the write preserves the
+file's coding system.  The applied block is logged for
+`emeld-undo-last-op', and the file's status and open peek are updated
+in place (the row drops out once nothing differs).  Needs a modified
+file in a directory comparison; one-sided files are whole-file copies
+\(\\[emeld-copy])."
+  (interactive "P")
+  (when emeld--git-mode
+    (user-error "Hunk copy is not available when comparing git revisions"))
+  (let ((node (get-text-property (point) 'emeld-node))
+        (index (get-text-property (point) 'emeld-inline-diff-index)))
+    (unless (and node index (not (emeld-node-is-dir node)))
+      (user-error "Point is not on an inline-diff change block (TAB peeks a file)"))
+    (unless (eq (emeld-node-diff-status node) 'different)
+      (user-error "Hunk copy needs a modified file; copy a one-sided file whole with %s"
+                  (substitute-command-keys "\\[emeld-copy]")))
+    (let* ((lines (mapcar #'substring-no-properties (emeld-node-inline-diff node)))
+           (hunk (emeld--inline-diff-hunk-at lines index)))
+      (unless hunk
+        (user-error "Point is not inside a change block"))
+      (let* ((beg (car hunk))
+             (end (cdr hunk))
+             (header (nth beg lines)))
+        (unless (string-match "\\`@@ -\\([0-9]+\\)\\(?:,[0-9]+\\)? +\\+\\([0-9]+\\)" header)
+          (user-error "Malformed hunk header: %s" header))
+        (let ((old-start (string-to-number (match-string 1 header)))
+              (new-start (string-to-number (match-string 2 header))))
+          (pcase-let* ((`(,old . ,new) (emeld--hunk-sides lines beg end))
+                       (target (if reverse (emeld-node-left-path node)
+                                 (emeld-node-right-path node)))
+                       (side (if reverse "left" "right"))
+                       (find (if reverse new old))
+                       (replace (if reverse old new))
+                       (hint (if reverse new-start old-start))
+                       (nremoved (cl-count-if #'emeld--inline-diff-removed-line-p
+                                              (cl-subseq lines beg end)))
+                       (nadded (cl-count-if #'emeld--inline-diff-added-line-p
+                                            (cl-subseq lines beg end))))
+            (unless (file-exists-p target)
+              (user-error "No %s file to apply to" side))
+            (when (yes-or-no-p
+                   (format "Apply change block (-%d +%d lines) to the %s file (%s)? "
+                           nremoved nadded side (emeld-node-name node)))
+              (emeld--replace-in-file target find replace hint)
+              (emeld--log-op (list :type 'hunk :path target
+                                   :find find :replace replace
+                                   :time (current-time)))
+              (message "Applied change block to %s" (file-name-nondirectory target))
+              (emeld--refresh-node-after-hunk target))))))))
 
 (defun emeld-ediff ()
   "Run Ediff on the file at point, comparing the left and right sides.
@@ -4377,8 +4566,10 @@ state without the whole tree flashing (see `emeld--update-after-copy')."
 (defvar-local emeld--op-log nil
   "Stack of undoable file operations in this comparison (newest first).
 Each entry is a plist: `(:type delete :path ORIG :trash TRASH :time TIME
-:is-dir BOOL)' for a trashed file, or `(:type copy :src SRC :dest DEST
-:time TIME :is-dir BOOL :mirror BOOL)' for a completed copy.
+:is-dir BOOL)' for a trashed file, `(:type copy :src SRC :dest DEST
+:time TIME :is-dir BOOL :mirror BOOL)' for a completed copy, or
+`(:type hunk :path FILE :find TEXT :replace TEXT :time TIME)' for an
+applied change block (`emeld-copy-hunk').
 Only operations whose effect can be reversed are logged (a delete
 whose trash location could not be captured is not logged).
 See `emeld-undo-last-op'.  Kept to `emeld-op-log-max' entries.")
@@ -4577,16 +4768,39 @@ Messages describe the outcome and the affected node is refreshed."
                       " — files pruned by mirroring are not restored"
                     ""))
          'done))))
+    ('hunk
+     (let ((path (plist-get op :path)))
+       (cond
+        ((not (file-exists-p path))
+         (message "Cannot undo change block: %s is gone" path)
+         'gone)
+        (t
+         (condition-case err
+             (progn
+               ;; Reverse the edit: find what was applied and restore
+               ;; what was there before.
+               (emeld--replace-in-file path (plist-get op :replace)
+                                       (plist-get op :find))
+               (emeld--refresh-node-after-hunk path)
+               (message "Restored change block in %s"
+                        (file-name-nondirectory path))
+               'done)
+           (user-error
+            (message "Cannot undo change block: %s (entry kept for retry)"
+                     (error-message-string err))
+            'keep))))))
     (_ (message "Unknown operation, dropped") 'gone)))
 
 (defun emeld-undo-last-op ()
-  "Undo the most recent logged delete or copy in this comparison.
+  "Undo the most recent logged delete, copy or change block in this comparison.
 A delete restores the file from trash to its original path
 (recreating parents) and rescans the whole comparison so the
 restored file shows up; this refuses when something already occupies
 the path or the trash entry is gone.  A copy removes the copied
 destination (to trash); files pruned by a mirror copy are not
-restorable.  The affected node is refreshed afterwards.
+restorable.  A change block re-applies its reverse edit to the file,
+refusing — and keeping the entry — when the applied text is no longer
+present.  The affected node is refreshed afterwards.
 See `emeld--op-log'."
   (interactive)
   (unless emeld--op-log
@@ -4607,6 +4821,7 @@ See `emeld--op-log'."
             ('copy (format "%s to %s%s"
                            (plist-get op :src) (plist-get op :dest)
                            (if (plist-get op :mirror) " [mirror]" "")))
+            ('hunk (format "change block in %s" (plist-get op :path)))
             (_ "?"))))
 
 (defvar-local emeld--op-source-buffer nil
@@ -5310,11 +5525,15 @@ node — see `emeld--node-relpath' for the equivalent slow form."
                                           (propertize (concat indent-prefix guide)
                                                       'face 'shadow)
                                           (make-string (string-width status-marker) ?\s))))
-                (dolist (dl (emeld-node-inline-diff node))
-                  (let ((dstart (point)))
-                    (insert diff-prefix dl "\n")
-                    (add-text-properties dstart (point)
-                                         `(emeld-node ,node emeld-inline-diff t))))))
+                (let ((index 0))
+                  (dolist (dl (emeld-node-inline-diff node))
+                    (let ((dstart (point)))
+                      (insert diff-prefix dl "\n")
+                      (add-text-properties dstart (point)
+                                           `(emeld-node ,node
+                                             emeld-inline-diff t
+                                             emeld-inline-diff-index ,index)))
+                    (setq index (1+ index))))))
 
             ;; Recurse.  The continuation indent depends on `emeld-tree-density':
             ;; `compact' matches the branch width for a tight tree, `wide' adds
@@ -5403,11 +5622,12 @@ node — see `emeld--node-relpath' for the equivalent slow form."
           (format "sync to other side (copy/delete via %s)"
                   (if (emeld--copy-use-rsync-p) "rsync" "built-in copy")))
     emeld-copy)
+   ("a" "apply change block at point (peek; C-u: reverse)" emeld-copy-hunk)
    ("R" (lambda () (if emeld-copy-mirror "[x] mirror copy (--delete)" "[ ] mirror copy (--delete)"))
     (lambda () (interactive) (emeld-toggle-mirror)) :transient t)
    ("x"   "delete marked/at point" emeld-delete)
    ("D"   "delete at point (this pane)" emeld-delete-at-point)
-   ("u"   "undo last delete/copy" emeld-undo-last-op)
+   ("u"   "undo last delete/copy/block" emeld-undo-last-op)
    ("l"   "list operations" emeld-list-operations)])
 
 (transient-define-prefix emeld-dispatch-diff ()
@@ -5499,7 +5719,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
    ("o"   "hop to other tree" emeld-jump-other-side)
    ("e"   "ediff"           emeld-ediff)
    ("G"   "rescan"          emeld-rescan)
-   ("u"   "undo last delete/copy" emeld-undo-last-op)])
+   ("u"   "undo last delete/copy/block" emeld-undo-last-op)])
 
 (define-key emeld-mode-map (kbd "?") #'emeld-dispatch)
 
