@@ -3,18 +3,6 @@
 
 Gaps between emeld and Meld, ordered by usefulness for an Emacs variant.
 
-* TODO Three-Way Comparison
-
-** TODO Three-way file compare (LOCAL vs BASE vs REMOTE)
-
-  Currently emeld is strictly two-way.
-  
-** TODO Three-way folder compare
-
-** TODO Merge conflict resolution
-
-  Per-change merge actions across three panes.
-
 * TODO Text / Content Filters
 
 ** DONE Regex-based line filtering for diff comparison
@@ -25,52 +13,6 @@ Gaps between emeld and Meld, ordered by usefulness for an Emacs variant.
 
   Script comment stripping, whitespace normalization, etc.
   
-** TODO "Same when filtered" state
-
-  Files that differ but become identical after content filters — shown italicized.
-
-* TODO Folder Comparison Enhancements
-
-** TODO Flattened view
-
-  Collapse tree hierarchy to a flat file list with a "Location" column showing the relative path of each file.
-  
-** TODO Case-insensitive filename matching
-
-  Toggle via transient; useful on FAT/exFAT/HFS+ filesystems.
-  
-** TODO Marked comparison
-
-  Compare two /differently-named/ files across folders by selecting them.
-  
-** TODO File state emblems
-
-  Newest-file indicator, symbolic-link arrow, selected-for-comparison tick.
-  
-** TODO Per-file status bar
-
-  Detail line for the currently selected file.
-
-* TODO Navigation
-
-** DONE Change-count / jump-to-change-number
-
-  =M-n= / =M-p= step between changed files — skipping directory rows, identical files and inline previews — with a numeric prefix to repeat.  The header line shows the number of changed files displayed.
-  
-** TODO Left/right arrow keys to move focus between panes in file view
-
-** TODO Scroll-based change navigation in the overview bar
-
-* TODO Session & UI Polish
-
-** DONE Word-level refinement in the inline diff peek
-
-   =TAB= on a file now highlights the words that actually changed within modified lines (=diff-refine-added= / =diff-refine-removed=, the way =diff-refine-hunk= does), computed with =smerge-refine-regions= and whitespace-trimmed.  Each modified spot costs a small =diff= run, so peeks with more than =emeld-inline-diff-refine-max-spots= spots (default 250) stay plain; =0= disables refinement.
-
-** TODO Multi-tab / multi-buffer sessions
-
-  Multiple comparisons open simultaneously.  emeld is single-buffer per comparison.
-
 * Deprioritized — Already Covered by Emacs Built-Ins
 
 ** File Content Diff View
