@@ -405,6 +405,40 @@ must reuse them rather than create siblings with the same name."
                 (should (equal first-text (buffer-string)))))))
       (delete-file file))))
 
+(ert-deftest emeld-file-meta-toggle-live ()
+  "Toggling `emeld-show-file-meta' updates rendered rows at once, no rescan."
+  (let* ((file (make-temp-file "emeld-meta-t" nil ".txt"))
+         (calls 0)
+         (real (symbol-function 'file-attributes)))
+    (unwind-protect
+        (with-temp-buffer
+          (setq-local emeld--marked-paths (make-hash-table :test #'equal))
+          (setq-local emeld--git-mode nil)
+          (let ((emeld-show-file-meta nil)
+                (node (emeld-node-create :name (file-name-nondirectory file)
+                                         :diff-status 'different
+                                         :left-path file :right-path file)))
+            (cl-letf (((symbol-function 'file-attributes)
+                       (lambda (path &optional id-format)
+                         (cl-incf calls)
+                         (funcall real path id-format))))
+              ;; Off: no tag, and nothing is stat'ed or cached.
+              (emeld--render-nodes (list node) "" 60)
+              (should-not (string-match-p "(" (buffer-string)))
+              (should (= 0 calls))
+              ;; Toggle on: the tag appears on this very render.
+              (setq emeld-show-file-meta t)
+              (erase-buffer)
+              (emeld--render-nodes (list node) "" 60)
+              (should (string-match-p "(" (buffer-string)))
+              (should (= 2 calls))
+              ;; Toggle off: it disappears again, still without a rescan.
+              (setq emeld-show-file-meta nil)
+              (erase-buffer)
+              (emeld--render-nodes (list node) "" 60)
+              (should-not (string-match-p "(" (buffer-string))))))
+      (delete-file file))))
+
 (ert-deftest emeld-reclassify-drops-meta-cache ()
   "Re-classifying after a copy drops the node's cached meta tags."
   (let* ((left (make-temp-file "emeld-metaL" t))

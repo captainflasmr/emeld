@@ -4887,26 +4887,29 @@ describe the work tree, not the compared content)."
   "Return NODE's file-meta tag on SIDE, computing and caching it once.
 SIDE is `left' or `right'.  The formatted tag (`emeld--file-meta-string')
 is stored in the node's `left-meta'/`right-meta' slot — with the symbol
-`none' marking a computed \"no tag\" — so re-renders driven by toggles,
-expand/collapse and marks never re-stat visible files.
+`none' marking a computed \"no tag\" — so repeated renders for
+expand/collapse, marks and display toggles never re-stat the same file.
+Nothing is consulted or cached while `emeld-show-file-meta' is off, so
+switching the tags themselves on or off takes effect on the next render.
 `emeld--invalidate-node-meta' drops the cache when the node's disk state
 changes (a copy or its undo); a rescan builds fresh nodes."
-  (let ((cached (if (eq side 'left)
-                    (emeld-node-left-meta node)
-                  (emeld-node-right-meta node))))
-    (cond
-     ((eq cached 'none) nil)
-     (cached cached)
-     (t
-      (let ((tag (emeld--file-meta-string
-                  (if (eq side 'left)
-                      (emeld-node-left-path node)
-                    (emeld-node-right-path node))
-                  (emeld-node-is-dir node))))
-        (if (eq side 'left)
-            (setf (emeld-node-left-meta node) (or tag 'none))
-          (setf (emeld-node-right-meta node) (or tag 'none)))
-        tag)))))
+  (when emeld-show-file-meta
+    (let ((cached (if (eq side 'left)
+                      (emeld-node-left-meta node)
+                    (emeld-node-right-meta node))))
+      (cond
+       ((eq cached 'none) nil)
+       (cached cached)
+       (t
+        (let ((tag (emeld--file-meta-string
+                    (if (eq side 'left)
+                        (emeld-node-left-path node)
+                      (emeld-node-right-path node))
+                    (emeld-node-is-dir node))))
+          (if (eq side 'left)
+              (setf (emeld-node-left-meta node) (or tag 'none))
+            (setf (emeld-node-right-meta node) (or tag 'none)))
+          tag))))))
 
 (defun emeld--invalidate-node-meta (node)
   "Forget any cached file-meta tags on NODE.
