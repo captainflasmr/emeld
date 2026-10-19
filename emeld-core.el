@@ -306,7 +306,8 @@ that filter is on, and the hunk output honors it regardless."
 - `auto'    : use rsync when `emeld-rsync-command' is found on `exec-path',
               otherwise fall back to Emacs's built-in copy.
 - `rsync'   : always use rsync; error up front if it is not available.
-- `builtin' : always use `copy-file' / `copy-directory'.
+- `builtin' : always use Emacs's own copy — `copy-file' for files, and for
+              directories a step-by-step walk that mirrors `copy-directory'.
 rsync only sends the parts of a file that changed, preserves metadata,
 and recurses efficiently, so it is faster and more robust for large or
 already-partly-synced trees.  See `emeld-rsync-options'."
@@ -336,7 +337,7 @@ files that exist only on the destination — so \"copy left→right\" becomes
 a true mirror rather than a merge.  Only affects rsync copies of
 directories (`emeld-copy-method' must allow rsync); single files and the
 built-in copy are unaffected, since `--delete' has nothing to prune for a
-single file and `copy-directory' cannot delete.  To mirror a whole tree,
+single file and the built-in copy never deletes.  To mirror a whole tree,
 copy a directory node (or a left-only directory) with this enabled.
 Because it deletes files, `emeld-copy' labels the action as a mirror and
 warns before proceeding."
@@ -4320,18 +4321,58 @@ when `emeld-copy-mirror' is enabled, making DEST exactly match SOURCE."
             (list "--" src dst))))
 
 (defun emeld--copy-one (source dest-root)
-  "Copy a single file or directory at SOURCE to DEST-ROOT preserving path.
-The built-in copy performed per node by `emeld--copy-builtin-async';
-creates missing parent directories."
+  "Copy the single file SOURCE to DEST-ROOT, preserving its path.
+The per-file step of `emeld--copy-builtin-async'; directory nodes are
+walked entry by entry instead (`emeld--copy-tree-step').  Creates
+missing parent directories."
   (let ((dest (emeld--copy-dest source dest-root)))
-    (if (file-directory-p source)
-        (if (fboundp 'copy-directory-contents)
-            (copy-directory source dest t t t)
-          (when (and (file-exists-p dest) (not (file-directory-p dest)))
-            (delete-file dest))
-          (copy-directory source dest t t))
-      (copy-file source dest t))
+    (copy-file source dest t)
     dest))
+
+(defun emeld--copy-tree-step (step)
+  "Perform one step of the chunked built-in directory copy, returning new steps.
+STEP is one of `(:enter SRC DST)' (create DST and schedule its entries),
+`:file SRC DST' (copy one file, keeping its time), `:link TARGET DST'
+\(recreate a symlink) or `(:attrs SRC DST EXISTED)' (apply SRC's modes
+and times to DST afterwards).  The returned steps are in the order they
+should run.  Mirrors `copy-directory' semantics: entries are classified
+the way it classifies them, symlinks are recreated as links, files keep
+their modes and times, and a directory's attributes are applied after
+its contents (following a destination directory that already existed,
+not one the walk created)."
+  (pcase step
+    (`(:enter ,src ,dst)
+     ;; A stray file occupying the destination directory slot is replaced,
+     ;; as `emeld--copy-one' did before directory nodes were walked.
+     (when (and (file-exists-p dst) (not (file-directory-p dst)))
+       (delete-file dst))
+     (let ((existed (file-directory-p dst)))
+       (unless existed (make-directory dst t))
+       (append
+        (mapcar (lambda (file)
+                  (let ((target (concat (file-name-as-directory dst)
+                                        (file-name-nondirectory file)))
+                        (filetype (car (file-attributes file))))
+                    (cond
+                     ((eq filetype t) (list :enter file target))
+                     ((stringp filetype) (list :link filetype target))
+                     (t (list :file file target)))))
+                (directory-files src 'full directory-files-no-dot-files-regexp))
+        ;; Directory attributes go last, after the contents.
+        (list (list :attrs src dst existed)))))
+    (`(:file ,src ,dst)
+     (copy-file src dst t t)
+     nil)
+    (`(:link ,target ,dst)
+     (make-symbolic-link target dst t)
+     nil)
+    (`(:attrs ,src ,dst ,existed)
+     (let ((modes (file-modes src))
+           (times (file-attribute-modification-time (file-attributes src)))
+           (flag (unless existed 'nofollow)))
+       (when modes (set-file-modes dst modes flag))
+       (when times (set-file-times dst times flag)))
+     nil)))
 
 (defun emeld--find-node (rel)
   "Return the tree node whose relative path is REL, or nil.
@@ -4503,11 +4544,13 @@ rsync output is logged to the hidden buffer ` *emeld-rsync*'."
     (funcall run-next jobs)))
 
 (defun emeld--copy-builtin-async (jobs rels)
-  "Copy JOBS with the built-in copy, one node at a time, asynchronously.
-The fallback used when rsync is unavailable: `emeld--copy-one' copies a
-node, then the loop reschedules itself through a zero-delay timer, so
-Emacs stays responsive between nodes (a single very large node still
-blocks while it is copied).  Cancelling `emeld--copy-timer' — which
+  "Copy JOBS with the built-in copy, one step at a time, asynchronously.
+The fallback used when rsync is unavailable.  File nodes are copied by
+`emeld--copy-one' in a single step; directory nodes are walked entry by
+entry by `emeld--copy-tree-step', so even one big directory does not
+block Emacs between its entries (only a single very large *file* still
+blocks while it is copied).  The loop reschedules itself through a
+zero-delay timer; cancelling `emeld--copy-timer' — which
 `emeld--stop-scan' does for a rescan or a buffer kill — aborts the
 chain.  RELS are the relative paths the overall sync touched; on
 completion only those nodes are updated in place
@@ -4519,7 +4562,10 @@ reported.  Successful copies are pushed to `emeld--op-log' for
   (let* ((buf (current-buffer))
          (total (length jobs))
          (done 0) (count 0) (errors 0)
-         run-next)
+         ;; State of the directory walk currently in progress.
+         (tree-stack nil) (tree-src nil) (tree-dest nil)
+         (tree-files 0) (tree-failed nil)
+         run-next run-steps)
     (setq run-next
           (lambda (remaining)
             (cond
@@ -4535,24 +4581,72 @@ reported.  Successful copies are pushed to `emeld--op-log' for
                          "")))
              (t
               (let ((src (caar remaining))
-                    (dst-root (cdar remaining)))
+                    (dst-root (cdar remaining))
+                    (started nil))
                 (cl-incf done)
-                (if (not (file-exists-p src))
-                    (cl-incf errors)
-                  (condition-case _err
+                (message "Copying %d/%d: %s" done total
+                         (file-name-nondirectory (directory-file-name src)))
+                (condition-case _err
+                    (cond
+                     ((not (file-exists-p src))
+                      (cl-incf errors))
+                     ((file-directory-p src)
+                      (with-current-buffer buf
+                        (let ((dest (emeld--copy-dest src dst-root)))
+                          (when (file-in-directory-p dest src)
+                            (user-error "Cannot copy `%s' into its subdirectory `%s'"
+                                        src dest))
+                          (setq tree-src src tree-dest dest
+                                tree-files 0 tree-failed nil
+                                tree-stack (list (list :enter src dest)))
+                          (setq started t))))
+                     (t
                       (with-current-buffer buf
                         (let ((dest (emeld--copy-one src dst-root)))
                           (cl-incf count)
                           (emeld--log-op (list :type 'copy
                                                :src src :dest dest
                                                :time (current-time)
-                                               :is-dir (file-directory-p src)
-                                               :mirror nil))))
-                    (error (cl-incf errors)))
-                  (message "Copying %d/%d: %s" done total
-                           (file-name-nondirectory (directory-file-name src))))
+                                               :is-dir nil
+                                               :mirror nil))))))
+                  (error (cl-incf errors)))
                 (setq emeld--copy-timer
-                      (run-with-timer 0 nil run-next (cdr remaining))))))))
+                      (run-with-timer
+                       0 nil (if started run-steps run-next) (cdr remaining))))))))
+    (setq run-steps
+          (lambda (remaining)
+            (cond
+             ((not (buffer-live-p buf)) nil)
+             ((null tree-stack)
+              ;; The directory finished: log it and move to the next job.
+              (unless tree-failed
+                (with-current-buffer buf
+                  (cl-incf count)
+                  (emeld--log-op (list :type 'copy
+                                       :src tree-src :dest tree-dest
+                                       :time (current-time)
+                                       :is-dir t
+                                       :mirror nil))))
+              (setq emeld--copy-timer
+                    (run-with-timer 0 nil run-next remaining)))
+             (t
+              (condition-case _err
+                  (progn
+                    (setq tree-stack
+                          (append (emeld--copy-tree-step (pop tree-stack))
+                                  tree-stack))
+                    (cl-incf tree-files)
+                    ;; Throttled progress for big directories.
+                    (when (zerop (mod tree-files 200))
+                      (message "Copying %d/%d: %s (%d entries…)" done total
+                               (file-name-nondirectory
+                                (directory-file-name tree-src))
+                               tree-files)))
+                (error (cl-incf errors)
+                       (setq tree-failed t
+                             tree-stack nil)))
+              (setq emeld--copy-timer
+                    (run-with-timer 0 nil run-steps remaining))))))
     (message "Copying %d node(s) using the built-in copy..." total)
     (setq emeld--copy-timer (run-with-timer 0 nil run-next jobs))))
 

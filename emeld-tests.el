@@ -1251,13 +1251,15 @@ Comparing from another dired buffer pairs it with that directory."
       (delete-directory tmp t))))
 
 (ert-deftest emeld-copy-builtin-async-logs ()
-  "Built-in copies run node-at-a-time and push undoable log entries."
+  "Built-in copies run step-at-a-time and push undoable log entries."
   (let* ((left (make-temp-file "emeldL" t))
          (right (make-temp-file "emeldR" t)))
     (unwind-protect
         (progn
           (with-temp-file (expand-file-name "a.txt" left) (insert "x"))
           (with-temp-file (expand-file-name "b.txt" left) (insert "y"))
+          (make-directory (expand-file-name "sub" left))
+          (with-temp-file (expand-file-name "sub/inner.txt" left) (insert "z"))
           (with-temp-buffer
             (setq-local emeld--left-root left
                         emeld--right-root right
@@ -1266,9 +1268,10 @@ Comparing from another dired buffer pairs it with that directory."
             (cl-letf (((symbol-function 'emeld-refresh) (lambda () nil)))
               (emeld--copy-builtin-async
                (list (cons (expand-file-name "a.txt" left) right)
+                     (cons (expand-file-name "sub" left) right)
                      (cons (expand-file-name "b.txt" left) right))
-               '("a.txt" "b.txt"))
-              ;; The chain yields between nodes: it stays busy until the
+               '("a.txt" "sub" "b.txt"))
+              ;; The chain yields between steps: it stays busy until the
               ;; pending timers have all been run.
               (should (emeld--copy-busy-p))
               (while (timerp emeld--copy-timer)
@@ -1276,13 +1279,59 @@ Comparing from another dired buffer pairs it with that directory."
               (should-not (emeld--copy-busy-p))
               (should (file-exists-p (expand-file-name "a.txt" right)))
               (should (file-exists-p (expand-file-name "b.txt" right)))
-              (should (= 2 (length emeld--op-log)))
+              ;; The directory node was walked entry by entry.
+              (should (file-exists-p (expand-file-name "sub/inner.txt" right)))
+              (should (= 3 (length emeld--op-log)))
               (should (eq 'copy (plist-get (car emeld--op-log) :type)))
+              (should (eq t (plist-get (nth 1 emeld--op-log) :is-dir)))
               ;; Newest entry first: b.txt was copied last.
               (should (equal (expand-file-name "b.txt" right)
                              (plist-get (car emeld--op-log) :dest))))))
       (delete-directory left t)
       (delete-directory right t))))
+
+(ert-deftest emeld-copy-tree-step-matches-copy-directory ()
+  "The chunked walker reproduces `copy-directory' content, modes and links."
+  (let* ((root (make-temp-file "emeld-ct" t))
+         (src (expand-file-name "src" root))
+         (a (expand-file-name "a" src))
+         (b (expand-file-name "b" a))
+         (ref (expand-file-name "ref" root))
+         (got (expand-file-name "got" root)))
+    (unwind-protect
+        (progn
+          (make-directory b t)
+          (with-temp-file (expand-file-name "top.txt" src) (insert "top\n"))
+          (with-temp-file (expand-file-name "x.txt" a) (insert "x\n"))
+          (with-temp-file (expand-file-name "deep.txt" b) (insert "deep\n"))
+          (make-symbolic-link "top.txt" (expand-file-name "link" src))
+          (set-file-modes (expand-file-name "x.txt" a) #o640)
+          (set-file-modes b #o700)
+          ;; Reference: the primitive the walker replaces.
+          (copy-directory src ref t t t)
+          ;; The walker, driven step by step like the async chain does.
+          (let ((stack (list (list :enter src got))))
+            (while stack
+              (setq stack (append (emeld--copy-tree-step (pop stack)) stack))))
+          (dolist (rel '("top.txt" "a/x.txt" "a/b/deep.txt"))
+            (let ((s (expand-file-name rel src))
+                  (r (expand-file-name rel ref))
+                  (g (expand-file-name rel got)))
+              (should (file-regular-p g))
+              (should (equal (with-temp-buffer (insert-file-contents s) (buffer-string))
+                             (with-temp-buffer (insert-file-contents g) (buffer-string))))
+              ;; Modes and mtimes are preserved, like `copy-directory'.
+              (should (equal (file-modes s) (file-modes g)))
+              (should (equal (file-modes r) (file-modes g)))
+              (should (equal (file-attribute-modification-time (file-attributes s))
+                             (file-attribute-modification-time (file-attributes g))))))
+          ;; Symlinks are recreated as links with the same target.
+          (should (equal "top.txt" (file-symlink-p (expand-file-name "link" got))))
+          (should (equal "top.txt" (file-symlink-p (expand-file-name "link" ref))))
+          ;; Directory modes are applied after the contents.
+          (should (equal (file-modes b) (file-modes (expand-file-name "a/b" got))))
+          (should (equal (file-modes b) (file-modes (expand-file-name "a/b" ref)))))
+      (delete-directory root t))))
 
 (ert-deftest emeld-copy-method-effective ()
   "The reported method follows `emeld-copy-method' and rsync availability."
