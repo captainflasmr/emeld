@@ -76,17 +76,9 @@ Gaps between emeld and Meld, ordered by usefulness for an Emacs variant, followe
 
   Tests: fixture tree with mocked prompts; only accepted files are copied, log entries and tally are correct.
 
-** TODO 5. Narrow/search the tree
+** DONE 5. Narrow/search the tree
 
-  Effort: medium-small — value: medium.
-
-  Jump-to-file moves; narrowing scopes the tree to a pattern, to focus on a subtree or a family of paths.
-
-  - =emeld-narrow= prompts for a regexp (or a glob with a prefix) and renders only matching paths plus their ancestor directories, with a header flag such as =[narrow: REGEXP]=; =emeld-widen= clears it.
-  - Hook into =emeld--node-visible-p= (or an extra render predicate) so the change count, change navigation and jump-to-file candidates follow automatically.
-  - Session-only, like =C-k= hides — unlike =&=, nothing is written to =.dir-locals.el=.
-
-  Tests: narrowed visible set with ancestors; narrowed change count and jump candidates; widen restores.
+  Implemented as =emeld-narrow= / =emeld-widen= (=C-x n n= / =C-x n w=, View sub-menu =N=): a regexp narrow — or a shell-style glob with a prefix argument, following the filter-group rules — keeps every match, its ancestor directories and, for a matched directory, its whole subtree, expanding the ancestors of matches so they show.  Session-only (nothing is written to =.dir-locals.el=), it composes with the status toggles, content filters and =C-k= hides, and scopes the header change count, change navigation and jump-to-file candidates; the header shows =[narrow: PATTERN]=.  The kept set is recomputed at each render (=emeld--narrow-update=), so it survives rescans, lazy directory population and copies without invalidation hooks.
 
 ** TODO 6. Niche bigger bet: rename/move detection
 

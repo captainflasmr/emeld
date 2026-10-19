@@ -535,6 +535,20 @@ The renderer skips these nodes (and their subtrees).  Buffer-local and
 deliberately *not* reset on rescan, so a hide survives `emeld-refresh'
 within the session; it is never persisted to `.dir-locals.el' (use
 `emeld-add-filter-at-point' for that).  Cleared by `emeld-unhide-all'.")
+(defvar-local emeld--narrow-pattern nil
+  "Active tree narrow pattern, or nil when the whole tree is shown.
+Set by `emeld-narrow'; session-only and buffer-local like
+`emeld--hidden-paths', and deliberately not persisted to
+`.dir-locals.el'.  Matched as a regexp against each node's relative path
+\(or as a glob when `emeld--narrow-glob-p' is non-nil).  An empty
+pattern means no narrow.")
+(defvar-local emeld--narrow-glob-p nil
+  "Whether `emeld--narrow-pattern' is a shell-style glob rather than a regexp.")
+(defvar-local emeld--narrow-kept nil
+  "Hash of relpaths kept by the active narrow, or nil.
+Filled by `emeld--narrow-update' on each render: the matching nodes plus
+their ancestor directories (and, for a matched directory, its whole
+subtree).")
 (defvar-local emeld--last-render-time nil
   "Float-time of the last `emeld--render' call, for render throttling.")
 (defvar-local emeld--same-skip-files nil
@@ -2271,6 +2285,110 @@ unhide everything hidden this session (`emeld-unhide-all')."
                  (substitute-command-keys
                   "\\[universal-argument] \\[emeld-hide-at-point]"))))))
 
+(defun emeld--narrow-match-p (relpath)
+  "Non-nil when RELPATH matches the active narrow pattern.
+Globs follow the filter-group rules — a glob containing a slash matches
+the relative path, otherwise the filename — while regexps match the
+relative path."
+  (if emeld--narrow-glob-p
+      (let ((rx (emeld--glob-to-regexp emeld--narrow-pattern)))
+        (string-match-p rx (if (string-match-p "/" emeld--narrow-pattern)
+                               relpath
+                             (file-name-nondirectory relpath))))
+    (string-match-p emeld--narrow-pattern relpath)))
+
+(defun emeld--narrow-update ()
+  "Recompute `emeld--narrow-kept' for the current tree and narrow pattern.
+Runs on each `emeld--render' while a narrow is active, so the kept set
+stays correct after rescans, lazy directory population and copies.  Keeps
+every matching node, its ancestor directories, and — for a matched
+directory — its whole subtree."
+  (setq emeld--narrow-kept
+        (when emeld--narrow-pattern
+          (let ((table (make-hash-table :test #'equal)))
+            (cl-labels ((walk (node rel inherited)
+                          ;; Return non-nil when NODE or a descendant is kept.
+                          (let ((match (or inherited (emeld--narrow-match-p rel)))
+                                (descendant nil))
+                            (when (and (emeld-node-is-dir node)
+                                       (emeld-node-children node))
+                              (dolist (child (emeld-node-children node))
+                                (when (walk child
+                                            (if (string-empty-p rel)
+                                                (emeld-node-name child)
+                                              (concat rel "/" (emeld-node-name child)))
+                                            match)
+                                  (setq descendant t))))
+                            (when (or match descendant)
+                              (puthash rel t table)
+                              t))))
+              (walk emeld--root-node "" nil))
+            table))))
+
+(defun emeld--narrow-expand-matches ()
+  "Expand the ancestors of every node matching the active narrow pattern."
+  (cl-labels ((walk (node rel)
+                (when (emeld--narrow-match-p rel)
+                  (let ((parent (emeld-node-parent node)))
+                    (while parent
+                      (setf (emeld-node-expanded parent) t)
+                      (setq parent (emeld-node-parent parent)))))
+                (when (emeld-node-is-dir node)
+                  (dolist (child (emeld-node-children node))
+                    (walk child (if (string-empty-p rel)
+                                    (emeld-node-name child)
+                                  (concat rel "/" (emeld-node-name child))))))))
+    (walk emeld--root-node "")))
+
+(defun emeld--narrow-keeps-p (node)
+  "Non-nil when NODE survives the active narrow (or no narrow is active)."
+  (or (null emeld--narrow-pattern)
+      (eq node emeld--root-node)
+      (and emeld--narrow-kept
+           (gethash (emeld--node-relpath node) emeld--narrow-kept))))
+
+(defun emeld-narrow (pattern &optional glob)
+  "Show only tree paths matching PATTERN, plus their ancestor directories.
+PATTERN is a regexp matched against each node's relative path; with a
+prefix argument (GLOB) it is a shell-style glob, following the
+filter-group rules (a glob containing a slash matches the relative path,
+otherwise the filename).  A matched directory keeps its whole subtree,
+and the ancestors of every match are expanded so the matches are visible.
+An empty PATTERN widens again (`emeld-widen').  The narrow is
+session-only: nothing is written to `.dir-locals.el' (use
+\\[emeld-add-filter-at-point] for a persistent filter)."
+  (interactive
+   (let ((glob current-prefix-arg))
+     (list (read-string
+            (format "Narrow to %s (empty clears)%s: "
+                    (if glob "glob" "regexp")
+                    (if emeld--narrow-pattern
+                        (format " [%s]" emeld--narrow-pattern)
+                      ""))
+            nil nil emeld--narrow-pattern)
+           glob)))
+  (if (string-empty-p (string-trim (or pattern "")))
+      (emeld-widen)
+    (setq emeld--narrow-pattern (string-trim pattern)
+          emeld--narrow-glob-p (and glob t))
+    (emeld--narrow-update)
+    (emeld--narrow-expand-matches)
+    (emeld--render)
+    (message "Narrowed to %s%s"
+             (if emeld--narrow-glob-p "glob " "")
+             emeld--narrow-pattern)))
+
+(defun emeld-widen ()
+  "Remove the tree narrowing set by `emeld-narrow'."
+  (interactive)
+  (if (null emeld--narrow-pattern)
+      (message "Not narrowed")
+    (setq emeld--narrow-pattern nil
+          emeld--narrow-glob-p nil
+          emeld--narrow-kept nil)
+    (emeld--render)
+    (message "Widened")))
+
 ;;;###autoload
 (defun emeld-diff (dir1 dir2 &optional depth)
   "Compare DIR1 and DIR2 side-by-side.
@@ -2678,6 +2796,8 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "&")   #'emeld-add-filter-at-point)
     (define-key map (kbd "E")   #'emeld-edit-dir-locals)
     (define-key map (kbd "C-k") #'emeld-hide-at-point)
+    (define-key map (kbd "C-x n n") #'emeld-narrow)
+    (define-key map (kbd "C-x n w") #'emeld-widen)
     (define-key map (kbd "F")   #'emeld-dispatch-filter)
     (define-key map (kbd "s")   #'emeld-dispatch-sync)
     (define-key map (kbd "r")   #'emeld-dispatch-mark)
@@ -5164,6 +5284,7 @@ Each label is spelled out with a leading ASCII checkbox.  Scan-affecting
 notes are appended after them: the whitespace mode (`[ws:amount]' or
 `[ws:all]') and the other content filters (`[ignore-blanks]',
 `[ignore-crlf]', `[ignore-re]', `[ignore-case]') when active, a
+`[narrow: PATTERN]' flag while the tree is narrowed (`emeld-narrow'), a
 `warning'-faced \"(!) gitignore off\" note while `emeld-respect-gitignore'
 is off (git-ignored files are then included in the scan — the exception
 to the default of dropping them, which needs no flag), and a
@@ -5185,6 +5306,8 @@ from the transient (\\[emeld-dispatch])."
    (when emeld-ignore-line-endings " [ignore-crlf]")
    (when emeld-ignore-matching-lines " [ignore-re]")
    (when emeld-ignore-case " [ignore-case]")
+   (when emeld--narrow-pattern
+     (format " [narrow: %s]" emeld--narrow-pattern))
    ;; Git-ignored files are dropped from the scan by default, so that
    ;; needs no flag; warn only when respect is off (the exception),
    ;; since ignored files are then included.
@@ -5341,6 +5464,9 @@ See `emeld--node-meta-string'."
          (fallback-line (line-number-at-pos)))
     
     (setq emeld--column-width (/ (* (window-width) emeld-column-ratio) 100))
+    ;; Refresh the narrow's kept set against the current tree, so it stays
+    ;; correct after rescans, lazy population and copies.
+    (emeld--narrow-update)
     (buffer-disable-undo)
     (erase-buffer)
     (remove-overlays)
@@ -5470,12 +5596,16 @@ hidden, an all-identical (`same') directory is hidden too, so toggling Same
 off returns to a pure diff view.  Directories containing changes are always
 shown so collapsed folder rows remain navigable.  Nodes temporarily
 hidden this session (`emeld--hidden-paths', via `emeld-hide-at-point') are
-never visible regardless of the other rules."
+never visible regardless of the other rules, and an active narrow
+\(`emeld-narrow') keeps only matching paths and their ancestors."
   (and
    ;; Session-only temporary hide; the relpath walk is skipped entirely
    ;; unless something is actually hidden.
    (not (and emeld--hidden-paths
              (member (emeld--node-relpath node) emeld--hidden-paths)))
+   ;; Session-only narrowing (`emeld-narrow'); skipped entirely unless
+   ;; a pattern is set.
+   (emeld--narrow-keeps-p node)
    (or (eq node emeld--root-node)
       ;; Expose top-level subdirectories for structural context, but only while
       ;; showing identical files; otherwise a `same' dir must not surface.
@@ -5884,6 +6014,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
      (lambda () (interactive) (emeld-toggle-ignore-case)) :transient t)
     ("R" (lambda () (if emeld-ignore-matching-lines "[x] ignore matching lines" "[ ] ignore matching lines"))
      (lambda () (interactive) (emeld-set-ignore-matching-lines)) :transient t)
+    ("N" "narrow to regexp (empty: widen)" emeld-narrow :transient t)
     ("c" (lambda () (if emeld--git-commit-expanded "[x] commit msg" "[ ] commit msg"))
      (lambda () (interactive) (emeld-git-toggle-commit-message)) :transient t
      :if (lambda () emeld--git-mode))

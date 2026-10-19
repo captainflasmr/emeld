@@ -939,6 +939,171 @@ rows' padding, so the callback must re-render and refresh
       (should (eq (emeld--current-node) file))
       (should (looking-at-p "deep\\.txt")))))
 
+(defun emeld-test--rendered-relpaths ()
+  "Return the node rows currently rendered, as relpaths, in order.
+Peek lines are skipped (they carry the file's node property too)."
+  (let (out)
+    (save-excursion
+      (goto-char (point-min))
+      (while (not (eobp))
+        (let ((node (get-text-property (point) 'emeld-node)))
+          (when (and node
+                     (not (get-text-property (point) 'emeld-inline-diff)))
+            (push (emeld--node-relpath node) out)))
+        (forward-line 1)))
+    (nreverse out)))
+
+(ert-deftest emeld-narrow-scopes-the-tree ()
+  "Narrowing keeps matches and ancestors and scopes counts and candidates."
+  (with-temp-buffer
+    (setq-local emeld--marked-paths (make-hash-table :test #'equal)
+                emeld--git-mode nil
+                emeld--status-phase 'done
+                emeld--hidden-paths nil
+                emeld--left-root "/x/"
+                emeld--right-root "/y/"
+                emeld-show-file-meta nil
+                emeld-show-same nil
+                emeld-show-files t
+                emeld-show-added t
+                emeld-show-different t)
+    (let* ((root (emeld-node-create :name "root" :is-dir t :expanded t))
+           (src (emeld-node-create :name "src" :is-dir t :expanded t
+                                   :diff-status 'different :parent root))
+           (doc (emeld-node-create :name "doc" :is-dir t :expanded t
+                                   :diff-status 'different :parent root))
+           (a (emeld-node-create :name "a.el" :diff-status 'different
+                                 :left-path "/x/src/a.el" :right-path "/y/src/a.el"
+                                 :parent src))
+           (b (emeld-node-create :name "b.txt" :diff-status 'different
+                                 :left-path "/x/src/b.txt" :right-path "/y/src/b.txt"
+                                 :parent src))
+           (c (emeld-node-create :name "c.el" :diff-status 'different
+                                 :left-path "/x/doc/c.el" :right-path "/y/doc/c.el"
+                                 :parent doc))
+           (d (emeld-node-create :name "d.md" :diff-status 'different
+                                 :left-path "/x/d.md" :right-path "/y/d.md"
+                                 :parent root)))
+      (setf (emeld-node-children src) (list a b)
+            (emeld-node-children doc) (list c)
+            (emeld-node-children root) (list src doc d)
+            emeld--root-node root)
+      (emeld--render)
+      (should (= 4 emeld--change-count))
+      (let ((current-prefix-arg nil))
+        (cl-letf (((symbol-function 'read-string)
+                   (lambda (&rest _) "\\.el\\'")))
+          (call-interactively #'emeld-narrow)))
+      (should (= 2 emeld--change-count))
+      (let ((rows (emeld-test--rendered-relpaths)))
+        (should (member "src" rows))
+        (should (member "doc" rows))
+        (should (member "src/a.el" rows))
+        (should (member "doc/c.el" rows))
+        (should-not (member "src/b.txt" rows))
+        (should-not (member "d.md" rows)))
+      ;; Jump-to-file candidates follow the narrow.
+      (should (equal '("doc/c.el" "src/a.el")
+                     (sort (mapcar #'emeld--node-relpath
+                                   (emeld--collect-jump-files emeld--root-node))
+                           #'string<)))
+      ;; The header flags the active narrow.
+      (should (string-match-p "\\[narrow: " (emeld--display-state-string)))
+      ;; Widening restores the full tree and its counts.
+      (emeld-widen)
+      (should (= 4 emeld--change-count))
+      (should-not (string-match-p "\\[narrow: " (emeld--display-state-string)))
+      (should (member "src/b.txt" (emeld-test--rendered-relpaths))))))
+
+(ert-deftest emeld-narrow-glob ()
+  "A glob narrow follows the filter-group rules for filenames and paths."
+  (with-temp-buffer
+    (setq-local emeld--marked-paths (make-hash-table :test #'equal)
+                emeld--git-mode nil
+                emeld--status-phase 'done
+                emeld--hidden-paths nil
+                emeld--left-root "/x/"
+                emeld--right-root "/y/"
+                emeld-show-file-meta nil
+                emeld-show-same nil
+                emeld-show-files t
+                emeld-show-added t
+                emeld-show-different t)
+    (let* ((root (emeld-node-create :name "root" :is-dir t :expanded t))
+           (src (emeld-node-create :name "src" :is-dir t :expanded t
+                                   :diff-status 'different :parent root))
+           (doc (emeld-node-create :name "doc" :is-dir t :expanded t
+                                   :diff-status 'different :parent root))
+           (a (emeld-node-create :name "a.el" :diff-status 'different
+                                 :left-path "/x/src/a.el" :right-path "/y/src/a.el"
+                                 :parent src))
+           (b (emeld-node-create :name "b.txt" :diff-status 'different
+                                 :left-path "/x/src/b.txt" :right-path "/y/src/b.txt"
+                                 :parent src))
+           (c (emeld-node-create :name "c.el" :diff-status 'different
+                                 :left-path "/x/doc/c.el" :right-path "/y/doc/c.el"
+                                 :parent doc)))
+      (setf (emeld-node-children src) (list a b)
+            (emeld-node-children doc) (list c)
+            (emeld-node-children root) (list src doc)
+            emeld--root-node root)
+      (emeld--render)
+      ;; A filename glob matches anywhere…
+      (let ((current-prefix-arg '(4)))
+        (cl-letf (((symbol-function 'read-string)
+                   (lambda (&rest _) "*.el")))
+          (call-interactively #'emeld-narrow)))
+      (should (eq t emeld--narrow-glob-p))
+      (let ((rows (emeld-test--rendered-relpaths)))
+        (should (member "src/a.el" rows))
+        (should (member "doc/c.el" rows))
+        (should-not (member "src/b.txt" rows)))
+      ;; …and a glob with a slash matches the relative path.
+      (let ((current-prefix-arg '(4)))
+        (cl-letf (((symbol-function 'read-string)
+                   (lambda (&rest _) "src/*")))
+          (call-interactively #'emeld-narrow)))
+      (let ((rows (emeld-test--rendered-relpaths)))
+        (should (member "src" rows))
+        (should (member "src/a.el" rows))
+        (should (member "src/b.txt" rows))
+        (should-not (member "doc" rows))
+        (should-not (member "doc/c.el" rows)))
+      (emeld-widen))))
+
+(ert-deftest emeld-narrow-expands-match-ancestors ()
+  "Narrowing expands collapsed directories on the way to a match."
+  (with-temp-buffer
+    (setq-local emeld--marked-paths (make-hash-table :test #'equal)
+                emeld--git-mode nil
+                emeld--status-phase 'done
+                emeld--hidden-paths nil
+                emeld--left-root "/x/"
+                emeld--right-root "/y/"
+                emeld-show-file-meta nil
+                emeld-show-same nil
+                emeld-show-files t
+                emeld-show-added t
+                emeld-show-different t)
+    (let* ((root (emeld-node-create :name "root" :is-dir t :expanded t))
+           (src (emeld-node-create :name "src" :is-dir t :expanded nil
+                                   :diff-status 'different :parent root))
+           (a (emeld-node-create :name "a.el" :diff-status 'different
+                                 :left-path "/x/src/a.el" :right-path "/y/src/a.el"
+                                 :parent src)))
+      (setf (emeld-node-children src) (list a)
+            (emeld-node-children root) (list src)
+            emeld--root-node root)
+      (emeld--render)
+      (should-not (string-match-p "a\\.el" (buffer-string)))
+      (let ((current-prefix-arg nil))
+        (cl-letf (((symbol-function 'read-string)
+                   (lambda (&rest _) "a\\.el")))
+          (call-interactively #'emeld-narrow)))
+      (should (emeld-node-expanded src))
+      (should (string-match-p "a\\.el" (buffer-string)))
+      (emeld-widen))))
+
 (ert-deftest emeld-delete-one-captures-trash ()
   "`emeld--delete-one' returns the trash location it moved PATH to."
   (let* ((tmp (make-temp-file "emeld-trash" t))

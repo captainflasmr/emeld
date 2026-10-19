@@ -23,6 +23,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Marked directories: flag a directory as comparison side A while browsing Dired (a plain command, no default key bindings), then compare it against the directory you are browsing.
 - Side-aware navigation (~n~/~p~) and side-jumping (~o~).
 - Change-oriented movement: ~M-n~/~M-p~ jump to the next/previous changed *file* (numeric prefix to repeat), skipping directory rows, identical files (when shown) and inline-diff preview lines; the header line shows how many changes are displayed.  ~j~ (~M-x emeld-jump-to-file~) jumps straight to a file by name — completion over every file the filters allow, status marker included — expanding folded folders on the way.
+- Tree narrowing: ~C-x n n~ (~emeld-narrow~) shows only the paths matching a regexp — or a shell-style glob with a prefix argument, following the filter-group rules — keeping every match, its ancestor directories and, for a matched directory, its whole subtree; the ancestors of every match are expanded so it is visible.  ~C-x n w~ (~emeld-widen~), or an empty pattern, restores the full tree.  Session-only (nothing is written to ~.dir-locals.el~), it composes with the status toggles, content filters and ~C-k~ hides, and scopes the header change count, ~M-n~/~M-p~ navigation and ~j~ jump-to-file candidates.
 - Depth-limited "shallow" scan for huge trees or slow mounts (SMB/NFS): prefix ~emeld-diff~ with a depth (~C-u 2 M-x emeld-diff~) to scan only the top levels and stop; deeper directories are marked with a dim ~…~ and enumerated on demand by expanding them (~TAB~).
 - Integration with ~ediff~.
 - A treemacs-style file-tree sidebar (~M-x emeld-sidebar~) that follows and highlights the active file — built on the same tree machinery (see below).
@@ -159,7 +160,7 @@ Top-level row 3 is ~Essential commands~ :: copy (~C~), mark (~m~), hop tree (~o~
 - ~Act — Sync~ (~s~) :: ~C~ copy/sync marked/at point (its label names the copy method in effect — ~rsync~ or ~built-in copy~), ~a~ apply the change block at point to the other file (~C-u a~ reverses; needs an open peek), ~R~ toggle mirror copy, ~x~ delete marked/at point, ~D~ delete at point (this pane), ~u~ undo last delete/copy/change block, ~l~ list undoable operations.
 - ~Act — Diff~ (~h~) :: ~d~ diff directory at point (whole root at the top level), ~P~ format patch.
 - ~Act — Filter~ (~F~) :: Toggle filter groups on/off (~ca~, ~cb~, ... ~[x]~/~[ ]~ checkmarks), edit ~.dir-locals.el~ (~E~), or add the node at point as a filter (~&~).
-- ~Inspect — View~ (~v~) :: Toggle what is displayed — tree-lines (~t~), tree density (~z~ cycles compact → extreme → wide), ~.gitignore~ respect (~I~), content filters — whitespace (~i~ cycles off → amount → all), line endings (~L~, CRLF vs LF), blank lines (~B~), case (~C~, directory mode only; ~git diff~ has no equivalent) and a regexp of ignorable lines (~R~ prompts, empty input clears) — commit message (~c~, git mode only), file size/mtime tags (~f~), session hide (~C-k~ hide node at point, ~C-u C-k~ unhides all); pane resize (~<~/~>~) and indent (~{~/~}~).
+- ~Inspect — View~ (~v~) :: Toggle what is displayed — tree-lines (~t~), tree density (~z~ cycles compact → extreme → wide), ~.gitignore~ respect (~I~), content filters — whitespace (~i~ cycles off → amount → all), line endings (~L~, CRLF vs LF), blank lines (~B~), case (~C~, directory mode only; ~git diff~ has no equivalent) and a regexp of ignorable lines (~R~ prompts, empty input clears) — narrowing (~N~, regexp; empty widens) — commit message (~c~, git mode only), file size/mtime tags (~f~), session hide (~C-k~ hide node at point, ~C-u C-k~ unhides all); pane resize (~<~/~>~) and indent (~{~/~}~).
 - ~Inspect — Mark~ (~r~) :: Mark/unmark the file on the current side (~m~/~u~); bulk-mark by status — modified (~* m~), left-only (~* l~), the full left→right mirror set (~* c~ — modified + left-only + right-only); ~U~ unmark all.
 - ~Inspect — Open~ (~O~) :: ~e~ ediff, ~=~/~SPC~ preview without leaving the tree (soft diff a modified file, show a new/one-sided one, fold a directory), ~TAB~ peek inline diff, ~o~ hop to other tree; ~A~/~B~ jump to dired on the left/right side, ~w~ copy path.
 
@@ -207,6 +208,8 @@ Most commands keep a direct key binding in ~emeld-mode~ (see below); the sub-men
 | I         | Toggle ~.gitignore~ respect (rescans)             |
 | &         | Filter node at point → save to ~.dir-locals.el~ and rescan |
 | C-k       | Temporarily hide node at point (session only; ~C-u C-k~ unhides all) |
+| C-x n n   | Narrow the tree to a regexp (C-u: glob; empty: widen) |
+| C-x n w   | Widen the tree (clear the narrow)                 |
 | W         | Swap left/right panes                              |
 | G         | Rescan whole comparison |
 | k         | Stop/abort an in-progress scan (keeps the partial tree) |
