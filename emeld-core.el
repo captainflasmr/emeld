@@ -2628,6 +2628,7 @@ Mimics Meld's display of missing files."
     (define-key map (kbd "W")   #'emeld-swap-panes)
     (define-key map (kbd "n")   #'emeld-next-line)
     (define-key map (kbd "p")   #'emeld-previous-line)
+    (define-key map (kbd "j")   #'emeld-jump-to-file)
     (define-key map (kbd "M-n") #'emeld-next-change)
     (define-key map (kbd "M-p") #'emeld-previous-change)
     (define-key map (kbd "o")   #'emeld-jump-other-side)
@@ -2709,6 +2710,16 @@ yet been set (e.g. before the first render)."
   (or (bound-and-true-p emeld--column-width)
       (/ (* (window-width) emeld-column-ratio) 100)))
 
+(defun emeld--at-status-marker-p ()
+  "Non-nil when point is at the status marker of the node at point.
+Lets the alignment helpers step over the marker (`M ', `A ', ...) the
+way they step over the fold indicator, landing on the name itself."
+  (let* ((node (get-text-property (point) 'emeld-node))
+         (marker (and node (emeld--status-marker node))))
+    (and marker
+         (not (string-empty-p marker))
+         (looking-at-p (regexp-quote marker)))))
+
 (defun emeld--move-to-node-name (on-right)
   "Move point to the node name on the current side (ON-RIGHT if non-nil).
 If the current side is empty but the other has a file, snap to it."
@@ -2718,11 +2729,12 @@ If the current side is empty but the other has a file, snap to it."
         (move-to-column width)
       (beginning-of-line))
     
-    ;; Skip mark char, prefixes, icons, and spaces on current side
+    ;; Skip mark char, prefixes, icons, status marker and spaces
     (let ((start-on-side (point)))
       (while (and (< (point) (line-end-position))
                   (< (point) limit)
-                  (looking-at "[]* └├│─[+-]"))
+                  (or (looking-at "[]* └├│─[+-]")
+                      (emeld--at-status-marker-p)))
         (forward-char 1))
 
       ;; If we reached the limit on the left side, back up slightly to stay on the left
@@ -2745,7 +2757,8 @@ If the current side is empty but the other has a file, snap to it."
             (let ((new-limit (if on-right (+ (line-beginning-position) width) (line-end-position))))
               (while (and (< (point) (line-end-position))
                           (< (point) new-limit)
-                          (looking-at "[]* └├│─[+-]"))
+                          (or (looking-at "[]* └├│─[+-]")
+                              (emeld--at-status-marker-p)))
                 (forward-char 1)))))))))
 
 (defun emeld-next-line ()
@@ -2770,6 +2783,68 @@ If the current side is empty but the other has a file, snap to it."
   (let* ((width (emeld--effective-column-width))
          (target-on-right (< (current-column) width)))
     (emeld--move-to-node-name target-on-right)))
+
+(defun emeld--collect-jump-files (node)
+  "Return the file nodes under NODE that the display filters allow.
+Folded directories are descended into — a jump reveals them — but a
+subtree pruned by `emeld--node-visible-p' (status toggles, filter
+groups, session hides) contributes nothing."
+  (when (emeld--node-visible-p node)
+    (if (emeld-node-is-dir node)
+        (cl-mapcan #'emeld--collect-jump-files (emeld-node-children node))
+      (list node))))
+
+(defun emeld--jump-row (node)
+  "Return the buffer position of NODE's rendered file row, or nil.
+Peek lines carry NODE's property too, so they are skipped."
+  (save-excursion
+    (goto-char (point-min))
+    (let ((pos nil))
+      (while (and (not pos) (not (eobp)))
+        (when (and (eq (get-text-property (point) 'emeld-node) node)
+                   (not (get-text-property (point) 'emeld-inline-diff)))
+          (setq pos (point)))
+        (forward-line 1))
+      pos)))
+
+(defun emeld-jump-to-file ()
+  "Jump to a file shown in the tree, chosen by completion.
+Prompts with every file the current display filters allow — relative
+paths, changed ones suffixed with their status marker (`M', `A', `D')
+— and moves point to the chosen row, expanding folded ancestor
+directories on the way and recentering when the buffer is displayed.
+Files hidden by the status toggles, filter groups or session hides are
+not offered; directories a depth-limited scan left unscanned
+contribute nothing until they are expanded, since their contents are
+not yet known."
+  (interactive)
+  (unless emeld--root-node
+    (user-error "No comparison loaded"))
+  (let ((nodes (emeld--collect-jump-files emeld--root-node)))
+    (unless nodes
+      (user-error "No files to jump to"))
+    (let* ((entries (mapcar (lambda (node)
+                              (let* ((rel (emeld--node-relpath node))
+                                     (marker (string-trim (emeld--status-marker node))))
+                                (cons (if (string-empty-p marker)
+                                          rel
+                                        (format "%s (%s)" rel marker))
+                                      node)))
+                            nodes))
+           (choice (completing-read "Jump to file: " entries nil t))
+           (node (cdr (assoc choice entries)))
+           (parent (emeld-node-parent node)))
+      (while parent
+        (setf (emeld-node-expanded parent) t)
+        (setq parent (emeld-node-parent parent)))
+      (emeld--render)
+      (let ((pos (emeld--jump-row node)))
+        (unless pos
+          (user-error "Could not find the row for %s" (emeld--node-relpath node)))
+        (goto-char pos)
+        (emeld--move-to-node-name nil)
+        (when (get-buffer-window (current-buffer))
+          (recenter))))))
 
 (defun emeld--changed-file-p (node)
   "Non-nil when NODE is a file in a changed state.
@@ -5712,7 +5787,8 @@ node — see `emeld--node-relpath' for the equivalent slow form."
      (lambda () (interactive) (emeld-toggle-show-different)) :transient t)]
    ["Navigate"
     ("M-n" "next change"     emeld-next-change :transient t)
-    ("M-p" "previous change" emeld-previous-change :transient t)]]
+    ("M-p" "previous change" emeld-previous-change :transient t)
+    ("j" "jump to file…"     emeld-jump-to-file)]]
   ["Essential commands"
    ("C"   "sync to other side (copy/delete)" emeld-copy)
    ("m"   "mark"            emeld-mark)

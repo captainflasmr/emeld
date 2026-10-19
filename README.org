@@ -22,7 +22,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Recent comparisons: every comparison is remembered, and the list persists across sessions so it can be re-run from ~M-x emeld-recent~ (or ~r~ in the transient Compare menu).
 - Marked directories: flag a directory as comparison side A while browsing Dired (a plain command, no default key bindings), then compare it against the directory you are browsing.
 - Side-aware navigation (~n~/~p~) and side-jumping (~o~).
-- Change-oriented movement: ~M-n~/~M-p~ jump to the next/previous changed *file* (numeric prefix to repeat), skipping directory rows, identical files (when shown) and inline-diff preview lines; the header line shows how many changes are displayed.
+- Change-oriented movement: ~M-n~/~M-p~ jump to the next/previous changed *file* (numeric prefix to repeat), skipping directory rows, identical files (when shown) and inline-diff preview lines; the header line shows how many changes are displayed.  ~j~ (~M-x emeld-jump-to-file~) jumps straight to a file by name — completion over every file the filters allow, status marker included — expanding folded folders on the way.
 - Depth-limited "shallow" scan for huge trees or slow mounts (SMB/NFS): prefix ~emeld-diff~ with a depth (~C-u 2 M-x emeld-diff~) to scan only the top levels and stop; deeper directories are marked with a dim ~…~ and enumerated on demand by expanding them (~TAB~).
 - Integration with ~ediff~.
 - A treemacs-style file-tree sidebar (~M-x emeld-sidebar~) that follows and highlights the active file — built on the same tree machinery (see below).
@@ -150,7 +150,7 @@ Deletions move the files to trash rather than erasing them outright.  When sever
 
 Magit-style: the top level has three rows — a ~Transient commands~ group with the eight sub-menu entry points, a ~Show~ | ~Navigate~ row pairing the file-kind toggles with change-oriented movement, and an ~Essential commands~ group for the most-used direct actions.  The group keys (~d~ ~T~ ~h~ ~s~ ~F~ ~v~ ~r~ ~O~) also work directly from the tree — pressing one opens its sub-menu without going through ~?~ first.  Pressing ~q~ (or ~C-g~) inside a sub-menu returns to the top level.
 
-Top-level row 2 is ~Show~ | ~Navigate~ :: toggle file kinds — same (~S~), new (~N~), modified (~M~) — beside change movement — next change (~M-n~), previous change (~M-p~).
+Top-level row 2 is ~Show~ | ~Navigate~ :: toggle file kinds — same (~S~), new (~N~), modified (~M~) — beside change movement — next change (~M-n~), previous change (~M-p~), jump to file (~j~).
 
 Top-level row 3 is ~Essential commands~ :: copy (~C~), mark (~m~), hop tree (~o~), ediff (~e~), rescan (~G~), undo (~u~).
 
@@ -214,6 +214,7 @@ Most commands keep a direct key binding in ~emeld-mode~ (see below); the sub-men
 | g         | Reset layout (indent + pane split + density) to defaults and redraw |
 | n/p       | Navigation (Side-aware)                           |
 | M-n / M-p | Next / previous changed file (skips dirs, same files, previews) |
+| j         | Jump to a file by name (completion; reveals folded folders) |
 | < / >     | Shrink/grow left pane width                       |
 | { / }     | Decrease/increase tree indent                     |
 

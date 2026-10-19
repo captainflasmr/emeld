@@ -847,6 +847,89 @@ rows' padding, so the callback must re-render and refresh
       (emeld-previous-change)
       (should (equal "c-mod.txt" (emeld-node-name (emeld--current-node)))))))
 
+(ert-deftest emeld-jump-candidates-respect-filters ()
+  "Jump candidates honour status toggles, shows and session hides."
+  (with-temp-buffer
+    (setq-local emeld--git-mode nil
+                emeld--hidden-paths nil
+                emeld-show-same nil
+                emeld-show-files t
+                emeld-show-added t
+                emeld-show-different t)
+    (let* ((root (emeld-node-create :name "" :is-dir t :expanded t))
+           (mod (emeld-node-create :name "mod.txt" :diff-status 'different
+                                   :left-path "/x/mod.txt" :right-path "/y/mod.txt"
+                                   :parent root))
+           (same (emeld-node-create :name "same.txt" :diff-status 'same
+                                    :left-path "/x/same.txt" :right-path "/y/same.txt"
+                                    :parent root))
+           (new (emeld-node-create :name "new.txt" :diff-status 'left-only
+                                   :left-path "/x/new.txt" :parent root))
+           (dir (emeld-node-create :name "sub" :is-dir t :diff-status 'different
+                                   :expanded nil :parent root))
+           (deep (emeld-node-create :name "deep.txt" :diff-status 'different
+                                    :left-path "/x/sub/deep.txt"
+                                    :right-path "/y/sub/deep.txt"
+                                    :parent dir)))
+      (setf (emeld-node-children dir) (list deep)
+            (emeld-node-children root) (list mod same new dir)
+            emeld--root-node root)
+      (cl-flet ((names ()
+                  (mapcar #'emeld--node-relpath
+                          (emeld--collect-jump-files root))))
+        (should (member "mod.txt" (names)))
+        (should (member "new.txt" (names)))
+        ;; Folded directories are still descended into.
+        (should (member "sub/deep.txt" (names)))
+        ;; Identical files stay out while Same is off…
+        (should-not (member "same.txt" (names)))
+        (setq emeld-show-same t)
+        (should (member "same.txt" (names)))
+        ;; …and a session-hidden directory prunes its subtree.
+        (setq emeld--hidden-paths (list "sub"))
+        (should-not (member "sub/deep.txt" (names)))))))
+
+(ert-deftest emeld-jump-to-file-reveals-and-moves ()
+  "Jumping to a file expands folded ancestors and lands on its name."
+  (with-temp-buffer
+    (setq-local emeld--marked-paths (make-hash-table :test #'equal)
+                emeld--git-mode nil
+                emeld--status-phase 'done
+                emeld--hidden-paths nil
+                emeld--left-root "/x/"
+                emeld--right-root "/y/"
+                emeld-show-file-meta nil
+                emeld-show-same nil
+                emeld-show-files t
+                emeld-show-added t
+                emeld-show-different t)
+    (let* ((root (emeld-node-create :name "root" :is-dir t :expanded t))
+           (dir (emeld-node-create :name "sub" :is-dir t :expanded nil
+                                   :diff-status 'different :parent root))
+           (file (emeld-node-create :name "deep.txt" :diff-status 'different
+                                    :left-path "/x/sub/deep.txt"
+                                    :right-path "/y/sub/deep.txt"
+                                    :parent dir)))
+      (setf (emeld-node-children dir) (list file)
+            (emeld-node-children root) (list dir)
+            emeld--root-node root)
+      (emeld--render)
+      ;; The folded directory's file row is not rendered yet.
+      (goto-char (point-min))
+      (should-not (search-forward "deep.txt" nil t))
+      (let ((seen nil))
+        (cl-letf (((symbol-function 'completing-read)
+                   (lambda (_prompt collection &rest _)
+                     (setq seen collection)
+                     (caar collection))))
+          (emeld-jump-to-file))
+        ;; The candidate names the path with its status marker.
+        (should (equal '("sub/deep.txt (M)") (mapcar #'car seen))))
+      ;; Ancestors unfolded, and point is on the file's name.
+      (should (emeld-node-expanded dir))
+      (should (eq (emeld--current-node) file))
+      (should (looking-at-p "deep\\.txt")))))
+
 (ert-deftest emeld-delete-one-captures-trash ()
   "`emeld--delete-one' returns the trash location it moved PATH to."
   (let* ((tmp (make-temp-file "emeld-trash" t))
