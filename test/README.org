@@ -1,0 +1,104 @@
+#+TITLE: emeld example comparison (demo + test fixture)
+#+OPTIONS: toc:2
+
+* Generating
+
+  #+begin_src sh
+  test/make-example.sh              # → test/example/{left,right,git-repo}
+  #+end_src
+
+  The output is gitignored: the generator (=test/emeld-example.el=) is the
+  source of truth.  Contents and modification times are fixed, so the
+  generated trees — and videos recorded from them — are reproducible;
+  regenerate before each recording.  =make-example.sh= also builds the git
+  demo repository.  The generator is loaded by the test suite too, which
+  turns it into a fixture for the end-to-end tests in =emeld-tests.el=.
+
+  =test/example= is itself a throwaway git work tree.  That matters when
+  the fixture lives inside the emeld repository (where =.gitignore= ignores
+  =test/example/= wholesale): git work-tree discovery stops at
+  =test/example/.git=, so the fixture's own =.gitignore= files — not the
+  enclosing repository's rules — decide what the gitignore demos hide.
+
+* Running the comparison
+
+  #+begin_src sh
+  emacs -Q -L . -l emeld.el --eval '(emeld-diff "test/example/left" "test/example/right")'
+  #+end_src
+
+  or =M-x emeld-diff= and pick the two directories.  Relative paths work
+  (they are expanded against =default-directory=).
+
+** What each file demonstrates
+
+  | Path | Demonstrates |
+  |------+--------------|
+  | =README.md=, =same.txt=, =empty.txt=, =big.txt=, =src/util.el= | identical files (shown with ~S~; exercises the same-file merge) |
+  | =modified.txt= | a one-line modification: ~TAB= peek, ~e= ediff, hunk copy |
+  | =multi-hunk.txt= | three separate hunks: per-hunk copy, change navigation |
+  | =duplicate-blocks.txt= | repeated identical blocks; only the second changed (hunk line-hint targeting) |
+  | =no-newline.txt= | no trailing newline on either side (the peek's =\ No newline= marker) |
+  | =whitespace.txt= | whitespace-only change (~i~/~w~ filters) |
+  | =blanklines.txt= | blank-line-only change (~B~) |
+  | =case.txt= | case-only change (~C~; directory mode only) |
+  | =comments.c= | comment-only change (~R= with a POSIX regexp, e.g. =^[[:space:]]*//=) |
+  | =crlf.txt= | CRLF vs LF (~L=) |
+  | =binary.bin=, =docs/images/logo.bin= | binary files (the peek reports "Binary files … differ") |
+  | =spaces in name.txt=, =unicode-é.txt= | paths with spaces and non-ASCII names |
+  | =symlink.txt= → =same.txt= | symbolic links (=diff= follows the target) |
+  | =.gitignore=, =ignored.log=, =build/output.txt= | gitignore handling: simple patterns reach =diff --exclude=, so they hide even outside a work tree; ~I= toggles respect |
+  | =backups/app.bak=, =backups/notes~= | the default "Backups" filter group (they differ, but are excluded until the group is toggled) |
+  | =src/deep/level1/level2/level3/…= | deep nesting: tree lines, jump-to-file, narrow, depth-limited scans |
+  | =many/f01..f40.txt= | many files in one directory; f10/f20/f30/f40 differ (jump, narrow, navigation) |
+  | =new-file.txt=, =left-only-dir/=, =to-copy.txt=, =copy-tree/= | left-only ("new") files and directories |
+  | =deleted-file.txt=, =right-only-dir/=, =to-delete.txt= | right-only ("deleted") files and directories |
+  | =copy-tree/= (40 files) | the chunked built-in copy: mark it and press ~C= without rsync |
+
+  A default scan of the example shows 66 changed files (68 with ~I= off);
+  the test suite asserts the full status set, the content-filter effects,
+  the peek, and jump/narrow against this fixture.
+
+* Video walkthrough recipes
+
+  Suggested recordings, in order.  Keys are pressed in the comparison
+  tree; ~?= opens the transient menu (~q= closes it).  Start each take from
+  a freshly generated fixture so the tree and file metadata are identical.
+
+  | # | Topic | Keys / steps | Fixture |
+  |---+-------+--------------+---------|
+  | 1 | Open the comparison and lay out the tree | =M-x emeld-diff= with the two directories; ~t= tree-lines, ~z= density, ~f= file meta | all |
+  | 2 | Statuses and display filters | ~S= same, ~N= new, ~M= modified; point at the header legend | =README.md=, =new-file.txt=, =deleted-file.txt=, =modified.txt= |
+  | 3 | Change navigation | ~M-n= / ~M-p= (numeric prefix repeats; header count) | =many/=, =src/= |
+  | 4 | Peek and word-level refinement | ~TAB= on a file, ~TAB= again to collapse | =modified.txt=, =src/main.el= |
+  | 5 | Hunk copy and undo | ~TAB=, point inside a hunk, ~a= (or ~C-u a= for the other direction), ~u= to undo | =modified.txt=, =multi-hunk.txt=, =duplicate-blocks.txt=, =no-newline.txt= |
+  | 6 | Content filters | ~v= then ~i= (whitespace), ~L= (line endings), ~B= (blanks), ~C= (case), ~R= (regexp) | =whitespace.txt=, =crlf.txt=, =blanklines.txt=, =case.txt=, =comments.c= |
+  | 7 | Filename filter groups | ~F= then the group key shown by the menu (e.g. Backups) | =backups/= |
+  | 8 | .gitignore respect | ~I= (off/on) | =ignored.log=, =build/output.txt= |
+  | 9 | Jump to file | ~j=, complete a path | =src/main.el=, =many/f10.txt= |
+  | 10 | Narrow and widen | ~C-x n n= (regexp, e.g. =src/= or =\\.el\\'=), ~C-x n w= | =src/=, =docs/=, =many/= |
+  | 11 | Mark, copy, delete | ~m= on =to-copy.txt=, ~C=; mark the struck side of =to-delete.txt=, ~C= deletes; ~x= deletes marked | =to-copy.txt=, =to-delete.txt=, =left-only-dir/= |
+  | 12 | Mirror sync (rsync) | ~R= (mirror), then ~C= on a directory | =left-only-dir/=, =copy-tree/= |
+  | 13 | Chunked built-in copy | Set ~emeld-copy-method= to =builtin= (or run with rsync absent), ~C= on =copy-tree/= | =copy-tree/= |
+  | 14 | Undo log | ~u= for the last operation; ~l= lists operations, ~u= on a row | after #11 |
+  | 15 | Session hide | ~C-k= hides the node at point, ~C-u C-k= restores everything | =many/=, =docs/= |
+  | 16 | Patch export | ~P= writes a unified patch of the changes | after #5 |
+  | 17 | Dired integration | ~A= / ~B= open the left/right side in dired | any file or directory |
+  | 18 | Recent comparisons | ~M-x emeld-recent= (or ~d= → ~r=) | — |
+  | 19 | Git revisions | ~?= → ~T= → ~G= (or =M-x emeld-git-diff=); compare =HEAD~1= with =[working tree]= | =test/example/git-repo= |
+  | 20 | Git history stepping | ~?= → ~T= → ~H=, start from =HEAD=, then ~,= / ~.= (steps through to the working-tree slot) | git demo repo |
+  | 21 | Git commit context and patch | ~c= on the commit block; ~P= | git demo repo |
+
+  Recording notes:
+
+  - Regenerate the fixture before each take (=test/make-example.sh=): the
+    mtimes are fixed at 2026-01-02 03:04, so ~f= (file meta) shows the same
+    tags every time.
+  - For the built-in-copy demo, either run Emacs with =rsync= missing from
+    =exec-path= or set =(setq emeld-copy-method 'builtin)=.
+  - The git demo repo has four commits, a =demo-branch=, an unstaged edit
+    (=main.txt=) and a staged new file (=wip.txt=) — =git diff= does not
+    show untracked files, so the new file is staged — giving a
+    modification, a deletion and an addition in one comparison.
+  - =emeld-ignore-matching-lines= (~R=) takes a POSIX basic regexp, because
+    it is handed to =diff= / =git diff= (e.g. =^[[:space:]]*//=, not an
+    Emacs =\\s= construct).
