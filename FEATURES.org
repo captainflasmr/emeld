@@ -1,7 +1,7 @@
 #+TITLE: emeld Feature Roadmap
 #+OPTIONS: toc:2
 
-Gaps between emeld and Meld, ordered by usefulness for an Emacs variant.
+Gaps between emeld and Meld, ordered by usefulness for an Emacs variant, followed by larger standalone feature proposals.
 
 * TODO Text / Content Filters
 
@@ -20,3 +20,80 @@ Gaps between emeld and Meld, ordered by usefulness for an Emacs variant.
 
 ** Version Control Integration
   Meld's VC features (single-dir diff against HEAD, VC file states, git mergetool, VC operations) are redundant in Emacs.  =vc-mode=, =vc-dir=, and =magit= already cover all of this, and emeld benefits from being embedded alongside them.
+
+* TODO Significant Feature Proposals
+
+  Larger features under consideration, in rough order of value for emeld's compare-and-sync use case.  Effort covers implementation plus tests; each reuses existing machinery where possible (the tree and renderer, the inline peek, content filters, the undo log, transient menus).
+
+** TODO 1. Write back from history to the working tree (git mode)
+
+  Effort: medium — value: high.
+
+  Git mode is deliberately read-only, but writing to the *working tree* (never to commits) is the safe and useful completion of the compare story: browsing "what changed since HEAD" usually ends with wanting one file, or one block, back.
+
+  - =C= on a node in a comparison whose right side is the working tree restores that file's left-revision content (=git show REV:path=; the same =emeld--git-blob-buffer= machinery behind RET/=).
+  - =a= (hunk copy) reverts only the block at point to the revision.  Git-mode peeks are old=left revision / new=working tree, so this is the reverse direction of directory-mode hunk copy: find the worktree's current text and replace it with the revision's.  The mechanical parts already exist (=emeld--inline-diff-hunk-at=, =emeld--hunk-sides=, =emeld--replace-in-file=).
+  - Undo: hunk reverts reuse the existing =:type 'hunk= entries; a whole-file revert needs a small new op-log variant (or trash the current file, write the new content, and log both) so =u= restores the previous worktree state.
+  - Re-status the node afterwards (a targeted =git diff= or a rescan), recompute ancestors and re-render.
+  - Guards: only when =emeld--git-right-rev= is =working=; decide what to do for binary blobs, symlinks, and files whose visiting buffer has unsaved changes.
+
+  Tests: revert a whole file and a single hunk in a temp repo, leaving other hunks untouched; undo both; refuse revision-vs-revision.
+
+** TODO 2. Merge-conflict workflow
+
+  Effort: medium-high — value: high.
+
+  Resolving a conflicted merge is the one thing git users still open a different tool for, and emeld already has the tree, the peek and the diff rendering.
+
+  - Detect unmerged paths (=git diff --name-status --diff-filter=U=, or =git status --porcelain=: UU/AA/DU/UD/AU/UA/DD) and present them as a tree built from =emeld-node= like the rest of emeld.
+  - Per node: take ours (=git checkout --ours -- path=), take theirs, show base/ours/theirs from the index stages (=:1:=, =:2:=, =:3:= via =git show=), and hand off to ediff/smerge for hand-merging.
+  - Offer to =git add= a resolved path and refresh the listing; the peek can show ours vs theirs, with the base available on demand.
+  - Shares the worktree-write plumbing of item 1.
+
+  Tests: temp repo with a manufactured conflict; take-ours/take-theirs resolve and can be staged; states like both-added and both-deleted.
+
+** TODO 3. Live watch / auto-refresh
+
+  Effort: medium — value: medium-high.
+
+  Comparisons go stale while one side is being edited (especially the git working-tree side).
+
+  - Tier 1 (cheap): =emeld-auto-refresh-mode=, a buffer-local minor mode, refreshes on =after-save-hook= when the saved file is under either root (debounced).  Catches edits made through emeld's own =f=.
+  - Tier 2: =file-notify= watches per scanned directory (the scanner already enumerates them), coalescing bursts with an idle timer and adding/removing watches on rescan and lazy population.  Rescans already preserve expansion and point.
+  - Important: suppress events caused by emeld's own writes (copies, hunk applies) and pause watching while a copy runs — a rescan aborts in-flight copies via =emeld--stop-scan=, and self-triggered rescans would otherwise loop.
+
+  Tests: after-save refresh; debounce/suppression with a stubbed =file-notify=.
+
+** TODO 4. Interactive sync review
+
+  Effort: medium — value: medium-high.
+
+  =emeld-copy= is all-or-nothing per marked set; reviewing the sync change by change is a natural workflow (smerge/ediff-merge style).
+
+  - =emeld-sync-review= walks the changed files (or the marked set) in tree order, shows the peek/quick diff for each, and prompts copy / skip / delete / quit, using the existing per-node copy and delete machinery (rsync or built-in as configured).  Finish with a tally.
+  - Accepted actions log to =emeld--op-log= as today, so =u= undoes them individually.
+  - One-sided nodes follow the existing "make the other side match" rules; a directory node is accepted as a whole subtree.
+
+  Tests: fixture tree with mocked prompts; only accepted files are copied, log entries and tally are correct.
+
+** TODO 5. Narrow/search the tree
+
+  Effort: medium-small — value: medium.
+
+  Jump-to-file moves; narrowing scopes the tree to a pattern, to focus on a subtree or a family of paths.
+
+  - =emeld-narrow= prompts for a regexp (or a glob with a prefix) and renders only matching paths plus their ancestor directories, with a header flag such as =[narrow: REGEXP]=; =emeld-widen= clears it.
+  - Hook into =emeld--node-visible-p= (or an extra render predicate) so the change count, change navigation and jump-to-file candidates follow automatically.
+  - Session-only, like =C-k= hides — unlike =&=, nothing is written to =.dir-locals.el=.
+
+  Tests: narrowed visible set with ancestors; narrowed change count and jump candidates; widen restores.
+
+** TODO 6. Niche bigger bet: rename/move detection
+
+  Effort: high — value: use-case dependent.
+
+  Directory comparisons show a moved file as delete + add; hash-based pairing (size first, then =secure-hash= on candidates) could present one "renamed" row and offer a move-aware sync (rename on the other side, undoable).  Meld does not do this, so it is a differentiator — but a fair amount of model, render and sync work, and only worth it if deployment-style trees matter.
+
+** Recommended order
+
+  1 and 2 share the "write into the worktree" plumbing and turn git mode from read-only into a practical revert/recover/resolve tool.  Then 3 for liveness, 4 as the workflow layer over the sync features that already exist, and 5 as a focused navigation win; 6 only when the rename use case proves important.
