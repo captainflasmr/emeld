@@ -1,5 +1,4 @@
 #+TITLE: Emeld: Meld-Inspired Local Diff
-#+AUTHOR: Antigravity
 
 * Introduction
 
