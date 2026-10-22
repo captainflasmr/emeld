@@ -8,7 +8,7 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 
 #+attr_org: :width 300px
 #+attr_html: :width 100%
-[[file:demos/20261022120734--screen-recording_001.mp4]]
+[[file:demos/20261022120734--screen-recording_001.gif]]
 
 * Features
 - Side-by-side view in a single buffer.
