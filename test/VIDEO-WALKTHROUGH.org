@@ -14,7 +14,9 @@ Emacs theme (load-theme 'doom-lantern t)
 * 1. Open the comparison and lay out the tree
 
 - =M-x emeld-diff= with =test/example/left= and =test/example/right=.
+- ~TAB~ to fold layers of diffs
 - ~t~ toggles tree lines.
+- ~v~ ~f~ show file metadata
 - ~z~ cycles density: compact → extreme → wide.
 - Move the window size to see dynamic tree re-render
 - move trees closer/further apart
