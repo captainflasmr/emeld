@@ -5999,13 +5999,20 @@ node — see `emeld--node-relpath' for the equivalent slow form."
 
 (transient-define-prefix emeld-dispatch-view ()
   "Show, hide, and layout options."
-  [["Show"
+  [:class transient-columns
+   ["Show"
     ("t" (lambda () (if emeld-show-tree-lines "[x] tree-lines" "[ ] tree-lines"))
      (lambda () (interactive) (emeld-toggle-tree-lines)) :transient t)
     ("z" (lambda () (format "density: %s" emeld-tree-density))
      (lambda () (interactive) (emeld-cycle-tree-density)) :transient t)
     ("I" (lambda () (if emeld-respect-gitignore "[x] gitignore" "[ ] gitignore"))
      (lambda () (interactive) (emeld-toggle-gitignore)))
+    ("f" (lambda () (if emeld-show-file-meta "[x] file meta" "[ ] file meta"))
+     (lambda () (interactive) (emeld-toggle-show-file-meta)) :transient t)
+    ("c" (lambda () (if emeld--git-commit-expanded "[x] commit msg" "[ ] commit msg"))
+     (lambda () (interactive) (emeld-git-toggle-commit-message)) :transient t
+     :if (lambda () emeld--git-mode))]
+   ["Ignore"
     ("i" (lambda ()
            (pcase emeld-ignore-whitespace
              ('change "[-b] ignore whitespace (amount)")
@@ -6019,15 +6026,10 @@ node — see `emeld--node-relpath' for the equivalent slow form."
     ("C" (lambda () (if emeld-ignore-case "[x] ignore case" "[ ] ignore case"))
      (lambda () (interactive) (emeld-toggle-ignore-case)) :transient t)
     ("R" (lambda () (if emeld-ignore-matching-lines "[x] ignore matching lines" "[ ] ignore matching lines"))
-     (lambda () (interactive) (emeld-set-ignore-matching-lines)) :transient t)
+     (lambda () (interactive) (emeld-set-ignore-matching-lines)) :transient t)]
+   ["Navigate / layout"
     ("N" "narrow to regexp (empty: widen)" emeld-narrow :transient t)
-    ("c" (lambda () (if emeld--git-commit-expanded "[x] commit msg" "[ ] commit msg"))
-     (lambda () (interactive) (emeld-git-toggle-commit-message)) :transient t
-     :if (lambda () emeld--git-mode))
     ("C-k" "hide node (C-u: unhide all)" emeld-hide-at-point)
-    ("f" (lambda () (if emeld-show-file-meta "[x] file meta" "[ ] file meta"))
-     (lambda () (interactive) (emeld-toggle-show-file-meta)) :transient t)]
-   ["Layout"
     (">" "pane wider"   emeld-grow-column :transient t)
     ("<" "pane narrow"  emeld-shrink-column :transient t)
     ("}" "indent more"  emeld-increase-indent :transient t)
