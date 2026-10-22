@@ -4,6 +4,12 @@
 
 Emeld is a simple, side-by-side directory comparison tool for Emacs. It is designed to be a lightweight and maintainable alternative to other directory diff tools, with a focus on ease of use and a clean hierarchy.
 
+* Demo
+
+#+attr_org: :width 300px
+#+attr_html: :width 100%
+[[file:demos/20261022120734--screen-recording_001.mp4]]
+
 * Features
 - Side-by-side view in a single buffer.
 - Recursive glob-based filtering (like Meld) — excluded at the ~diff~ level.
