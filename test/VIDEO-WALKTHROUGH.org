@@ -16,7 +16,7 @@ Emacs theme (load-theme 'doom-lantern t)
 - =M-x emeld-diff= with =test/example/left= and =test/example/right=.
 - ~TAB~ to fold layers of diffs
 - ~t~ toggles tree lines.
-- ~v~ ~f~ show file metadata
+- ~v f~ show file metadata
 - ~z~ cycles density: compact → extreme → wide.
 - Move the window size to see dynamic tree re-render
 - move trees closer/further apart
@@ -44,7 +44,7 @@ Emacs theme (load-theme 'doom-lantern t)
 * 5. Change inspection through ediff/diff-mode
 
 - ~SPC~ view diff in separate buffer
-- ~e~ view difference and hunk copy where required
+- ~e~ view ediff and hunk copy where required
 
 * 6. Hunk copy and undo
 
@@ -65,6 +65,8 @@ Emacs theme (load-theme 'doom-lantern t)
 
 - ~F~ opens the Filter menu.
 - Press the group key shown by the menu, for example the key for =Backups=.
+- ~F E~ edit .dir-locals.el to modify group list
+- ~&~ filter node at point to build up exclusion list
 
 * 9. .gitignore respect
 
