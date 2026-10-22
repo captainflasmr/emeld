@@ -9,4 +9,6 @@ This document contains the current bugs/improvements, this is just for me mainly
 
 * Bugs/Improvements
 
+** TODO emphasize in README that it is heavily inspired by *emeld*
+
 ** TODO robocopy integration for windows?
