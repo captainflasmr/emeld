@@ -1,0 +1,111 @@
+#+TITLE: emeld Video Walkthrough Recipes
+#+AUTHOR: James Dyer
+#+OPTIONS: toc:nil num:nil
+#+STARTUP: overview
+
+Keys are pressed in the comparison tree.  =?= opens the transient menu; =q= closes it.
+
+* 1. Open the comparison and lay out the tree
+
+- =M-x emeld-diff= with =test/example/left= and =test/example/right=.
+- ~t~ toggles tree lines.
+- ~z~ cycles density: compact → extreme → wide.
+
+* 2. Statuses and display filters
+
+- ~S~ toggles identical files.
+- ~N~ toggles new files.
+- ~M~ toggles modified files.
+
+* 3. Change navigation
+
+- ~M-n~ jumps to the next changed file.
+- ~M-p~ jumps to the previous changed file.
+
+* 4. Peek and word-level refinement
+
+- ~TAB~ on a modified file peeks an inline diff underneath the row.
+- ~TAB~ again collapses the peek.
+- Watch: the changed words inside modified lines are highlighted.
+- Watch: the peek expands and collapses without leaving the tree.
+
+* 5. Hunk copy and undo
+
+- ~TAB~ opens the inline diff.
+- Point inside a hunk.
+- ~a~ applies that change block to the other file.
+- ~u~ undoes the last copy.
+
+* 6. Content filters
+
+- ~v~ opens the View menu.
+- ~i~ cycles whitespace filtering: off → amount → all.
+- ~L~ toggles line-ending filtering (CRLF vs LF).
+- ~B~ toggles blank-line-only changes.
+- ~C~ toggles case-only changes; this is directory mode only.
+
+* 7. Filename filter groups
+
+- ~F~ opens the Filter menu.
+- Press the group key shown by the menu, for example the key for =Backups=.
+
+* 8. .gitignore respect
+
+- ~I~ toggles .gitignore respect off and on.
+
+* 9. Jump to file
+
+- ~j~ opens jump-to-file completion.
+- Complete a path such as =src/main.el= or =many/f10.txt=.
+
+* 10. Narrow and widen
+
+- ~C-x n n~ narrows to a regexp, e.g. =src/= or =\\.el\\'=.
+- ~C-x n w~ widens back to the full tree.
+
+* 11. Mark, copy, delete
+
+- ~m~ marks =to-copy.txt= on its current side.
+- ~C~ copies the marked file to the other side.
+- For =to-delete.txt=, mark the struck side and press ~C~ to delete it.
+- ~x~ deletes marked nodes from their marked sides.
+
+* 12. Undo log
+
+- ~u~ undoes the last delete, copy, or applied change block.
+- ~l~ lists undoable operations, newest first.
+- Press ~u~ or ~RET~ on a row to undo that entry.
+
+* 13. Session hide
+
+- ~C-k~ hides the node at point for the current session.
+- ~C-u C-k~ restores everything.
+
+* 14. Patch export
+
+- Press ~P~ to format the changes as a unified patch.
+
+* 15. Dired integration
+
+- ~A~ opens the left side in Dired.
+- ~B~ opens the right side in Dired.
+
+* 16. Recent comparisons
+
+- =M-x emeld-recent= reopens a previous comparison.
+- Or use ~d~ → ~r~ from the transient menu.
+- Watch: the list persists across sessions in =emeld-recent-file=.
+- Watch: missing directories are skipped and pruned from the list.
+
+* 17. Git revisions
+
+- ~?~ → ~T~ → ~G~ opens git revisions.
+- Or run =M-x emeld-git-diff=.
+- Compare =HEAD~1= with =[working tree]=.
+
+* 18. Git history stepping
+
+- ~?~ → ~T~ → ~H~ starts a history walk.
+- Start from =HEAD=.
+- ~,~ steps older; ~.~ steps newer.
+- Walk through to the working-tree slot.
