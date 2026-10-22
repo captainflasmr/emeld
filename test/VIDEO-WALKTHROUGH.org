@@ -112,15 +112,9 @@ Emacs theme (load-theme 'doom-lantern t)
 - =M-x emeld-recent= reopens a previous comparison.
 - Or use ~d~ → ~r~ from the transient menu.
 
-* 18. Git revisions
+* 18. Git revisions / history stepping
 
-- ~?~ → ~T~ → ~G~ opens git revisions.
-- Or run =M-x emeld-git-diff=.
+- run =M-x emeld-git-diff=.
 - Compare =HEAD~1= with =[working tree]=.
-
-* 19. Git history stepping
-
-- ~?~ → ~T~ → ~H~ starts a history walk.
 - Start from =HEAD=.
 - ~,~ steps older; ~.~ steps newer.
-- Walk through to the working-tree slot.
