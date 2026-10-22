@@ -5,7 +5,7 @@
 
 Emeld is a simple, side-by-side directory comparison tool for Emacs. It is designed to be a lightweight and maintainable alternative to other directory diff tools, with a focus on ease of use and a clean hierarchy.
 
-=?= opens the transient menu; =q= closes it.
+=?= opens the transient menu.
 
 #+begin_src elisp :exports none
 Emacs theme (load-theme 'doom-lantern t)
