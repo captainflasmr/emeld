@@ -48,6 +48,9 @@
 
 * Video walkthrough recipes
 
+  A slide-by-slide presentation version of these recipes is in
+  [[file:VIDEO-WALKTHROUGH.org][VIDEO-WALKTHROUGH.org]].
+
   Suggested recordings, in order.  Keys are pressed in the comparison tree; ~?= opens the transient menu (~q= closes it).  Start each take from a freshly generated fixture so the tree and file metadata are identical.
 
   | # | Topic | Keys / steps | Fixture |

@@ -323,7 +323,7 @@ test/bench.sh large       # Linux kernel v7.0 vs v6.19 (git clone on first run)
 
 It records to ~BENCHMARKS.org~ by default.  Set ~EMELD_BENCH_SAME=1~ to also run and record the identical-files pass, ~EMELD_BENCH_RECORD=0~ to print without recording, or ~EMELD_BENCH_FILE=PATH~ to redirect the log.
 
-For a feature-oriented demo comparison — used by the video walkthroughs and by the test suite — run ~test/make-example.sh~.  It generates ~test/example/~ with two directory trees exercising every status, content filter, filter group, gitignore, binary/CRLF/no-newline file, deep nesting, chunked copy and more, plus a small git repository; see ~test/README.org~ for the layout and the walkthrough recipes.
+For a feature-oriented demo comparison — used by the video walkthroughs and by the test suite — run ~test/make-example.sh~.  It generates ~test/example/~ with two directory trees exercising every status, content filter, filter group, gitignore, binary/CRLF/no-newline file, deep nesting, chunked copy and more, plus a small git repository; see ~test/README.org~ for the layout and the walkthrough recipes, or ~test/VIDEO-WALKTHROUGH.org~ for a slide-by-slide presentation.
 
 * Per-Project Configuration with ~.dir-locals.el~
 
