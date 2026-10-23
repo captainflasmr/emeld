@@ -1,7 +1,21 @@
 ;;; emeld-core.el --- Meld-Inspired Local Diff: shared core -*- lexical-binding: t; -*-
 
-;; Keywords: files, tools
-;; Version: 0.48.0
+;; Copyright (C) 2026 James Dyer
+
+;; This file is not part of GNU Emacs.
+
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 ;;; Commentary:
 ;; A simple side-by-side directory comparison tool inspired by Meld.
@@ -141,7 +155,7 @@ tighter tree (`│ └─file') that sits well in the available space.
 
 `extreme' collapses each level to a single column regardless of
 `emeld-indent-offset' — the connector is a lone glyph with no dashes
-(`│└file') — for the densest possible tree.  Especially handy in the
+`│└file' — for the densest possible tree.  Especially handy in the
 narrow `emeld-sidebar'.
 
 Whatever the density, files and directories share the same indent, so
@@ -303,8 +317,9 @@ that filter is on, and the hunk output honors it regardless."
 
 (defcustom emeld-copy-method 'auto
   "How `emeld-copy' transfers files and directories between the two sides.
-- `auto'    : use rsync when `emeld-rsync-command' is found on `exec-path',
-              otherwise fall back to Emacs's built-in copy.
+- `auto'    : use rsync when `emeld-rsync-command' is found in the
+              variable `exec-path', otherwise fall back to Emacs's
+              built-in copy.
 - `rsync'   : always use rsync; error up front if it is not available.
 - `builtin' : always use Emacs's own copy — `copy-file' for files, and for
               directories a step-by-step walk that mirrors `copy-directory'.
@@ -616,11 +631,18 @@ Also push a structured copy of the run onto `emeld--benchmark-log' so
   "Return the emeld version from its source header, or \"?\"."
   (or (ignore-errors
         (require 'find-func)
-        (with-temp-buffer
-          (insert-file-contents (find-library-name "emeld") nil 0 4000)
-          (goto-char (point-min))
-          (when (re-search-forward "^;;+[ \t]*Version:[ \t]*\\(.+\\)$" nil t)
-            (string-trim (match-string 1)))))
+        (let* ((lib (find-library-name "emeld"))
+               ;; Prefer the source file: an installed package also has
+               ;; emeld.elc, which `find-library-name' may return instead.
+               (file (concat (file-name-sans-extension lib) ".el")))
+          (with-temp-buffer
+            (insert-file-contents file nil 0 4000)
+            (goto-char (point-min))
+            ;; MELPA rewrites `Version' to `Package-Version' in the built
+            ;; package, so accept either header.
+            (when (re-search-forward
+                   "^;;+[ \t]*\\(?:Package-\\)?Version:[ \t]*\\(.+\\)$" nil t)
+              (string-trim (match-string 1))))))
       "?"))
 
 (defun emeld--git-describe ()
@@ -773,6 +795,7 @@ Useful for filling in the System block of a hand-written benchmark entry."
 
 (defun emeld--make-file-node (relpath parent status)
   "Create emeld-node for a file at RELPATH (relative from root).
+PARENT is the parent directory node and STATUS is the change status.
 Only sets the path for the side(s) where the file exists.
 Single-sided directories are populated and expanded eagerly so that
 all changed files are visible on initial scan."
@@ -824,8 +847,10 @@ all changed files are visible on initial scan."
        :diff-status status)))))
 
 (defun emeld--entries-to-nodes (entries prefix parent)
-  "Convert ENTRIES (alist of (REL-PATH . STATUS)) into emeld-node tree.
-Directories are grouped first, followed by files, each sorted alphabetically."
+  "Convert ENTRIES (alist of (REL-PATH . STATUS)) into an emeld-node tree.
+PREFIX is the directory path prepended to each entry and PARENT is the
+node the new children are attached to.  Directories are grouped first,
+followed by files, each sorted alphabetically."
   (let ((dirs (make-hash-table :test 'equal))
         (files nil))
     (dolist (entry entries)
@@ -965,7 +990,8 @@ stripped).  Defaults to `find', which is universal; set it to e.g.
   :group 'emeld)
 
 (defun emeld--build-tree-from-diff (buf)
-  "Build tree from `diff -rq' output asynchronously using chunked iterations."
+  "Build a tree in BUF from `diff -rq' output asynchronously.
+The output is parsed in chunks to keep the UI responsive."
   (when (buffer-live-p buf)
     (with-current-buffer buf
       (let* ((left emeld--left-root)
@@ -1043,7 +1069,12 @@ stripped).  Defaults to `find', which is universal; set it to e.g.
           (run-with-timer 0.001 nil #'process-lines-chunk))))))
 
 (defun emeld--entries-to-nodes-progressive (entries prefix parent buf initial-render-cb final-cb &optional gen)
-  "Convert ENTRIES into nodes progressively.
+  "Convert ENTRIES into nodes progressively in BUF.
+PREFIX is the directory path prepended to each entry and PARENT is the
+node the new children are attached to.  INITIAL-RENDER-CB is called with
+the first batch of nodes and FINAL-CB when the subtree is complete; GEN
+is the scan generation to guard against stale work.
+
 Prioritizes branches containing modifications or differences so they render
 first, allowing identical/same branches to populate quietly afterward."
   (let ((dirs (make-hash-table :test 'equal))
@@ -1326,7 +1357,7 @@ error from `make-process'."
     (user-error "The `diff' program is not on `exec-path'; install GNU diffutils and try again")))
 
 (defun emeld--start-diff (buf)
-  "Start async `diff -rq' for content comparison.
+  "Start an async `diff -rq' content comparison for BUF.
 Active filter group patterns (without `/') are passed to `diff'
 as `--exclude' arguments so diff skips filtered files entirely.
 Uses a process filter to stream-parse output incrementally."
@@ -1390,6 +1421,7 @@ Uses a process filter to stream-parse output incrementally."
 
 (defun emeld--parse-diff-line (line left-dir right-dir)
   "Parse a `diff -rq' output LINE into (REL-PATH . STATUS) or nil.
+LEFT-DIR and RIGHT-DIR are the roots passed to `diff'.
 Explicitly handles and strips single quotes added to paths by the shell.
 The boundary between the two paths in a \"Files A and B differ\" line is
 anchored on the known RIGHT-DIR prefix (the literal directory passed to
@@ -1520,7 +1552,7 @@ pairs that should be scanned next."
     (nreverse to-descend)))
 
 (defun emeld--finalize-dir-statuses (node)
-  "Bottom-up: set each directory's status and `scanned' flag from descendants.
+  "Set NODE's status and `scanned' flag from its descendants, bottom-up.
 A directory is `different' if any descendant is a change, else `unscanned'
 if any descendant (or itself) was left unscanned, else `same'.  One-sided
 directory statuses (`left-only'/`right-only') are preserved."
@@ -1593,11 +1625,12 @@ scanning each parent's children."
         (emeld--seed-dir-path-hash child rel path-hash)))))
 
 (defun emeld--get-or-create-dir-node (rel-dir-path path-hash root left-root right-root)
-  "Return the directory node for REL-DIR-PATH, creating it (and any missing
-ancestors) when absent.  PATH-HASH is the authoritative dir index for the
-scan: it is pre-seeded with existing tree dirs by `emeld--seed-dir-path-hash'
-and updated as new dirs are created, so a miss means the dir is genuinely
-new and no per-parent scan is needed."
+  "Return the directory node for REL-DIR-PATH, creating missing ancestors.
+PATH-HASH is the authoritative dir index for the scan: it is pre-seeded
+with existing tree dirs by `emeld--seed-dir-path-hash' and updated as new
+dirs are created, so a miss means the dir is genuinely new and no
+per-parent scan is needed.  ROOT is the tree root, and LEFT-ROOT and
+RIGHT-ROOT are the comparison roots."
   (or (gethash rel-dir-path path-hash)
       (let* ((parent-dir (file-name-directory (directory-file-name rel-dir-path)))
              (parent-rel-path (if (or (null parent-dir) (string= parent-dir "./")
@@ -1622,6 +1655,9 @@ new and no per-parent scan is needed."
         new-dir)))
 
 (defun emeld--add-same-entry-to-tree (root relpath path-hash left-root right-root)
+  "Add RELPATH as an identical file under ROOT.
+PATH-HASH indexes existing nodes, LEFT-ROOT and RIGHT-ROOT are the
+comparison roots, and the entry is skipped when active filters exclude it."
   (let* ((rel-dir (file-name-directory relpath))
          (parent-rel (if rel-dir (directory-file-name rel-dir) ""))
          (parent-node (if (string-empty-p parent-rel)
@@ -1646,6 +1682,7 @@ new and no per-parent scan is needed."
         (puthash file-key new-file path-hash)))))
 
 (defun emeld--sort-tree-recursive (node)
+  "Sort NODE's children recursively, directories before files."
   (when (emeld-node-children node)
     (setf (emeld-node-children node)
           (sort (emeld-node-children node)
@@ -1659,6 +1696,10 @@ new and no per-parent scan is needed."
       (emeld--sort-tree-recursive child))))
 
 (defun emeld--process-same-chunk-worker (buf remaining-lines root left right old-gc path-hash)
+  "Merge identical-file LINES into ROOT in BUF, one chunk at a time.
+REMAINING-LINES is the unprocessed `diff -rqs' output, LEFT and RIGHT are
+the comparison roots, OLD-GC is the previous `gc-cons-threshold', and
+PATH-HASH indexes existing nodes."
   (if (not (buffer-live-p buf))
       (setq gc-cons-threshold old-gc)
     (with-current-buffer buf
@@ -1737,6 +1778,9 @@ each left-only directory's relpath (its whole subtree is then excluded)."
 
 (defun emeld--process-same-files-worker (buf paths root left right old-gc path-hash)
   "Chunked merge of enumerated left-side PATHS (relpaths) as identical files.
+BUF is the comparison buffer, ROOT is the tree root, LEFT and RIGHT are
+the comparison roots, OLD-GC is the previous `gc-cons-threshold', and
+PATH-HASH indexes existing nodes.
 A path is added as a `same' node unless it is already known
 \(`emeld--same-skip-files': differing/left-only/already-merged) or lies
 under a left-only directory (`emeld--same-left-only-dirs').
@@ -1792,7 +1836,8 @@ under a left-only directory (`emeld--same-left-only-dirs').
             (setq gc-cons-threshold old-gc)))))))
 
 (defun emeld--scan-same-list (buf)
-  "Find identical files by listing the left tree and subtracting known paths.
+  "Find identical files in BUF by listing the left tree.
+Paths already known to differ are subtracted.
 See `emeld-same-files-method'.  Runs `emeld-list-command' asynchronously on
 the left root, then merges the leftover (identical) files into the tree."
   (with-current-buffer buf
@@ -1916,6 +1961,7 @@ shared `emeld--process-same-files-worker'."
       (setq emeld--scan-process proc))))
 
 (defun emeld--scan-same-async (buf)
+  "Start the asynchronous identical-files pass for BUF."
   (with-current-buffer buf
     (emeld--stop-scan)
     (setq emeld--status-phase 'running-diff
@@ -1940,7 +1986,8 @@ shared `emeld--process-same-files-worker'."
         (emeld--scan-same-diff buf))))))
 
 (defun emeld--scan-same-diff (buf)
-  "Find identical files by re-running `diff -rqs' (see `emeld-same-files-method')."
+  "Find identical files in BUF by re-running `diff -rqs'.
+See `emeld-same-files-method'."
   (with-current-buffer buf
     (let* ((excludes (emeld--diff-exclude-args))
            (left emeld--left-root)
@@ -2202,7 +2249,7 @@ read with completion over the existing `emeld-filter-groups' names; an
 unknown name creates a new, active group.
 
 The updated `emeld-filter-groups' value is written to `.dir-locals.el' at
-the left root (via `add-dir-local-variable', under the `nil' mode used in
+the left root (via `add-dir-local-variable', under the nil mode used in
 the manual setup, then saved), applied to this comparison, and rescanned
 so the matching files drop out immediately.  This lets you permanently
 tidy up a directory comparison — excluding build/cache/noise paths —
@@ -2445,7 +2492,7 @@ recursive compare would block on deep I/O."
     (emeld-refresh)))
 
 (defun emeld--get-dwim-dirs ()
-  "Try to guess directories based on visible dired buffers."
+  "Try to guess directories based on visible Dired buffers."
   (let ((dired-dirs (delq nil
                           (mapcar (lambda (w)
                                     (with-current-buffer (window-buffer w)
@@ -2456,11 +2503,11 @@ recursive compare would block on deep I/O."
 
 ;;;###autoload
 (defun emeld-diff-dwim (&optional depth)
-  "Start emeld-diff guessing directories from visible dired buffers.
-Prompts for confirmation or selection.  A prefix argument is passed
-through to `emeld-diff' as the scan-depth limit (e.g. `C-u 2' scans two
-levels; bare `C-u' scans one), for a fast shallow scan of large or slow
-trees."
+  "Start `emeld-diff' guessing directories from visible Dired buffers.
+Prompts for confirmation or selection.  DEPTH, from a prefix argument,
+is passed through to `emeld-diff' as the scan-depth limit (e.g. `C-u 2'
+scans two levels; bare `C-u' scans one), for a fast shallow scan of
+large or slow trees."
   (interactive (list (emeld--prefix-to-depth current-prefix-arg)))
   (require 'dired-aux)
   (let* ((target-b (dired-dwim-target-directory))
@@ -2474,7 +2521,7 @@ trees."
          (right-suggest (if (and target-b (not (string= left-abs (directory-file-name (expand-file-name target-b)))))
                             target-b
                           nil))
-         (right (read-directory-name "Right directory: " 
+         (right (read-directory-name "Right directory: "
                                      (or right-suggest (file-name-directory left-abs))
                                      right-suggest t))
          (right-abs (directory-file-name (expand-file-name right))))
@@ -2628,14 +2675,14 @@ Set with `emeld-mark-dir-a'.")
 
 (defun emeld--mark-dir-value ()
   "The current buffer's directory, as a value for the marked side.
-In a dired buffer this is its directory; elsewhere it is the buffer's
+In a Dired buffer this is its directory; elsewhere it is the buffer's
 `default-directory'.  Stored without a trailing slash."
   (directory-file-name (expand-file-name default-directory)))
 
 ;;;###autoload
 (defun emeld-mark-dir-a ()
-  "Mark the current dired directory as comparison side A.
-Also works outside dired, using `default-directory'.  Then, from the
+  "Mark the current Dired directory as comparison side A.
+Also works outside Dired, using `default-directory'.  Then, from the
 directory to compare it against, run `emeld-compare-marked-dirs'.
 There are no default key bindings: bind your own (e.g. in the `C-c z'
 prefix)."
@@ -2648,7 +2695,7 @@ prefix)."
 (defun emeld-compare-marked-dirs (&optional depth)
   "Compare the directory marked with `emeld-mark-dir-a' against the current one.
 Side A is the marked directory; side B is the current buffer's
-directory (in dired, the dired directory).  With a prefix argument,
+directory (in Dired, the Dired directory).  With a prefix argument,
 DEPTH limits the initial scan as in `emeld-diff'."
   (interactive (list (emeld--prefix-to-depth current-prefix-arg)))
   (unless emeld-dir-a
@@ -2995,7 +3042,7 @@ not yet known."
 (defun emeld--changed-file-p (node)
   "Non-nil when NODE is a file in a changed state.
 Modified, left-only and right-only files are changed; directories
-(and nil, as on header lines) are not; identical (`same') files are
+and nil (as on header lines) are not; identical (`same') files are
 not."
   (and node
        (not (emeld-node-is-dir node))
@@ -3248,7 +3295,8 @@ to the other content filters)."
 
 (defun emeld--walk-set-dirs-only (node)
   "Expand intermediate dir nodes, collapse leaf dir nodes (those with no sub-dirs).
-Shows the directory skeleton without revealing the file leaves inside."
+NODE is the subtree to walk.  Shows the directory skeleton without
+revealing the file leaves inside."
   (when (and node (emeld-node-is-dir node))
     (let ((has-subdir (cl-some #'emeld-node-is-dir (emeld-node-children node))))
       (setf (emeld-node-expanded node) has-subdir)
@@ -3282,7 +3330,7 @@ callers redisplay.  A directory is expanded when its `diff-status' is not
         (walk child)))))
 
 (defun emeld-cycle-subtree ()
-  "Cycle the subtree at point through FOLDED → DIRS → SUBTREE, org-mode style.
+  "Cycle the subtree at point through FOLDED → DIRS → SUBTREE, `org-mode' style.
 
 On a file, TAB instead toggles an inline diff preview beneath the row
 \(`emeld-toggle-inline-diff'), a Magit-style quick peek.
@@ -3376,7 +3424,7 @@ scan generation and bail).  The partial tree is left in place; rescan with
 (defun emeld-redraw ()
   "Reset the display layout to defaults and re-render, without rescanning.
 Restores the indentation (`emeld-indent-offset'), the pane/tree separation
-(`emeld-column-ratio') and the tree density (`emeld-tree-density') to
+`emeld-column-ratio' and the tree density (`emeld-tree-density') to
 their standard values, recomputes the column width from the current window
 width, and redraws — preserving point and expansion state.  Use this to
 undo layout tweaks made with \\[emeld-increase-indent]/\\[emeld-decrease-indent],
@@ -3628,7 +3676,7 @@ In git mode this re-selects the revision for that side instead of a directory."
 
 On the header line (directory paths), prompt to replace the
 current side's directory with a new one via completion.
-On files, run ediff or open.  On directories, open in dired."
+On files, run Ediff or open.  On directories, open in Dired."
   (interactive)
   (let* ((node (get-text-property (point) 'emeld-node))
          (header (get-text-property (point) 'emeld-header))
@@ -3677,9 +3725,9 @@ In git mode the file is shown at the current side's revision (via
             (message "No file on %s side" (if on-left "left" "right"))))))))
 
 (defun emeld--dired-side (on-left)
-  "Open dired for the ON-LEFT (else right) side as a quick jump.
-Targets the node at point on that side: a directory opens dired in it, a
-file opens dired on its parent with point on the file.  When the node has
+  "Open Dired for the ON-LEFT (else right) side as a quick jump.
+Targets the node at point on that side: a directory opens Dired in it, a
+file opens Dired on its parent with point on the file.  When the node has
 no path on that side (or point is not on a node) the side's comparison
 root is used instead.  In git mode the node's repo-relative path is
 resolved against the repo's working tree."
@@ -3702,12 +3750,12 @@ resolved against the repo's working tree."
       (dired-goto-file target))))
 
 (defun emeld-dired-left ()
-  "Jump to dired for the left side of the node at point (or the left root)."
+  "Jump to Dired for the left side of the node at point (or the left root)."
   (interactive)
   (emeld--dired-side t))
 
 (defun emeld-dired-right ()
-  "Jump to dired for the right side of the node at point (or the right root)."
+  "Jump to Dired for the right side of the node at point (or the right root)."
   (interactive)
   (emeld--dired-side nil))
 
@@ -5116,8 +5164,8 @@ Messages describe the outcome and the affected node is refreshed."
 
 (defun emeld-undo-last-op ()
   "Undo the most recent logged delete, copy or change block in this comparison.
-A delete restores the file from trash to its original path
-(recreating parents) and rescans the whole comparison so the
+A delete restores the file from trash to its original path, recreating
+parents, and rescans the whole comparison so the
 restored file shows up; this refuses when something already occupies
 the path or the trash entry is gone.  A copy removes the copied
 destination (to trash); files pruned by a mirror copy are not
@@ -5688,7 +5736,7 @@ revision reproduces the left.  Reports COUNT changes."
                                   "--find-renames" "--find-copies")
                             filter-args rev-args))))
         (unless (eq status 0)
-          (user-error "git diff failed (exit %s); is the repository still available?"
+          (user-error "Git diff failed (exit %s); is the repository still available?"
                       status))
         (write-region (point-min) (point-max) outfile nil 'silent))))
   (message "Wrote git patch with %d change(s) to %s" count outfile))
@@ -5913,7 +5961,7 @@ node — see `emeld--node-relpath' for the equivalent slow form."
   "A transient suffix that evaluates a lambda for its description.")
 
 (cl-defmethod transient-format-description ((obj emeld-dynamic-suffix))
-  "Evaluate the dynamic-description slot for the display string."
+  "Evaluate OBJ's dynamic-description slot for the display string."
   (let ((fn (oref obj dynamic-description)))
     (if fn (funcall fn) (cl-call-next-method))))
 

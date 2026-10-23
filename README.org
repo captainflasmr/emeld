@@ -36,6 +36,17 @@ Emeld is a simple, side-by-side directory comparison tool for Emacs. It is desig
 - Fully themeable (uses standard Emacs faces).
 
 * Installation
+
+** MELPA
+Emeld is available from MELPA:
+#+begin_src elisp
+(use-package emeld
+  :ensure t)
+#+end_src
+
+Or run ~M-x package-install RET emeld RET~.
+
+** Manual
 Copy the files to your load path and add the following to your init file:
 #+begin_src elisp
 (add-to-list 'load-path "~/.emacs.d/offline-packages/local-packages/emeld")
@@ -349,3 +360,17 @@ Toggle named groups on/off from the transient menu (~?~ then ~F~) or with ~M-x e
 You do not have to write ~.dir-locals.el~ by hand.  With point on a file or directory in the tree, ~&~ (~emeld-add-filter-at-point~, also under ~&~ in the transient Filter sub-menu) adds it as a filter and saves it: it prompts for the glob (defaulting to the basename — edit it to e.g. ~*.log~ or a ~sub/dir~ relative path) and the group to add it to (completing over existing names; a new name creates a new, active group), writes the updated ~emeld-filter-groups~ to ~.dir-locals.el~ at the left root, activates the group and rescans so the matching files drop out at once.  Repeat it to progressively tidy up a fresh comparison; the exclusions persist for next time.
 
 For a *temporary* tidy-up that you do not want recorded, ~C-k~ (~emeld-hide-at-point~) hides just the node at point — and, for a directory, its subtree — for this session only.  Nothing is written to ~.dir-locals.el~, and the hide survives a rescan within the session; the header line shows a ~(!) N hidden~ note while anything is tucked away.  Restore everything with ~C-u C-k~ (~emeld-unhide-all~).  Use this when you want to declutter the view but stay interested in the item later; use ~&~ when the exclusion should be permanent.
+
+* License
+
+Emeld is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free
+Software Foundation, either version 3 of the License, or (at your option)
+any later version.
+
+Emeld is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
+FOR A PARTICULAR PURPOSE.  See the GNU General Public License for more
+details.
+
+See [[file:COPYING][COPYING]] for the full license text.

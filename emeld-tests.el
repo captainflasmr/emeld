@@ -1,5 +1,24 @@
 ;;; emeld-tests.el --- Tests for emeld.el -*- lexical-binding: t; -*-
 
+;; Copyright (C) 2026 James Dyer
+
+;; This file is not part of GNU Emacs.
+
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+;;; Code:
+
 ;; The package is now multi-file (emeld-core/-git/-sidebar/-dired, umbrella
 ;; emeld.el).  Put the repo root — and test/, for the example fixture
 ;; generator — on `load-path', then load the whole.
@@ -2613,5 +2632,8 @@ show up with the right statuses."
       (when (buffer-live-p buf) (kill-buffer buf))
       (delete-directory dir t))))
 
+(provide 'emeld-tests)
+
 (message "Running tests...")
 (ert-run-tests-batch-and-exit)
+;;; emeld-tests.el ends here

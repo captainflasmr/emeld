@@ -1,5 +1,22 @@
 ;;; emeld-sidebar.el --- Treemacs-style file-tree sidebar for emeld -*- lexical-binding: t; -*-
 
+;; Copyright (C) 2026 James Dyer
+
+;; This file is not part of GNU Emacs.
+
+;; This program is free software: you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation, either version 3 of the License, or
+;; (at your option) any later version.
+
+;; This program is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
 ;;; Commentary:
 ;; A docked side window that renders ONE directory tree (not a diff), built on
 ;; the same `emeld-node' model and rendering helpers as the comparison view.
@@ -484,7 +501,7 @@ revealed and highlighted; as you switch buffers it keeps up when
 `emeld-sidebar-follow-mode' is on (enabled here when `emeld-sidebar-follow'
 is non-nil).  RET / `f' / `v' open a file (or toggle
 a directory), TAB expands/collapses, `o' opens without leaving the sidebar,
-`g' refreshes, `.' reveals the main window's file, `F' toggles follow-mode,
+`g' refreshes, `.' reveals the main window's file, `F' toggles `follow-mode',
 `q' closes it."
   (interactive "P")
   (let ((win (get-buffer-window emeld--sidebar-buffer-name)))
@@ -521,12 +538,13 @@ during minibuffer completion, the next window while browsing an `*xref*'
 list), which a selected-window-only look can never see.")
 
 (defun emeld--sidebar-follow (&optional frame)
-  "Reveal the active window's file in the sidebar (follow-mode hook).
-Fires on both window-selection and window-buffer changes, so it tracks
-switching windows *and* opening a file in the current window.  The
-selected window's file wins; when the selected window shows no file
-(e.g. while completing in the minibuffer, or browsing the `*xref*'
-buffer), the most recently changed other window is followed instead --
+  "Reveal the active window's file in the sidebar (follow hook).
+FRAME is ignored; the hook may pass it.  Fires on both window-selection
+and `window-buffer' changes, so it tracks switching windows *and* opening
+a file in the current window.  The selected window's file wins; when the
+selected window shows no file (e.g. while completing in the minibuffer,
+or browsing the `*xref*' buffer), the most recently changed other window
+is followed instead --
 which is how xref candidate previews, displayed in a non-selected
 window, keep the sidebar on the file being previewed."
   (let ((sb (get-buffer-window emeld--sidebar-buffer-name t)))
